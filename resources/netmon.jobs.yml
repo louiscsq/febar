@@ -69,6 +69,7 @@ resources:
               gold_schema: ${resources.schemas.netmon_gold.name}
               eval_schema: ${resources.schemas.netmon_eval.name}
               gov_schema: ${resources.schemas.netmon_gov.name}
+              noc_schema: ${resources.schemas.netmon_noc.name}
 
     # End to end: history -> mask/filter functions -> pipeline -> grants, tags and comments.
     netmon_bootstrap:

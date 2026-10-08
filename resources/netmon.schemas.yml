@@ -23,6 +23,10 @@ resources:
       catalog_name: ${var.catalog}
       name: ${var.eval_schema}
       comment: Ground truth and evaluation of detection / DQ handling. Never a feature source.
+    netmon_noc:
+      catalog_name: ${var.catalog}
+      name: ${var.noc_schema}
+      comment: NOC serving layer - region-filtered views over silver and gold. The only data regional NOC groups can read.
     netmon_gov:
       catalog_name: ${var.catalog}
       name: ${var.gov_schema}

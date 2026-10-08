@@ -237,60 +237,106 @@ def gold_samples(r: Runner) -> None:
 
 
 def evaluation(r: Runner) -> None:
-    d = Doc(r, "05_time_to_detect.md", "Time-to-detect against ground truth",
-            "Scored incidents: customer-impacting and not censored. `ttd_s` = (evidence time + measured pipeline "
-            "latency for live files) − `impact_start_ts`. `history` is the 15-minute-ROP backfill (cannot meet "
-            "a 5-minute SLA by construction); `stream` is the 1-minute live feed. See docs/pipeline.md.")
-    d.query("Summary per run (median / p90 TTD, % within 5 minutes)", f"""
-        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type = 'ALL' ORDER BY source_run, event_class""",
-            note="`event_class = ALL` covers every scored incident; `fault` excludes planned maintenance (which "
-                 "the NOC suppresses via the change calendar) and red herrings.")
+    d = Doc(r, "05_time_to_detect.md", "Time-to-detect, localisation and precision against ground truth",
+            "Scored incidents: customer-impacting and not censored. Two separate metrics (docs/pipeline.md):\n\n"
+            "- **(a) customer-impact detection** — first detection on any element of the incident's footprint; "
+            "`impact_ttd_s` = (evidence time + measured pipeline latency for live files) − `impact_start_ts`. "
+            "This is the 5-minute SLA metric.\n"
+            "- **(b) root-element localisation** — a detection or the topology rollup lands on an element of "
+            "`root_element_ids` (any one counts for cluster faults).\n\n"
+            "`history` = 15-minute-ROP backfill (cannot meet a 5-minute SLA by construction); `stream` = 1-minute "
+            "live feed. Fault-only rows (`event_class = fault`) are the headline; planned work is suppressed by "
+            "the change calendar and reported separately.")
+    cols = ("source_run, event_class, n_incidents, n_impact_detected, impact_detected_pct, impact_median_ttd_s, "
+            "impact_p90_ttd_s, impact_within_5min_pct, n_root_localised, root_localised_pct, "
+            "localisation_median_ttd_s, localised_within_5min_pct, median_evidence_lag_s, median_pipeline_latency_s")
+    d.query("Headline: faults only", f"""
+        SELECT {cols} FROM {E}.eval_ttd_summary WHERE event_class = 'fault' AND fault_type = 'ALL'
+        ORDER BY source_run DESC""")
+    d.query("All event classes", f"""
+        SELECT {cols} FROM {E}.eval_ttd_summary WHERE fault_type = 'ALL'
+        ORDER BY source_run DESC, CASE event_class WHEN 'fault' THEN 0 WHEN 'ALL' THEN 9 ELSE 1 END, event_class""")
     d.query("Per fault type", f"""
-        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type <> 'ALL' ORDER BY source_run, event_class, fault_type""")
-    d.query("Live-stream incidents", f"""
-        SELECT incident_id, fault_type, severity, region_code, root_element_id, impact_start_ts, is_detected,
-               first_signal_source, first_element_id, first_flags, round(evidence_lag_s, 0) AS evidence_lag_s,
-               round(first_pipeline_latency_s, 1) AS pipeline_latency_s, round(ttd_s, 1) AS ttd_s,
-               detected_within_sla, root_detected
-        FROM {E}.eval_incident_detection WHERE source_run = 'stream' ORDER BY impact_start_ts""")
+        SELECT source_run, event_class, fault_type, n_incidents, impact_detected_pct, impact_median_ttd_s,
+               impact_within_5min_pct, root_localised_pct, localisation_median_ttd_s, localised_within_5min_pct
+        FROM {E}.eval_ttd_summary WHERE fault_type <> 'ALL'
+        ORDER BY source_run DESC, CASE event_class WHEN 'fault' THEN 0 ELSE 1 END, event_class, fault_type""")
+    d.query("Live-stream fault incidents", f"""
+        SELECT incident_id, fault_type, root_element_type, impact_start_ts, impact_detected, first_signal_source,
+               first_element_type, round(evidence_lag_s, 0) AS evidence_lag_s,
+               round(first_pipeline_latency_s, 1) AS pipeline_latency_s, round(impact_ttd_s, 1) AS impact_ttd_s,
+               impact_within_sla, root_localised, localisation_source, round(localisation_ttd_s, 1) AS localisation_ttd_s
+        FROM {E}.eval_incident_detection WHERE source_run = 'stream' AND event_class = 'fault'
+        ORDER BY impact_start_ts""")
     d.query("Ground-truth incidents in the live stream (incl. censored and non-impacting)", f"""
         SELECT event_class, fault_type, is_customer_impacting, is_censored, count(*) AS n
         FROM {E}.eval_gt_incidents WHERE source_run = 'stream' GROUP BY ALL ORDER BY ALL""")
-    d.query("Detection precision (detections explained by any ground-truth event)", f"""
-        SELECT * FROM {E}.eval_detection_precision ORDER BY source_run, signal_source""")
+    d.query("Fault-detection precision and maintenance suppression", f"""
+        SELECT * FROM {E}.eval_detection_precision
+        ORDER BY source_run DESC, CASE signal_source WHEN 'ALL' THEN 0 ELSE 1 END, signal_source""",
+            note="Each detection labelled in priority order: uncensored fault = TP; overlapping a censored incident "
+                 "= excluded; planned work = suppressed when `in_maintenance` (else a false page); red herring "
+                 "(e.g. TRAFFIC_SURGE) = FP; nothing = FP. `fault_precision_pct` = TP / (TP + FP).")
     d.query("RCA topology-heuristic baseline (hit@1 / hit@3 vs root_element_ids)", f"""
         SELECT source_run, fault_type, count(*) AS n, round(100.0 * avg(CAST(hit_at_1 AS INT)), 1) AS hit1_pct,
                round(100.0 * avg(CAST(hit_at_3 AS INT)), 1) AS hit3_pct
         FROM {E}.eval_rca_baseline GROUP BY GROUPING SETS ((source_run), (source_run, fault_type))
-        ORDER BY source_run, fault_type NULLS FIRST""")
+        ORDER BY source_run DESC, fault_type NULLS FIRST""")
     d.write()
 
 
+NOC = f"{CAT}.netmon_noc"
+NOC_VIEWS = ["silver_kpis", "silver_alarms", "silver_sessions", "silver_topology_nodes", "silver_topology_edges",
+             "silver_maintenance_windows", "gold_cell_baseline", "gold_cell_health_1m", "gold_cell_health_5m",
+             "gold_impact_detections", "gold_element_impact_5m", "gold_cell_sessions_5m"]
+
+
 def governance(r: Runner, demo: bool) -> None:
-    d = Doc(r, "06_governance.md", "Unity Catalog governance: masks, row filters, grants, tags",
-            "Policies are declared on the pipeline tables and backed by the functions in "
-            "`governance/sql/01_functions.sql`; grants and tags by `02_grants.sql` / `03_comments_tags.sql`.")
+    d = Doc(r, "06_governance.md", "Unity Catalog governance: masks, row filters, roles, grants, tags",
+            "Masks and row filters are declared on the pipeline tables (`silver_sessions`, `gold_impact_detections`) "
+            "and backed by `governance/sql/01_functions.sql`. Regional NOC roles read only the region-filtered views "
+            "in `netmon_noc` (`02_noc_views.sql`); `noc_national` also reads gold and the operational silver tables; "
+            "`pii_privileged` is granted nothing (`03_grants_*.sql`). Tags: `04_comments_tags.sql`.")
     d.query("Column masks", f"""
         SELECT table_schema, table_name, column_name, mask_name FROM {CAT}.information_schema.column_masks
         ORDER BY ALL""")
     d.query("Row filters", f"""
         SELECT table_schema, table_name, filter_name, target_columns FROM {CAT}.information_schema.row_filters
         ORDER BY ALL""")
+    d.query("Region-filtered serving views (netmon_noc)", f"""
+        SELECT table_name, left(regexp_replace(view_definition, '\\s+', ' '), 170) AS definition
+        FROM {CAT}.information_schema.views WHERE table_schema = 'netmon_noc' ORDER BY 1""")
     d.query("Policy function definitions", f"""
         SELECT routine_name, routine_definition FROM {CAT}.information_schema.routines
         WHERE routine_schema = 'netmon_gov' ORDER BY 1""")
-    d.query("Grants (catalog, gold schema, silver_sessions)", f"""
-        SELECT grantee, privilege_type, 'CATALOG' AS object, catalog_name AS name
-        FROM {CAT}.information_schema.catalog_privileges WHERE grantee NOT LIKE '%@%'
-        UNION ALL
-        SELECT grantee, privilege_type, 'SCHEMA', schema_name FROM {CAT}.information_schema.schema_privileges
-        WHERE schema_name LIKE 'netmon%' AND grantee NOT LIKE '%@%'
-        UNION ALL
-        SELECT grantee, privilege_type, 'TABLE', table_name FROM {CAT}.information_schema.table_privileges
-        WHERE table_schema = 'netmon_silver' AND grantee NOT LIKE '%@%'
-        ORDER BY 3, 4, 1, 2""",
-            note="Grantees are the persona service principals' application ids (UC rejects the workspace-local "
-                 "groups; see docs/pipeline.md). Mapping: see the persona table below.")
+
+    groups = {g["displayName"]: g["id"] for g in r.cli("groups", "list")}
+    sps = {s["applicationId"]: s["displayName"] for s in r.cli("service-principals", "list")
+           if s.get("displayName", "").startswith("netmon-")}
+    lines = ["| group | role | members |", "|---|---|---|"]
+    for g in sorted(x for x in groups if x.startswith(("noc_", "pii_"))):
+        mem = r.cli("groups", "get", groups[g]).get("members") or []
+        role = ("national NOC" if g == "noc_national" else "unmask only (no grants)" if g == "pii_privileged"
+                else "regional NOC")
+        lines.append(f"| `{g}` | {role} | {', '.join(m.get('display', '?') for m in mem) or '—'} |")
+    d.text("Workspace-local groups, roles and members", "\n".join(lines))
+    case = " ".join(f"WHEN '{a}' THEN '{n}'" for a, n in sps.items())
+    ids = ", ".join(f"'{a}'" for a in sps)
+    d.query("Privileges held by each persona (grantees; every netmon securable)", f"""
+        WITH p AS (
+          SELECT grantee, 'CATALOG' AS kind, catalog_name AS object, privilege_type
+          FROM {CAT}.information_schema.catalog_privileges
+          UNION ALL SELECT grantee, 'SCHEMA', schema_name, privilege_type FROM {CAT}.information_schema.schema_privileges
+          UNION ALL SELECT grantee, 'TABLE', concat(table_schema, '.', table_name), privilege_type
+            FROM {CAT}.information_schema.table_privileges
+          UNION ALL SELECT grantee, 'FUNCTION', concat(routine_schema, '.', routine_name), privilege_type
+            FROM {CAT}.information_schema.routine_privileges)
+        SELECT persona, kind, object, array_sort(collect_set(privilege_type)) AS privileges FROM (
+          SELECT CASE a.id {case} END AS persona, p.* FROM (SELECT explode(array({ids})) AS id) a
+          LEFT JOIN p ON p.grantee = a.id)
+        GROUP BY ALL ORDER BY persona, kind, object""",
+            note="`netmon-pii-only` (member of `pii_privileged` only) has no privileges at all; the regional "
+                 "analysts hold only the `netmon_noc` schema (plus USE CATALOG and the filter function).")
     d.query("Tags: schemas and tables", f"""
         SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM {CAT}.information_schema.schema_tags
         UNION ALL
@@ -300,88 +346,79 @@ def governance(r: Runner, demo: bool) -> None:
     d.query("Tags: PII columns", f"""
         SELECT schema_name, table_name, column_name, tag_name, tag_value FROM {CAT}.information_schema.column_tags
         WHERE schema_name LIKE 'netmon%' ORDER BY ALL""")
-    d.query("Table and column comments (key tables)", f"""
+    d.query("Table comments (key tables)", f"""
         SELECT table_schema, table_name, left(comment, 150) AS comment FROM {CAT}.information_schema.tables
-        WHERE table_schema IN ('netmon_silver', 'netmon_gold', 'netmon_eval') ORDER BY 1, 2""")
+        WHERE table_schema IN ('netmon_silver', 'netmon_gold', 'netmon_eval', 'netmon_noc') ORDER BY 1, 2""")
     d.query("Column comments on silver_sessions", f"""
         SELECT column_name, data_type, comment FROM {CAT}.information_schema.columns
         WHERE table_schema = 'netmon_silver' AND table_name = 'silver_sessions' AND comment IS NOT NULL
         ORDER BY ordinal_position""")
 
-    me = r.cli("current-user", "me")
-    groups = {g["displayName"]: g["id"] for g in r.cli("groups", "list")}
-    sps = {s["applicationId"]: s["displayName"] for s in r.cli("service-principals", "list")}
-    lines = ["| group | members |", "|---|---|"]
-    for g in sorted(x for x in groups if x.startswith(("noc_", "pii_"))):
-        mem = r.cli("groups", "get", groups[g]).get("members") or []
-        lines.append(f"| `{g}` | {', '.join(m.get('display', '?') for m in mem) or '—'} |")
-    d.text("Workspace-local groups and members", "\n".join(lines))
-    d.text("Persona service principals (grantees)", "\n".join(
-        ["| application id | display name |", "|---|---|"]
-        + [f"| `{a}` | {n} |" for a, n in sorted(sps.items(), key=lambda x: x[1]) if n.startswith("netmon-")]))
-
-    mask_sql = f"""
+    who_sql = f"""
         SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
                is_member('noc_region_nsw') AS in_noc_region_nsw, is_member('pii_privileged') AS in_pii_privileged,
                {GOV}.is_pii_privileged() AS pii_privileged_fn"""
-    rows_sql = f"""
-        SELECT 'silver_sessions' AS table_name, region_code, count(*) AS visible_rows FROM {S}.silver_sessions GROUP BY 2
-        UNION ALL
-        SELECT 'gold_impact_detections', region_code, count(*) FROM {G}.gold_impact_detections GROUP BY 2
-        ORDER BY 1, 2"""
-    sample_sql = f"""
-        SELECT record_id, imsi, msisdn, region_code, outcome FROM {S}.silver_sessions
-        ORDER BY record_id LIMIT 5"""
+    views_sql = "\nUNION ALL ".join(
+        f"SELECT '{v}' AS netmon_noc_view, count(*) AS visible_rows, "
+        f"array_join(array_sort(collect_set(region_code)), ',') AS regions FROM {NOC}.{v}" for v in NOC_VIEWS)
+    sample_sql = f"SELECT record_id, imsi, msisdn, region_code, outcome FROM {NOC}.silver_sessions ORDER BY record_id LIMIT 5"
     shape_sql = f"""
         SELECT count(*) AS n_rows,
                count_if(imsi RLIKE '^00101[0-9]{{10}}$') AS imsi_full_value,
                count_if(imsi RLIKE '^00101[*]{{8}}[0-9]{{2}}$') AS imsi_masked,
                count_if(msisdn RLIKE '^[+]999[0-9]{{9}}$') AS msisdn_full_value,
                count_if(msisdn RLIKE '^[+]999[*]{{6}}[0-9]{{3}}$') AS msisdn_masked
-        FROM {S}.silver_sessions"""
-    d.query("Current principal (capturing user)", mask_sql)
-    d.query("Masked output for a non-privileged reader (capturing user is not in pii_privileged)", sample_sql)
-    d.query("Mask shape check, non-privileged", shape_sql)
-    d.query("Rows visible per region as noc_national", rows_sql)
+        FROM {NOC}.silver_sessions"""
 
+    def state(title: str, note: str = "", masks: bool = False) -> None:
+        d.query(f"{title}: principal", who_sql)
+        d.query(f"{title}: rows visible in every object a regional role is granted", views_sql, note=note)
+        if masks:
+            d.query(f"{title}: IMSI / MSISDN shape (values never printed in full)", shape_sql)
+
+    state("State 1 - noc_national (capturing user)", masks=True)
+    d.query("State 1: masked sample for a NOC user outside pii_privileged", sample_sql)
     if demo:
-        uid = me["id"]
+        uid = r.cli("current-user", "me")["id"]
 
         def member(group: str, add: bool) -> None:
-            op = {"op": "add" if add else "remove", "path": "members" if add else f'members[value eq "{uid}"]'}
-            if add:
-                op["value"] = [{"value": uid}]
+            op = {"op": "add", "path": "members", "value": [{"value": uid}]} if add else \
+                {"op": "remove", "path": f'members[value eq "{uid}"]'}
             subprocess.run(["databricks", "groups", "patch", groups[group], "-p", r.profile, "--json", json.dumps(
                 {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [op]})], check=True)
 
-        def settle(cond_sql: str) -> None:
-            for _ in range(40):  # group membership reaches the SQL warehouse within a minute or so
-                if r.sql(cond_sql)[1][0][0] in (True, "true"):
+        def settle(nat: bool, nsw: bool, pii: bool) -> None:
+            want = (f"SELECT is_member('noc_national') = {nat} AND is_member('noc_region_nsw') = {nsw} "
+                    f"AND is_member('pii_privileged') = {pii}")
+            for _ in range(90):  # SCIM changes reach the warehouse's is_member() after a few minutes
+                if r.sql(want)[1][0][0] in (True, "true"):
                     return
                 time.sleep(10)
-            raise RuntimeError(f"membership change not visible: {cond_sql}")
+            raise RuntimeError(f"membership change not visible: {want}")
 
         try:
             member("noc_national", False)
             member("noc_region_nsw", True)
-            settle("SELECT NOT is_member('noc_national') AND is_member('noc_region_nsw')")
-            d.query("Row filter demo: same user, now only in noc_region_nsw", mask_sql)
-            d.query("Rows visible per region as noc_region_nsw (only NSW rows remain)", rows_sql)
+            settle(False, True, False)
+            state("State 2 - noc_region_nsw only", note="Only NSW rows remain in every object.")
             member("noc_region_nsw", False)
-            settle("SELECT NOT is_member('noc_region_nsw')")
-            d.query("Row filter demo: in no NOC group at all", rows_sql + "",
-                    note="No rows at all: the filter returns false for every region.")
-            member("noc_national", True)
+            settle(False, False, False)
+            state("State 3 - no NOC group", note="No rows in any object: the filter is false for every region.")
             member("pii_privileged", True)
-            settle("SELECT is_member('pii_privileged') AND is_member('noc_national')")
-            d.query("Mask demo: same user added to pii_privileged", mask_sql)
-            d.query("Mask shape check, privileged (full values visible; values themselves not printed)", shape_sql)
+            settle(False, False, True)
+            state("State 4 - pii_privileged only (no NOC role)", masks=True,
+                  note="Still no rows: pii_privileged grants no data access on its own (and holds no privileges, "
+                       "see the persona table above).")
+            member("noc_national", True)
+            settle(True, False, True)
+            state("State 5 - noc_national + pii_privileged", masks=True,
+                  note="A NOC role plus pii_privileged: every region, and IMSI / MSISDN unmasked (checked by pattern).")
         finally:
             member("pii_privileged", False)
             member("noc_region_nsw", False)
             member("noc_national", True)
-        settle("SELECT NOT is_member('pii_privileged') AND is_member('noc_national')")
-        d.query("Restored membership", mask_sql)
+        settle(True, False, False)
+        d.query("Restored membership", who_sql)
     d.write()
 
 

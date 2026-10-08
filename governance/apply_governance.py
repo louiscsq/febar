@@ -7,7 +7,7 @@
 # MAGIC | stage | what | when |
 # MAGIC |---|---|---|
 # MAGIC | `functions` | `01_functions.sql`: IMSI / MSISDN column-mask functions and the regional row-filter function | before the pipeline runs (its tables declare `MASK` / `ROW FILTER` on them) |
-# MAGIC | `policies` | NOC groups and persona service principals, `02_grants.sql` least-privilege grants, `03_comments_tags.sql` | after the pipeline has created its tables |
+# MAGIC | `policies` | NOC groups and persona service principals, `02_noc_views.sql` region-filtered serving views, `03_grants_*.sql` role grants, `04_comments_tags.sql` | after the pipeline has created its tables |
 # MAGIC | `all` | both | |
 # MAGIC
 # MAGIC **Groups.** `noc_national`, `noc_region_<code>` (one per region) and `pii_privileged` are created as
@@ -16,6 +16,10 @@
 # MAGIC Unity Catalog only accepts account-level principals as grantees, so each grant is attempted on the group
 # MAGIC first and, if UC rejects it, applied to the group's member service principals ("personas"), which are
 # MAGIC account-level identities. See docs/pipeline.md, "Governance".
+# MAGIC
+# MAGIC **Roles.** `noc_national` reads gold, the operational silver tables and the serving views. `noc_region_<code>`
+# MAGIC reads only the region-filtered views in the NOC schema. `pii_privileged` is granted nothing: it is only
+# MAGIC tested inside the mask functions, so it unmasks IMSI / MSISDN for someone who already holds a NOC role.
 
 # COMMAND ----------
 
@@ -27,11 +31,12 @@ from databricks.sdk.service import iam
 
 for k, v in {"catalog": "", "raw_schema": "netmon_raw", "bronze_schema": "netmon_bronze",
              "silver_schema": "netmon_silver", "gold_schema": "netmon_gold", "eval_schema": "netmon_eval",
-             "gov_schema": "netmon_gov", "volume": "landing", "stage": "all",
+             "gov_schema": "netmon_gov", "noc_schema": "netmon_noc", "volume": "landing", "stage": "all",
              "owner_in_national": "true"}.items():
     dbutils.widgets.text(k, v)
 p = {k: dbutils.widgets.get(k) for k in ["catalog", "raw_schema", "bronze_schema", "silver_schema", "gold_schema",
-                                         "eval_schema", "gov_schema", "volume", "stage", "owner_in_national"]}
+                                         "eval_schema", "gov_schema", "noc_schema", "volume", "stage",
+                                         "owner_in_national"]}
 assert p["catalog"], "catalog is required"
 stage = p["stage"]
 
@@ -49,6 +54,7 @@ SUBS = {
     "silver_schema": q(p["catalog"], p["silver_schema"]),
     "gold_schema": q(p["catalog"], p["gold_schema"]),
     "eval_schema": q(p["catalog"], p["eval_schema"]),
+    "noc_schema": q(p["catalog"], p["noc_schema"]),
     "landing_volume": q(p["catalog"], p["raw_schema"], p["volume"]),
 }
 SQL_DIR = os.path.join(os.getcwd(), "sql")
@@ -60,8 +66,12 @@ PERSONAS = {
     "netmon-noc-national": ["noc_national"],
     "netmon-noc-nsw-analyst": ["noc_region_nsw"],
     "netmon-noc-wa-analyst": ["noc_region_wa"],
-    "netmon-pii-officer": ["noc_national", "pii_privileged"],
+    "netmon-pii-officer": ["noc_national", "pii_privileged"],  # NOC role + PII: unmasked values
+    "netmon-pii-only": ["pii_privileged"],  # PII group but no NOC role: can read nothing
 }
+# Data access comes from NOC roles only.
+ROLE_GRANTS = {"noc_national": "03_grants_national.sql",
+               **{f"noc_region_{r.lower()}": "03_grants_regional.sql" for r in REGIONS}}
 
 
 def statements(name: str, extra: dict | None = None) -> list[str]:
@@ -139,8 +149,22 @@ if stage in ("policies", "all"):
         # The engineer who owns the pipeline reads all regions (row filter) but not raw PII.
         add_member(groups["noc_national"], w.current_user.me().id)
 
+    run("02_noc_views.sql")
+
+    # Converge every persona to its declared role: revoke whatever an earlier run granted, then grant.
+    managed = ([("CATALOG", SUBS["catalog"])]
+               + [("SCHEMA", SUBS[k]) for k in ("raw_schema", "bronze_schema", "silver_schema", "gold_schema",
+                                                 "eval_schema", "gov_schema", "noc_schema")]
+               + [("TABLE", f"{SUBS['silver_schema']}.{t}") for t in (
+                   "silver_sessions", "silver_kpis", "silver_alarms", "silver_topology_nodes",
+                   "silver_topology_edges", "silver_maintenance_windows")]
+               + [("FUNCTION", f"{SUBS['gov']}.region_filter")])
+    for sp in personas.values():
+        for kind, obj in managed:
+            spark.sql(f"REVOKE ALL PRIVILEGES ON {kind} {obj} FROM `{sp.application_id}`")
+
     grantees = {}  # group -> principals actually granted
-    for g in GROUPS:
+    for g, sql_file in ROLE_GRANTS.items():
         members = [sp for sp_name, sp in personas.items() if g in PERSONAS[sp_name]]
         try:
             spark.sql(f"GRANT USE CATALOG ON CATALOG {SUBS['catalog']} TO `{g}`")
@@ -149,13 +173,12 @@ if stage in ("policies", "all"):
             if "PRINCIPAL_DOES_NOT_EXIST" not in str(e):
                 raise
             grantees[g] = [sp.application_id for sp in members]
-    for g, principals in grantees.items():
-        for principal in principals:
-            print(f"-- grants for {g} -> {principal}")
-            run("02_grants.sql", {"principal": principal})
+        for principal in grantees[g]:
+            print(f"-- {sql_file} for {g} -> {principal}")
+            run(sql_file, {"principal": principal})
 
     # Only tolerate tables the pipeline has not created yet; tag-policy violations must fail the job.
-    skipped = run("03_comments_tags.sql", tolerate=("TABLE_OR_VIEW_NOT_FOUND",))
+    skipped = run("04_comments_tags.sql", tolerate=("TABLE_OR_VIEW_NOT_FOUND",))
     print(f"{len(skipped)} tag/comment statements skipped")
     print({g: v for g, v in grantees.items() if v})
 

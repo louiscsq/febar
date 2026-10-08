@@ -12,6 +12,7 @@ ALTER SCHEMA ${raw_schema} SET TAGS ('domain' = 'operations', 'netmon_layer' = '
 ALTER SCHEMA ${bronze_schema} SET TAGS ('domain' = 'operations', 'layer' = 'bronze', 'contains_pii' = 'true');
 ALTER SCHEMA ${silver_schema} SET TAGS ('domain' = 'operations', 'layer' = 'silver', 'contains_pii' = 'true');
 ALTER SCHEMA ${gold_schema} SET TAGS ('domain' = 'operations', 'layer' = 'gold', 'contains_pii' = 'false');
+ALTER SCHEMA ${noc_schema} SET TAGS ('domain' = 'operations', 'netmon_layer' = 'serving', 'row_filter' = 'by_region', 'consumer' = 'regional_noc');
 ALTER SCHEMA ${eval_schema} SET TAGS ('domain' = 'operations', 'netmon_layer' = 'evaluation', 'ground_truth' = 'true');
 
 -- PII: IMSI and MSISDN, raw in bronze (no grants), masked in silver.
