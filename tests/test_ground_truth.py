@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from conftest import read_table
-from netmon_datagen.faults import FAULT_SPECS
+from netmon_datagen.faults import CLUSTER_TYPES, FAULT_SPECS
 from netmon_datagen.topology import ANCESTOR_COL
 
 ROOT_ALARM_TYPES = ["CELL_OUTAGE", "SITE_POWER_OUTAGE", "BACKHAUL_DEGRADATION", "AGG_ROUTER_FAILURE",
@@ -48,13 +48,17 @@ def test_affected_elements_are_descendants_of_root(gt):
         assert set(r.affected_element_ids) <= set(topo.index)
         if r.fault_type in ("TRAFFIC_SURGE", "ALARM_STORM", "FLAPPING_ELEMENT"):
             continue
+        roots = set(r.root_element_ids)
+        assert r.root_element_id in roots
+        assert len(roots) == 1 or r.fault_type in CLUSTER_TYPES
+        assert {topo.at[x, "element_type"] for x in roots} == {r.root_element_type}
         if r.root_element_type == "CELL":
             desc = set()
         else:
             col = ANCESTOR_COL[r.root_element_type]
-            desc = set(topo.index[(topo[col] == r.root_element_id) & (topo.index != r.root_element_id)])
-        assert set(r.affected_element_ids) == desc
-        assert set(r.affected_cell_ids) <= desc | {r.root_element_id}
+            desc = set(topo.index[topo[col].isin(roots) & ~topo.index.isin(roots)])
+        assert set(r.affected_element_ids) == desc - {r.root_element_id}
+        assert set(r.affected_cell_ids) <= desc | roots
 
 
 def test_customer_impacting_incidents_do_not_overlap(gt):

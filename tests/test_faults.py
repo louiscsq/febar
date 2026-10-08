@@ -54,10 +54,11 @@ def test_changes_happen_only_inside_incident_windows(data):
 
 def test_router_failure_degrades_all_descendants_and_nothing_else(data):
     m, inc, topo = data
-    r = inc[inc.fault_type == "AGG_ROUTER_FAILURE"].iloc[0]
+    rf = inc[inc.fault_type == "AGG_ROUTER_FAILURE"]
+    r = rf.loc[(rf.end_ts - rf.impact_start_ts).idxmax()]  # longest one: needs whole periods inside the outage
     desc_cells = topo.index[(topo.router_id == r.root_element_id) & (topo.element_type == "CELL")]
     assert set(r.affected_cell_ids) == set(desc_cells)
-    t0 = r.impact_start_ts.ceil("15min") + pd.Timedelta(minutes=15)
+    t0 = (r.impact_start_ts + pd.Timedelta(minutes=3)).ceil("15min")  # every cell's onset is within 1-3 min
     t1 = r.end_ts.floor("15min")
     assert t1 > t0
     inside = _window(m, desc_cells, t0, t1)
