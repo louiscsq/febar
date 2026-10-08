@@ -1,15 +1,21 @@
-"""Detection scoring against ground truth: incident matching, time-to-detect and RCA hits.
+"""Detection scoring against ground truth. These definitions are what `netmon_eval` computes in Spark SQL;
+the Python versions are unit-tested and document the contract.
 
-These definitions are what `netmon_eval` computes in Spark SQL; the Python versions are used in the
-unit tests and to cross-check the evidence summary.
+Scored incidents: `is_customer_impacting AND NOT is_censored` (censored rows were not fully observed).
 
-- Scored incidents: `is_customer_impacting AND NOT is_censored` (censored rows were not fully observed).
-- A detection matches an incident when its element is one of the incident's elements (the roots in
-  `root_element_ids`, `affected_element_ids` or `affected_cell_ids`) and its signal time overlaps the
-  impact window, allowing `MATCH_SLACK_S` for alarm and collection lag.
-- Time-to-detect = first matching detection's availability time minus `impact_start_ts`, where
-  availability = when the evidence reached the pipeline plus the measured pipeline latency.
-- RCA hit: the candidate root is in `root_element_ids` (so any site of a bushfire cluster counts).
+Two separate metrics, because step-2 detection is per cell by design and naming the root is step 3's job:
+
+(a) **Customer-impact detection** (`impact_*`): the first detection on any element of the incident's
+    footprint (its roots, `affected_element_ids`, `affected_cell_ids`) whose signal overlaps the impact
+    window (+ `MATCH_SLACK_S`). TTD = that detection's availability (evidence time + measured pipeline
+    latency for live files) minus `impact_start_ts`. This is the 5-minute SLA metric.
+(b) **Root-element localisation** (`root_localised`, `localisation_*`): a detection, or the topology
+    rollup, lands on an element of `root_element_ids` (falling back to `root_element_id`). For cluster
+    faults any one of the roots counts.
+
+Detection precision labels each detection by the ground truth it overlaps, in priority order: uncensored
+fault (TP), censored incident (excluded), planned work (suppressed when `in_maintenance`, else FP), red
+herring (FP), nothing (FP).
 """
 
 from __future__ import annotations
@@ -21,8 +27,13 @@ SLA_S = 300  # 5-minute detection SLA
 MATCH_SLACK_S = 600
 
 
+def roots(inc: Mapping) -> set[str]:
+    return set(inc.get("root_element_ids") or ()) or {inc["root_element_id"]}
+
+
 def incident_elements(inc: Mapping) -> set[str]:
-    ids = {inc["root_element_id"]}
+    """The impact footprint: roots plus every affected element and cell."""
+    ids = roots(inc)
     for key in ("root_element_ids", "affected_element_ids", "affected_cell_ids"):
         ids.update(inc.get(key) or ())
     return ids
@@ -75,3 +86,35 @@ def rca_hit(candidates: Sequence[str], root_element_ids: Sequence[str], k: int =
     """Is any of the top-k ranked candidates a true root? Cluster faults list every root site/link."""
     roots = set(root_element_ids)
     return any(c in roots for c in candidates[:k])
+
+
+def localisation_time(inc: Mapping, dets: Iterable[Mapping], rollup: Iterable[Mapping] = ()) -> float | None:
+    """Seconds from impact start until a detection, or a rollup row (`element_id`, `available_s`,
+    `qualifies`), lands on a root element. None if the root is never localised."""
+    r = roots(inc)
+    times = [d["available_s"] for d in dets if d["element_id"] in r and matches(d, inc)]
+    times += [x["available_s"] for x in rollup if x["element_id"] in r and x.get("qualifies", True)]
+    return max(0.0, min(times) - inc["impact_start_s"]) if times else None
+
+
+LABEL_PRIORITY = ("fault", "censored", "planned", "red_herring")
+
+
+def label_detection(matched: Iterable[Mapping]) -> str:
+    """Label of a detection given the incidents it overlaps (`event_class`, `is_censored`)."""
+    found = set()
+    for inc in matched:
+        found.add("censored" if inc.get("is_censored") else inc["event_class"])
+    return next((x for x in LABEL_PRIORITY if x in found), "unexplained")
+
+
+def fault_precision(labelled: Iterable[tuple[str, bool]]) -> dict:
+    """`labelled`: (label, in_maintenance) per detection."""
+    n = {"fault": 0, "censored": 0, "planned_suppressed": 0, "planned_fp": 0, "red_herring": 0, "unexplained": 0}
+    for label, in_maint in labelled:
+        key = ("planned_suppressed" if in_maint else "planned_fp") if label == "planned" else label
+        n[key] += 1
+    fp = n["planned_fp"] + n["red_herring"] + n["unexplained"]
+    planned = n["planned_suppressed"] + n["planned_fp"]
+    return {**n, "fault_precision_pct": round(100.0 * n["fault"] / (n["fault"] + fp), 1) if n["fault"] + fp else None,
+            "maintenance_suppression_pct": round(100.0 * n["planned_suppressed"] / planned, 1) if planned else None}

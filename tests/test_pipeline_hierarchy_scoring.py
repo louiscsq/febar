@@ -78,6 +78,34 @@ def test_matching_and_time_to_detect():
     assert scoring.is_scored(INC) and not scoring.is_scored({**INC, "is_censored": True})
 
 
+def test_impact_detection_vs_root_localisation():
+    # A symptom cell is detected quickly, but the root (SITE-A / SITE-B cluster) only later.
+    dets = [det("CELL-A1", 1100, 1150), det("SITE-B", 1400, 1700)]
+    assert scoring.time_to_detect(INC, dets) == 150  # (a) impact: any footprint element
+    assert scoring.localisation_time(INC, dets) == 700  # (b) localisation: a root element (any cluster root)
+    assert scoring.localisation_time(INC, [dets[0]]) is None  # symptom only: not localised
+    roll = [{"element_id": "SITE-A", "available_s": 1500}, {"element_id": "CELL-A1", "available_s": 1100}]
+    assert scoring.localisation_time(INC, [dets[0]], roll) == 500
+    single = {**INC, "root_element_ids": []}  # falls back to root_element_id
+    assert scoring.roots(single) == {"SITE-A"}
+
+
+def test_detection_labels_and_fault_precision():
+    fault = {"event_class": "fault", "is_censored": False}
+    cens = {"event_class": "fault", "is_censored": True}
+    planned = {"event_class": "planned", "is_censored": False}
+    surge = {"event_class": "red_herring", "is_censored": False}
+    assert scoring.label_detection([surge, fault]) == "fault"
+    assert scoring.label_detection([cens, planned]) == "censored"
+    assert scoring.label_detection([surge]) == "red_herring"  # e.g. TRAFFIC_SURGE: a false positive
+    assert scoring.label_detection([]) == "unexplained"
+    p = scoring.fault_precision([("fault", False)] * 6 + [("red_herring", False)] + [("unexplained", False)]
+                                + [("planned", True)] * 3 + [("planned", False)] + [("censored", False)] * 5)
+    assert p["fault"] == 6 and p["censored"] == 5
+    assert p["fault_precision_pct"] == 66.7  # 6 / (6 + 1 surge + 1 unexplained + 1 unsuppressed planned)
+    assert p["maintenance_suppression_pct"] == 75.0
+
+
 def test_summary_and_percentiles():
     s = scoring.summarise([60, 120, 240, 600, None])
     assert s["n_incidents"] == 5 and s["n_detected"] == 4 and s["detected_pct"] == 80.0

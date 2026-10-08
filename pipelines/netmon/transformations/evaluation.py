@@ -50,12 +50,14 @@ def eval_detection_log():
 def _incident_detection_sql() -> str:
     return f"""
     WITH inc AS (
-      SELECT * FROM {S.eval}.eval_gt_incidents
+      SELECT *, CASE WHEN size(coalesce(root_element_ids, array())) > 0 THEN root_element_ids
+                     ELSE array(root_element_id) END AS roots
+      FROM {S.eval}.eval_gt_incidents
       WHERE is_customer_impacting AND NOT is_censored AND impact_start_ts IS NOT NULL
     ),
-    elems AS (
-      SELECT incident_id, source_run, explode(array_distinct(concat(
-               array(root_element_id), coalesce(root_element_ids, array()), coalesce(affected_element_ids, array()),
+    -- (a) impact footprint: every element the incident touches (affected cells / elements and its roots)
+    footprint AS (
+      SELECT incident_id, source_run, explode(array_distinct(concat(roots, coalesce(affected_element_ids, array()),
                coalesce(affected_cell_ids, array())))) AS element_id
       FROM inc
     ),
@@ -67,8 +69,8 @@ def _incident_detection_sql() -> str:
       FROM {S.eval}.eval_detection_log
     ),
     m AS (
-      SELECT e.incident_id, e.source_run, d.* EXCEPT (source_run)
-      FROM elems e
+      SELECT e.incident_id, e.source_run, array_contains(i.roots, d.element_id) AS on_root, d.* EXCEPT (source_run)
+      FROM footprint e
       JOIN inc i ON i.incident_id = e.incident_id AND i.source_run = e.source_run
       JOIN det d ON d.element_id = e.element_id AND d.source_run = e.source_run
        AND d.signal_end_ts > i.impact_start_ts
@@ -82,32 +84,63 @@ def _incident_detection_sql() -> str:
              min_by(flags, available_ts) AS first_flags,
              min_by(evidence_ts, available_ts) AS first_evidence_ts,
              min_by(CASE WHEN landed_ts IS NOT NULL THEN pipeline_latency_s END, available_ts) AS first_pipeline_latency_s,
-             min_by(detected_ts, available_ts) AS first_detected_ts,
              count(*) AS n_matched_detections, count(DISTINCT element_id) AS n_detected_elements,
-             max(CAST(array_contains(coalesce(i_roots, array()), element_id) AS INT)) = 1 AS root_detected
-      FROM (SELECT m.*, i.root_element_ids AS i_roots FROM m JOIN inc i USING (incident_id, source_run))
-      GROUP BY incident_id, source_run
+             min(CASE WHEN on_root THEN available_ts END) AS root_detection_ts,
+             min_by(element_id, CASE WHEN on_root THEN available_ts END) AS root_detection_element
+      FROM m GROUP BY incident_id, source_run
+    ),
+    -- (b) localisation via the topology rollup: a root element itself shows the impact (>= 80 % of its
+    -- descendant cells degraded or silent, or a service-down alarm on it). Earliest availability is a lower
+    -- bound: evidence available, the 5-min window closed and the 2-min health watermark passed (MV refresh
+    -- latency is not included).
+    rollup AS (
+      SELECT i.incident_id, i.source_run,
+             min(greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end))) AS rollup_ts,
+             min_by(f.element_id, f.window_end) AS rollup_element
+      FROM inc i JOIN {S.gold}.gold_element_impact_5m f
+        ON array_contains(i.roots, f.element_id)
+       AND f.window_end > i.impact_start_ts AND f.window_start < coalesce(i.impact_end_ts, i.end_ts)
+      WHERE f.impacted_fraction >= 0.8 OR f.n_service_down_alarms > 0
+      GROUP BY i.incident_id, i.source_run
+    ),
+    joined AS (
+      SELECT i.*, f.* EXCEPT (incident_id, source_run), r.rollup_ts, r.rollup_element,
+             least(f.root_detection_ts, r.rollup_ts) AS localised_ts
+      FROM inc i
+      LEFT JOIN first_det f ON f.incident_id = i.incident_id AND f.source_run = i.source_run
+      LEFT JOIN rollup r ON r.incident_id = i.incident_id AND r.source_run = i.source_run
     )
-    SELECT i.source_run, i.incident_id, i.event_class, i.fault_type, i.severity, i.region_code, i.root_element_id,
-           i.root_element_type, i.root_element_ids, i.impact_start_ts, i.impact_end_ts, i.n_affected_cells,
-           i.estimated_impacted_subscribers,
-           f.first_available_ts, f.first_signal_source, f.first_element_id, f.first_element_type, f.first_flags,
-           f.first_evidence_ts, f.first_pipeline_latency_s, f.first_detected_ts, f.n_matched_detections,
-           f.n_detected_elements, coalesce(f.root_detected, false) AS root_detected,
-           f.first_available_ts IS NOT NULL AS is_detected,
-           greatest(unix_timestamp(f.first_evidence_ts) - unix_timestamp(i.impact_start_ts), 0) AS evidence_lag_s,
-           greatest((unix_millis(f.first_available_ts) - unix_millis(i.impact_start_ts)) / 1000.0, 0) AS ttd_s,
-           coalesce((unix_millis(f.first_available_ts) - unix_millis(i.impact_start_ts)) / 1000.0
-                    <= {scoring.SLA_S}, false) AS detected_within_sla
-    FROM inc i LEFT JOIN first_det f ON f.incident_id = i.incident_id AND f.source_run = i.source_run
+    SELECT source_run, incident_id, event_class, fault_type, severity, region_code, root_element_id,
+           root_element_type, roots AS root_element_ids, impact_start_ts, impact_end_ts, n_affected_cells,
+           estimated_impacted_subscribers,
+           -- (a) customer-impact detection: any detection on the incident's footprint
+           first_available_ts IS NOT NULL AS impact_detected,
+           first_signal_source, first_element_id, first_element_type, first_flags, first_evidence_ts,
+           first_pipeline_latency_s, n_matched_detections, n_detected_elements,
+           greatest(unix_timestamp(first_evidence_ts) - unix_timestamp(impact_start_ts), 0) AS evidence_lag_s,
+           greatest((unix_millis(first_available_ts) - unix_millis(impact_start_ts)) / 1000.0, 0) AS impact_ttd_s,
+           coalesce((unix_millis(first_available_ts) - unix_millis(impact_start_ts)) / 1000.0 <= {scoring.SLA_S},
+                    false) AS impact_within_sla,
+           -- (b) root-element localisation: a detection, or the rollup, on an element of root_element_ids
+           localised_ts IS NOT NULL AS root_localised,
+           CASE WHEN localised_ts IS NULL THEN NULL
+                WHEN root_detection_ts IS NOT NULL AND root_detection_ts <= coalesce(rollup_ts, root_detection_ts)
+                  THEN 'detection' ELSE 'rollup' END AS localisation_source,
+           coalesce(CASE WHEN root_detection_ts <= coalesce(rollup_ts, root_detection_ts) THEN root_detection_element END,
+                    rollup_element) AS localised_element,
+           greatest((unix_millis(localised_ts) - unix_millis(impact_start_ts)) / 1000.0, 0) AS localisation_ttd_s,
+           coalesce((unix_millis(localised_ts) - unix_millis(impact_start_ts)) / 1000.0 <= {scoring.SLA_S},
+                    false) AS localised_within_sla
+    FROM joined
     """
 
 
 @dp.materialized_view(
     name=f"{S.eval}.eval_incident_detection",
-    comment="Per scored incident (customer-impacting, not censored): first matching detection, time-to-detect "
-            "(ttd_s, from impact_start_ts) and whether it met the 5-minute SLA. Cluster faults: root_detected "
-            "checks detections against every element of root_element_ids.",
+    comment="Per scored incident (customer-impacting, not censored), two separate metrics. (a) impact detection: "
+            "first detection on any element of the incident's footprint (affected cells / elements or roots), "
+            "impact_ttd_s and impact_within_sla. (b) root localisation: a detection or the topology rollup on an "
+            "element of root_element_ids (any one counts for cluster faults), localisation_ttd_s.",
 )
 def eval_incident_detection():
     return spark.sql(_incident_detection_sql())
@@ -115,18 +148,23 @@ def eval_incident_detection():
 
 @dp.materialized_view(
     name=f"{S.eval}.eval_ttd_summary",
-    comment="Time-to-detect summary per source run (history = 15-min ROP backfill, stream = 1-min live feed), "
-            "overall, per event class (fault / planned / red_herring) and per fault type: detected share, "
-            "median / p90 TTD and share detected within 5 minutes.",
+    comment="Per source run (history = 15-min ROP backfill, stream = 1-min live feed), per event class "
+            "(fault first) and fault type: impact-detection rate / median / p90 TTD / % within 5 min, and the "
+            "root-localisation rate / median TTD / % within 5 min.",
 )
 def eval_ttd_summary():
     return spark.sql(f"""
         SELECT source_run, coalesce(event_class, 'ALL') AS event_class, coalesce(fault_type, 'ALL') AS fault_type,
                count(*) AS n_incidents,
-               count_if(is_detected) AS n_detected,
-               round(100.0 * count_if(is_detected) / count(*), 1) AS detected_pct,
-               round(percentile(ttd_s, 0.5), 1) AS median_ttd_s, round(percentile(ttd_s, 0.9), 1) AS p90_ttd_s,
-               round(100.0 * count_if(detected_within_sla) / count(*), 1) AS within_5min_pct,
+               count_if(impact_detected) AS n_impact_detected,
+               round(100.0 * count_if(impact_detected) / count(*), 1) AS impact_detected_pct,
+               round(percentile(impact_ttd_s, 0.5), 1) AS impact_median_ttd_s,
+               round(percentile(impact_ttd_s, 0.9), 1) AS impact_p90_ttd_s,
+               round(100.0 * count_if(impact_within_sla) / count(*), 1) AS impact_within_5min_pct,
+               count_if(root_localised) AS n_root_localised,
+               round(100.0 * count_if(root_localised) / count(*), 1) AS root_localised_pct,
+               round(percentile(localisation_ttd_s, 0.5), 1) AS localisation_median_ttd_s,
+               round(100.0 * count_if(localised_within_sla) / count(*), 1) AS localised_within_5min_pct,
                round(percentile(evidence_lag_s, 0.5), 1) AS median_evidence_lag_s,
                round(percentile(first_pipeline_latency_s, 0.5), 1) AS median_pipeline_latency_s
         FROM {S.eval}.eval_incident_detection
@@ -135,33 +173,58 @@ def eval_ttd_summary():
 
 @dp.materialized_view(
     name=f"{S.eval}.eval_detection_precision",
-    comment="Share of detections explained by any ground-truth event (incl. red herrings, planned work and "
-            "censored incidents), per source run and signal source. Unexplained = false-positive candidates.",
+    comment="Fault-detection precision per source run and signal source. Each detection is labelled by the "
+            "ground truth it overlaps, in priority order: uncensored fault (true positive), censored incident "
+            "(excluded: label incomplete), planned work (suppressed if in_maintenance, else a false page), red "
+            "herring (false positive) or nothing (false positive). fault_precision_pct = TP / (TP + FP) over "
+            "non-excluded, non-suppressed detections. maintenance_suppression_pct is reported separately.",
 )
 def eval_detection_precision():
     return spark.sql(f"""
         WITH elems AS (
-          SELECT source_run, incident_id, event_class, start_ts, coalesce(end_ts, impact_end_ts) AS end_ts,
+          SELECT source_run, incident_id, event_class, is_censored, start_ts, coalesce(end_ts, impact_end_ts) AS end_ts,
                  explode(array_distinct(concat(array(root_element_id), coalesce(root_element_ids, array()),
                          coalesce(affected_element_ids, array()), coalesce(affected_cell_ids, array())))) AS element_id
           FROM {S.eval}.eval_gt_incidents
         ),
         matched AS (
-          SELECT d.detection_id, max_by(e.event_class, e.start_ts) AS event_class
+          SELECT d.source_run, d.detection_id,
+                 max(CAST(e.event_class = 'fault' AND NOT e.is_censored AS INT)) AS m_fault,
+                 max(CAST(e.is_censored AS INT)) AS m_censored,
+                 max(CAST(e.event_class = 'planned' AND NOT e.is_censored AS INT)) AS m_planned,
+                 max(CAST(e.event_class = 'red_herring' AND NOT e.is_censored AS INT)) AS m_red_herring
           FROM {S.eval}.eval_detection_log d
           JOIN elems e ON e.element_id = d.element_id AND e.source_run = d.source_run
            AND d.signal_end_ts > e.start_ts - INTERVAL 5 MINUTES
            AND (e.end_ts IS NULL OR d.signal_start_ts < e.end_ts + INTERVAL {scoring.MATCH_SLACK_S} SECONDS)
-          GROUP BY d.detection_id
+          GROUP BY d.source_run, d.detection_id
+        ),
+        labelled AS (
+          SELECT d.source_run, d.signal_source, d.in_maintenance,
+                 CASE WHEN m.m_fault = 1 THEN 'fault'
+                      WHEN m.m_censored = 1 THEN 'censored'
+                      WHEN m.m_planned = 1 THEN 'planned'
+                      WHEN m.m_red_herring = 1 THEN 'red_herring'
+                      ELSE 'unexplained' END AS label
+          FROM {S.eval}.eval_detection_log d
+          LEFT JOIN matched m ON m.source_run = d.source_run AND m.detection_id = d.detection_id
         )
-        SELECT d.source_run, d.signal_source, count(*) AS n_detections,
-               count(m.detection_id) AS n_explained,
-               count_if(m.event_class = 'fault') AS n_fault, count_if(m.event_class = 'planned') AS n_planned,
-               count_if(m.event_class = 'red_herring') AS n_red_herring,
-               round(100.0 * count(m.detection_id) / count(*), 1) AS explained_pct,
-               count_if(d.in_maintenance) AS n_in_maintenance_window
-        FROM {S.eval}.eval_detection_log d LEFT JOIN matched m ON m.detection_id = d.detection_id
-        GROUP BY d.source_run, d.signal_source""")
+        SELECT source_run, coalesce(signal_source, 'ALL') AS signal_source, count(*) AS n_detections,
+               count_if(label = 'fault') AS n_fault_tp,
+               count_if(label = 'censored') AS n_censored_excluded,
+               count_if(label = 'planned') AS n_planned,
+               count_if(label = 'planned' AND in_maintenance) AS n_planned_suppressed,
+               count_if(label = 'planned' AND NOT in_maintenance) AS n_planned_unsuppressed_fp,
+               count_if(label = 'red_herring') AS n_red_herring_fp,
+               count_if(label = 'unexplained') AS n_unexplained_fp,
+               round(100.0 * count_if(label = 'fault') / nullif(count_if(label = 'fault')
+                     + count_if(label = 'planned' AND NOT in_maintenance) + count_if(label = 'red_herring')
+                     + count_if(label = 'unexplained'), 0), 1) AS fault_precision_pct,
+               round(100.0 * count_if(label = 'planned' AND in_maintenance) / nullif(count_if(label = 'planned'), 0), 1)
+                 AS maintenance_suppression_pct,
+               count_if(label <> 'planned' AND in_maintenance) AS n_other_in_maintenance
+        FROM labelled
+        GROUP BY GROUPING SETS ((source_run), (source_run, signal_source))""")
 
 
 @dp.materialized_view(

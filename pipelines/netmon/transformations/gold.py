@@ -241,13 +241,14 @@ def _rollup_sql() -> str:
     -- every cell in every window: a cell with no KPI row while others reported is silent (dark)
     status AS (
       SELECT w.window_start, w.window_end, c.*, hc.cell_id IS NULL AS is_silent,
-             coalesce(hc.is_degraded, false) AS is_degraded, hc.latency_ms_z, hc.dl_throughput_mbps_z
+             coalesce(hc.is_degraded, false) AS is_degraded, hc.latency_ms_z, hc.dl_throughput_mbps_z,
+             hc.evidence_ts
       FROM windows w CROSS JOIN cells c
       LEFT JOIN {h} hc ON hc.window_start = w.window_start AND hc.cell_id = c.cell_id
     ),
     rolled AS (
       SELECT window_start, window_end, region_code, cell_id, is_silent, is_degraded, latency_ms_z,
-             dl_throughput_mbps_z, {hierarchy.stack_sql("cell_id")}
+             dl_throughput_mbps_z, evidence_ts, {hierarchy.stack_sql("cell_id")}
       FROM status
     ),
     agg AS (
@@ -256,7 +257,8 @@ def _rollup_sql() -> str:
              sum(CAST(is_silent AS INT)) AS n_silent_cells,
              sum(CAST(is_degraded AS INT)) AS n_degraded_cells,
              sum(CAST(is_silent OR is_degraded AS INT)) AS n_impacted_cells,
-             avg(latency_ms_z) AS avg_latency_z, avg(dl_throughput_mbps_z) AS avg_dl_throughput_z
+             avg(latency_ms_z) AS avg_latency_z, avg(dl_throughput_mbps_z) AS avg_dl_throughput_z,
+             max(evidence_ts) AS evidence_ts
       FROM rolled GROUP BY window_start, window_end, element_id, element_type, level
     ),
     children AS (
@@ -302,7 +304,7 @@ def _rollup_sql() -> str:
            coalesce(o.n_service_down_alarms, 0) AS n_service_down_alarms, o.alarm_codes,
            coalesce(s.n_subtree_alarms, 0) AS n_subtree_alarms,
            coalesce(s.n_subtree_service_down_alarms, 0) AS n_subtree_service_down_alarms,
-           mt.element_id IS NOT NULL AS in_maintenance_window
+           mt.element_id IS NOT NULL AS in_maintenance_window, g.evidence_ts
     FROM agg g
     JOIN {t} n ON n.element_id = g.element_id
     LEFT JOIN children c ON c.window_start = g.window_start AND c.element_id = g.element_id
