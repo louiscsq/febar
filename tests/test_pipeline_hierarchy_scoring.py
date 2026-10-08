@@ -162,3 +162,36 @@ def test_settings_from_conf():
             "netmon.eval_schema": "e", "netmon.gov_schema": "gov", "netmon.stream_step_seconds": "60"}
     s = Settings.from_conf(conf.__getitem__)
     assert s.gold == "`cat`.`g`" and s.feed_path("kpis") == "/Volumes/cat/raw/landing/*/kpis/"
+
+
+def test_no_cross_run_credit_for_localisation_or_detection():
+    # Two runs overlap on the same root element and time: only same-run evidence counts.
+    inc = {**INC, "source_run": "history"}
+    live_det = {**det("SITE-A", 1100, 1200), "source_run": "stream"}
+    live_roll = {"element_id": "SITE-A", "available_s": 1150, "source_run": "stream"}
+    assert scoring.time_to_detect(inc, [live_det]) is None
+    assert scoring.localisation_time(inc, [live_det], [live_roll]) is None
+    hist_roll = {"element_id": "SITE-B", "available_s": 1900, "source_run": "history"}
+    assert scoring.localisation_time(inc, [live_det], [live_roll, hist_roll]) == 900
+
+
+def test_first_localisation_reports_element_of_earliest_row():
+    roll = [{"element_id": "SITE-B", "available_s": 1600}, {"element_id": "SITE-A", "available_s": 1300}]
+    assert scoring.first_localisation(INC, [], roll) == (1300, "SITE-A")
+
+
+def test_alerts_group_detections_per_element_episode():
+    rows = [{"source_run": "s", "element_id": "C1", "signal_start_s": t, "label": "fault"} for t in (0, 60, 120)]
+    rows += [{"source_run": "s", "element_id": "C1", "signal_start_s": 5000, "label": "unexplained"}]
+    rows += [{"source_run": "h", "element_id": "C1", "signal_start_s": 60, "label": "red_herring",
+              "in_maintenance": False}]
+    al = scoring.alerts(rows)
+    assert sorted(len(a) for a in al) == [1, 1, 3]  # one 3-row episode, a separate later one, other run apart
+    labels = sorted(scoring.alert_label(a)[0] for a in al)
+    assert labels == ["fault", "red_herring", "unexplained"]
+    p = scoring.fault_precision([scoring.alert_label(a) for a in al])
+    assert p["fault_precision_pct"] == 33.3  # 1 TP alert vs 2 FP alerts, though 3 of 5 rows are TP
+    planned = [{"source_run": "s", "element_id": "S1", "signal_start_s": 0, "label": "planned", "in_maintenance": True},
+               {"source_run": "s", "element_id": "S1", "signal_start_s": 60, "label": "planned",
+                "in_maintenance": False}]
+    assert scoring.alert_label(planned) == ("planned", True)

@@ -24,6 +24,7 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 
 SLA_S = 300  # 5-minute detection SLA
+ALERT_GAP_S = 600  # detections on one element more than 10 min apart start a new alert
 MATCH_SLACK_S = 600
 
 
@@ -54,7 +55,7 @@ def matches(det: Mapping, inc: Mapping) -> bool:
 
 def time_to_detect(inc: Mapping, dets: Iterable[Mapping]) -> float | None:
     """Seconds from impact start to the first matching detection's availability (`available_s`)."""
-    times = [d["available_s"] for d in dets if matches(d, inc)]
+    times = [d["available_s"] for d in dets if same_run(d, inc) and matches(d, inc)]
     return max(0.0, min(times) - inc["impact_start_s"]) if times else None
 
 
@@ -91,10 +92,24 @@ def rca_hit(candidates: Sequence[str], root_element_ids: Sequence[str], k: int =
 def localisation_time(inc: Mapping, dets: Iterable[Mapping], rollup: Iterable[Mapping] = ()) -> float | None:
     """Seconds from impact start until a detection, or a rollup row (`element_id`, `available_s`,
     `qualifies`), lands on a root element. None if the root is never localised."""
+    first = first_localisation(inc, dets, rollup)
+    return max(0.0, first[0] - inc["impact_start_s"]) if first else None
+
+
+def same_run(x: Mapping, inc: Mapping) -> bool:
+    """Evidence only counts for an incident of the same generator run (`source_run`, when given)."""
+    return x.get("source_run", inc.get("source_run")) == inc.get("source_run")
+
+
+def first_localisation(inc: Mapping, dets: Iterable[Mapping], rollup: Iterable[Mapping] = ()) -> tuple | None:
+    """(available_s, element_id) of the earliest detection or qualifying rollup row on a root element of
+    the same run: the time and the element always come from the same row (SQL: min(struct(ts, element)))."""
     r = roots(inc)
-    times = [d["available_s"] for d in dets if d["element_id"] in r and matches(d, inc)]
-    times += [x["available_s"] for x in rollup if x["element_id"] in r and x.get("qualifies", True)]
-    return max(0.0, min(times) - inc["impact_start_s"]) if times else None
+    cands = [(d["available_s"], d["element_id"]) for d in dets
+             if d["element_id"] in r and same_run(d, inc) and matches(d, inc)]
+    cands += [(x["available_s"], x["element_id"]) for x in rollup
+              if x["element_id"] in r and x.get("qualifies", True) and same_run(x, inc)]
+    return min(cands) if cands else None
 
 
 LABEL_PRIORITY = ("fault", "censored", "planned", "red_herring")
@@ -118,3 +133,31 @@ def fault_precision(labelled: Iterable[tuple[str, bool]]) -> dict:
     planned = n["planned_suppressed"] + n["planned_fp"]
     return {**n, "fault_precision_pct": round(100.0 * n["fault"] / (n["fault"] + fp), 1) if n["fault"] + fp else None,
             "maintenance_suppression_pct": round(100.0 * n["planned_suppressed"] / planned, 1) if planned else None}
+
+
+def alerts(dets: Iterable[Mapping], gap_s: float = ALERT_GAP_S) -> list[list[Mapping]]:
+    """Group detection rows into alerts: per (source_run, element_id), consecutive detections whose
+    signal starts are at most `gap_s` apart belong to one alert (one page to the NOC)."""
+    by_key: dict[tuple, list[Mapping]] = {}
+    for d in dets:
+        by_key.setdefault((d.get("source_run"), d["element_id"]), []).append(d)
+    out = []
+    for rows in by_key.values():
+        rows = sorted(rows, key=lambda d: d["signal_start_s"])
+        cur = [rows[0]]
+        for prev, d in zip(rows, rows[1:], strict=False):
+            if d["signal_start_s"] - prev["signal_start_s"] > gap_s:
+                out.append(cur)
+                cur = []
+            cur.append(d)
+        out.append(cur)
+    return out
+
+
+def alert_label(alert: Sequence[Mapping]) -> tuple[str, bool]:
+    """An alert takes the highest-priority label of its detections; it is suppressed (maintenance) when
+    its first detection, the one that would page, is in a change window."""
+    labels = {d["label"] for d in alert}
+    label = next((x for x in (*LABEL_PRIORITY, "unexplained") if x in labels), "unexplained")
+    first = min(alert, key=lambda d: d["signal_start_s"])
+    return label, bool(first.get("in_maintenance"))

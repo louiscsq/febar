@@ -94,14 +94,17 @@ def _incident_detection_sql() -> str:
     -- bound: evidence available, the 5-min window closed and the 2-min health watermark passed (MV refresh
     -- latency is not included).
     rollup AS (
-      SELECT i.incident_id, i.source_run,
-             min(greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end))) AS rollup_ts,
-             min_by(f.element_id, f.window_end) AS rollup_element
-      FROM inc i JOIN {S.gold}.gold_element_impact_5m f
-        ON array_contains(i.roots, f.element_id)
-       AND f.window_end > i.impact_start_ts AND f.window_start < coalesce(i.impact_end_ts, i.end_ts)
-      WHERE f.impacted_fraction >= 0.8 OR f.n_service_down_alarms > 0
-      GROUP BY i.incident_id, i.source_run
+      SELECT incident_id, source_run, first.ts AS rollup_ts, first.element_id AS rollup_element
+      FROM (
+        -- one min(struct(...)) so the reported element is the one of the earliest localisation
+        SELECT i.incident_id, i.source_run,
+               min(struct(greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end)) AS ts,
+                          f.element_id AS element_id)) AS first
+        FROM inc i JOIN {S.gold}.gold_element_impact_5m f
+          ON f.source_run = i.source_run AND array_contains(i.roots, f.element_id)
+         AND f.window_end > i.impact_start_ts AND f.window_start < coalesce(i.impact_end_ts, i.end_ts)
+        WHERE f.impacted_fraction >= 0.8 OR f.n_service_down_alarms > 0
+        GROUP BY i.incident_id, i.source_run)
     ),
     joined AS (
       SELECT i.*, f.* EXCEPT (incident_id, source_run), r.rollup_ts, r.rollup_element,
@@ -171,17 +174,11 @@ def eval_ttd_summary():
         GROUP BY GROUPING SETS ((source_run), (source_run, event_class), (source_run, event_class, fault_type))""")
 
 
-@dp.materialized_view(
-    name=f"{S.eval}.eval_detection_precision",
-    comment="Fault-detection precision per source run and signal source. Each detection is labelled by the "
-            "ground truth it overlaps, in priority order: uncensored fault (true positive), censored incident "
-            "(excluded: label incomplete), planned work (suppressed if in_maintenance, else a false page), red "
-            "herring (false positive) or nothing (false positive). fault_precision_pct = TP / (TP + FP) over "
-            "non-excluded, non-suppressed detections. maintenance_suppression_pct is reported separately.",
-)
-def eval_detection_precision():
-    return spark.sql(f"""
-        WITH elems AS (
+def _labelled_sql() -> str:
+    """CTEs ending in `labelled`: every detection row with its ground-truth label, in priority order
+    (netmon_pipeline.scoring.label_detection)."""
+    return f"""
+        elems AS (
           SELECT source_run, incident_id, event_class, is_censored, start_ts, coalesce(end_ts, impact_end_ts) AS end_ts,
                  explode(array_distinct(concat(array(root_element_id), coalesce(root_element_ids, array()),
                          coalesce(affected_element_ids, array()), coalesce(affected_cell_ids, array())))) AS element_id
@@ -200,7 +197,7 @@ def eval_detection_precision():
           GROUP BY d.source_run, d.detection_id
         ),
         labelled AS (
-          SELECT d.source_run, d.signal_source, d.in_maintenance,
+          SELECT d.source_run, d.detection_id, d.signal_source, d.element_id, d.signal_start_ts, d.in_maintenance,
                  CASE WHEN m.m_fault = 1 THEN 'fault'
                       WHEN m.m_censored = 1 THEN 'censored'
                       WHEN m.m_planned = 1 THEN 'planned'
@@ -208,8 +205,12 @@ def eval_detection_precision():
                       ELSE 'unexplained' END AS label
           FROM {S.eval}.eval_detection_log d
           LEFT JOIN matched m ON m.source_run = d.source_run AND m.detection_id = d.detection_id
-        )
-        SELECT source_run, coalesce(signal_source, 'ALL') AS signal_source, count(*) AS n_detections,
+        )"""
+
+
+def _precision_select(unit: str, src: str) -> str:
+    return f"""
+        SELECT source_run, coalesce(signal_source, 'ALL') AS signal_source, count(*) AS n_{unit}s,
                count_if(label = 'fault') AS n_fault_tp,
                count_if(label = 'censored') AS n_censored_excluded,
                count_if(label = 'planned') AS n_planned,
@@ -219,12 +220,55 @@ def eval_detection_precision():
                count_if(label = 'unexplained') AS n_unexplained_fp,
                round(100.0 * count_if(label = 'fault') / nullif(count_if(label = 'fault')
                      + count_if(label = 'planned' AND NOT in_maintenance) + count_if(label = 'red_herring')
-                     + count_if(label = 'unexplained'), 0), 1) AS fault_precision_pct,
+                     + count_if(label = 'unexplained'), 0), 1) AS {unit}_fault_precision_pct,
                round(100.0 * count_if(label = 'planned' AND in_maintenance) / nullif(count_if(label = 'planned'), 0), 1)
-                 AS maintenance_suppression_pct,
-               count_if(label <> 'planned' AND in_maintenance) AS n_other_in_maintenance
-        FROM labelled
-        GROUP BY GROUPING SETS ((source_run), (source_run, signal_source))""")
+                 AS maintenance_suppression_pct
+        FROM {src}
+        GROUP BY GROUPING SETS ((source_run), (source_run, signal_source))"""
+
+
+@dp.materialized_view(
+    name=f"{S.eval}.eval_detection_precision",
+    comment="Detection-ROW fault precision per source run and signal source (one row per detection, i.e. per "
+            "degraded cell-minute or alarm). Labels in priority order: uncensored fault (TP), censored incident "
+            "(excluded), planned work (suppressed if in_maintenance, else FP), red herring (FP), nothing (FP). "
+            "row_fault_precision_pct = TP / (TP + FP). See eval_alert_precision for the alert-level figure.",
+)
+def eval_detection_precision():
+    return spark.sql(f"WITH {_labelled_sql()}\n{_precision_select('row', 'labelled')}")
+
+
+@dp.materialized_view(
+    name=f"{S.eval}.eval_alert_precision",
+    comment=f"Alert-level fault precision: detections grouped per (source_run, element_id) into episodes "
+            f"(a gap of more than {scoring.ALERT_GAP_S // 60} min starts a new alert, i.e. a new page). An alert "
+            "takes the highest-priority label of its detections and is suppressed when its first detection is in "
+            "a change window. alert_fault_precision_pct = TP alerts / (TP + FP alerts).",
+)
+def eval_alert_precision():
+    return spark.sql(f"""
+        WITH {_labelled_sql()},
+        ep AS (
+          SELECT *, sum(new_alert) OVER (PARTITION BY source_run, element_id ORDER BY signal_start_ts, detection_id)
+                    AS alert_seq
+          FROM (SELECT *, CASE WHEN unix_timestamp(signal_start_ts) - unix_timestamp(lag(signal_start_ts) OVER (
+                                      PARTITION BY source_run, element_id ORDER BY signal_start_ts, detection_id))
+                                    <= {scoring.ALERT_GAP_S} THEN 0 ELSE 1 END AS new_alert
+                FROM labelled)
+        ),
+        alerts AS (
+          SELECT source_run, element_id, alert_seq,
+                 min_by(signal_source, signal_start_ts) AS signal_source,
+                 min_by(in_maintenance, signal_start_ts) AS in_maintenance,
+                 CASE WHEN array_contains(collect_set(label), 'fault') THEN 'fault'
+                      WHEN array_contains(collect_set(label), 'censored') THEN 'censored'
+                      WHEN array_contains(collect_set(label), 'planned') THEN 'planned'
+                      WHEN array_contains(collect_set(label), 'red_herring') THEN 'red_herring'
+                      ELSE 'unexplained' END AS label,
+                 count(*) AS n_rows
+          FROM ep GROUP BY source_run, element_id, alert_seq
+        )
+        {_precision_select('alert', 'alerts')}""")
 
 
 @dp.materialized_view(
@@ -286,7 +330,7 @@ def eval_rca_baseline():
                  max(f.n_impacted_cells) AS n_impacted_cells, max(f.impacted_fraction) AS impacted_fraction,
                  max(f.n_service_down_alarms) AS n_service_down_alarms
           FROM inc i JOIN {S.gold}.gold_element_impact_5m f
-            ON f.region_code = i.region_code
+            ON f.source_run = i.source_run AND f.region_code = i.region_code
            AND f.window_start >= i.impact_start_ts - INTERVAL 5 MINUTES
            AND f.window_start < i.impact_start_ts + INTERVAL 15 MINUTES
           WHERE f.impacted_fraction >= 0.8 OR f.n_service_down_alarms > 0

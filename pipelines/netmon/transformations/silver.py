@@ -95,7 +95,7 @@ def silver_topology_edges():
 @dp.expect_or_drop("valid_window", "planned_start_ts IS NOT NULL AND planned_end_ts > planned_start_ts")
 def silver_maintenance_windows():
     return spark.sql(f"""
-        SELECT DISTINCT change_id, element_id, element_type,
+        SELECT DISTINCT _source_run AS source_run, change_id, element_id, element_type,
                try_to_timestamp(planned_start_ts, "{rules.TS_FORMAT}") AS planned_start_ts,
                try_to_timestamp(planned_end_ts, "{rules.TS_FORMAT}") AS planned_end_ts,
                change_type, status

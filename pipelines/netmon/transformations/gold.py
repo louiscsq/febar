@@ -84,7 +84,9 @@ def health(width: str):
     agg = (
         spark.readStream.table("kpis_scored")
         .withWatermark("event_ts", HEALTH_WATERMARK)
-        .groupBy(F.window("event_ts", width).alias("w"), "cell_id", *ANCESTOR_COLS, "region_code", "timezone")
+        # source_run keeps generator runs apart even if their windows ever overlap in time.
+        .groupBy(F.window("event_ts", width).alias("w"), "source_run", "cell_id", *ANCESTOR_COLS, "region_code",
+                 "timezone")
         .agg(
             F.count("*").alias("n_reports"),
             F.max("granularity_s").alias("granularity_s"),
@@ -93,7 +95,9 @@ def health(width: str):
             *[F.avg(c).alias(c) for c in BASE_COLS],
             F.sum(F.when(F.size("flags") > 0, 1).otherwise(0)).alias("n_flagged_reports"),
             F.sum(F.col("is_late").cast("int")).alias("n_late_reports"),
-            F.max("evidence_ts").alias("evidence_ts"),
+            # When the window's on-time evidence was available. Late arrivals (delivered up to 36 h later)
+            # are counted but must not make the window look like it became known a day later.
+            F.max(F.when(~F.col("is_late"), F.col("evidence_ts"))).alias("evidence_ts"),
         )
     )
     out = (
@@ -108,7 +112,7 @@ def health(width: str):
         .withColumn("max_abs_z", F.greatest(*[F.abs(F.col(f"{m}_z")) for m in BASE]))
     )
     # Keys first: Delta collects stats on the leading 32 columns, which liquid clustering needs.
-    keys = ["window_start", "window_end", "cell_id", "region_code", "is_degraded", "flags"]
+    keys = ["window_start", "window_end", "source_run", "cell_id", "region_code", "is_degraded", "flags"]
     return out.select(*keys, *[c for c in out.columns if c not in keys])
 
 
@@ -163,15 +167,17 @@ def impact_signals():
             "landed_ts", "evidence_ts", "_file_modification_time", "source_run", "record_id")
     )
     maint = spark.read.table(f"{S.silver}.silver_maintenance_windows").select(
-        F.col("element_id").alias("m_element_id"), "planned_start_ts", "planned_end_ts")
+        F.col("element_id").alias("m_element_id"), F.col("source_run").alias("m_source_run"), "planned_start_ts",
+        "planned_end_ts")
     sig = kpi.unionByName(alarm, allowMissingColumns=True)
     cond = (F.col("m_element_id").isin(F.col("site_id"), F.col("router_id"))
+            & (F.col("m_source_run") == F.col("source_run"))
             & (F.col("signal_start_ts") >= F.col("planned_start_ts"))
             & (F.col("signal_start_ts") < F.col("planned_end_ts")))
     return (
         sig.join(F.broadcast(maint), cond, "left")
         .withColumn("in_maintenance", F.col("m_element_id").isNotNull())
-        .drop("m_element_id", "planned_start_ts", "planned_end_ts")
+        .drop("m_element_id", "m_source_run", "planned_start_ts", "planned_end_ts")
         .withColumn("severity_score", F.expr(SEVERITY))
         .withColumn("detected_ts", F.current_timestamp())
         # Wall-clock time from the file landing in the Volume to this row being produced.
@@ -235,66 +241,69 @@ def gold_cell_sessions_5m():
 def _rollup_sql() -> str:
     t, h, a, m = (f"{S.silver}.silver_topology_nodes", f"{S.gold}.gold_cell_health_5m",
                   f"{S.silver}.silver_alarms", f"{S.silver}.silver_maintenance_windows")
+    # Every CTE is keyed by source_run, so one generator run's evidence never counts for another.
     return f"""
-    WITH windows AS (SELECT DISTINCT window_start, window_end FROM {h}),
+    WITH windows AS (SELECT DISTINCT source_run, window_start, window_end FROM {h}),
     cells AS (SELECT element_id AS cell_id, {", ".join(ANCESTOR_COLS)}, region_code FROM {t} WHERE element_type = 'CELL'),
-    -- every cell in every window: a cell with no KPI row while others reported is silent (dark)
+    -- every cell in every window of a run: a cell with no KPI row while others reported is silent (dark)
     status AS (
-      SELECT w.window_start, w.window_end, c.*, hc.cell_id IS NULL AS is_silent,
+      SELECT w.source_run, w.window_start, w.window_end, c.*, hc.cell_id IS NULL AS is_silent,
              coalesce(hc.is_degraded, false) AS is_degraded, hc.latency_ms_z, hc.dl_throughput_mbps_z,
              hc.evidence_ts
       FROM windows w CROSS JOIN cells c
-      LEFT JOIN {h} hc ON hc.window_start = w.window_start AND hc.cell_id = c.cell_id
+      LEFT JOIN {h} hc ON hc.source_run = w.source_run AND hc.window_start = w.window_start
+                      AND hc.cell_id = c.cell_id
     ),
     rolled AS (
-      SELECT window_start, window_end, region_code, cell_id, is_silent, is_degraded, latency_ms_z,
+      SELECT source_run, window_start, window_end, region_code, cell_id, is_silent, is_degraded, latency_ms_z,
              dl_throughput_mbps_z, evidence_ts, {hierarchy.stack_sql("cell_id")}
       FROM status
     ),
     agg AS (
-      SELECT window_start, window_end, element_id, element_type, level, first(region_code) AS region_code,
-             count(*) AS n_desc_cells,
+      SELECT source_run, window_start, window_end, element_id, element_type, level,
+             first(region_code) AS region_code, count(*) AS n_desc_cells,
              sum(CAST(is_silent AS INT)) AS n_silent_cells,
              sum(CAST(is_degraded AS INT)) AS n_degraded_cells,
              sum(CAST(is_silent OR is_degraded AS INT)) AS n_impacted_cells,
              avg(latency_ms_z) AS avg_latency_z, avg(dl_throughput_mbps_z) AS avg_dl_throughput_z,
              max(evidence_ts) AS evidence_ts
-      FROM rolled GROUP BY window_start, window_end, element_id, element_type, level
+      FROM rolled GROUP BY source_run, window_start, window_end, element_id, element_type, level
     ),
     children AS (
-      SELECT g.window_start, n.parent_id AS element_id, count(*) AS n_children,
+      SELECT g.source_run, g.window_start, n.parent_id AS element_id, count(*) AS n_children,
              sum(CAST(g.n_impacted_cells > 0 AS INT)) AS n_impacted_children
       FROM agg g JOIN {t} n ON n.element_id = g.element_id
-      WHERE n.parent_id IS NOT NULL GROUP BY g.window_start, n.parent_id
+      WHERE n.parent_id IS NOT NULL GROUP BY g.source_run, g.window_start, n.parent_id
     ),
     alarms_raised AS (
-      SELECT window(event_ts, '5 minutes').start AS window_start, element_id, upf_id, router_id, backhaul_id,
-             site_id, amf_id, alarm_code, severity, is_service_down
+      SELECT source_run, window(event_ts, '5 minutes').start AS window_start, element_id, upf_id, router_id,
+             backhaul_id, site_id, amf_id, alarm_code, severity, is_service_down
       FROM {a} WHERE event_type = 'RAISE'
     ),
     own_alarms AS (
-      SELECT window_start, element_id, count(*) AS n_alarms,
+      SELECT source_run, window_start, element_id, count(*) AS n_alarms,
              sum(CAST(severity = 'CRITICAL' AS INT)) AS n_critical_alarms,
              sum(CAST(is_service_down AS INT)) AS n_service_down_alarms,
              array_sort(collect_set(alarm_code)) AS alarm_codes
-      FROM alarms_raised GROUP BY window_start, element_id
+      FROM alarms_raised GROUP BY source_run, window_start, element_id
     ),
     -- ancestor columns include the element itself, so this counts alarms anywhere in each subtree
     subtree_alarms AS (
-      SELECT window_start, anc AS element_id, count(*) AS n_subtree_alarms,
+      SELECT source_run, window_start, anc AS element_id, count(*) AS n_subtree_alarms,
              sum(CAST(is_service_down AS INT)) AS n_subtree_service_down_alarms
-      FROM (SELECT window_start, element_id, is_service_down,
+      FROM (SELECT source_run, window_start, element_id, is_service_down,
                    explode(array_distinct(filter(array(element_id, site_id, backhaul_id, router_id, upf_id, amf_id),
                                                  x -> x IS NOT NULL))) AS anc
             FROM alarms_raised)
-      GROUP BY window_start, anc
+      GROUP BY source_run, window_start, anc
     ),
     maint AS (
-      SELECT DISTINCT w.window_start, mw.element_id
-      FROM windows w JOIN {m} mw ON mw.planned_start_ts < w.window_end AND mw.planned_end_ts > w.window_start
+      SELECT DISTINCT w.source_run, w.window_start, mw.element_id
+      FROM windows w JOIN {m} mw ON mw.source_run = w.source_run
+       AND mw.planned_start_ts < w.window_end AND mw.planned_end_ts > w.window_start
     )
-    SELECT g.window_start, g.window_end, g.element_id, g.element_type, g.level, g.region_code, n.parent_id,
-           g.n_desc_cells, g.n_silent_cells, g.n_degraded_cells, g.n_impacted_cells,
+    SELECT g.source_run, g.window_start, g.window_end, g.element_id, g.element_type, g.level, g.region_code,
+           n.parent_id, g.n_desc_cells, g.n_silent_cells, g.n_degraded_cells, g.n_impacted_cells,
            g.n_impacted_cells / g.n_desc_cells AS impacted_fraction,
            coalesce(c.n_children, 0) AS n_children, coalesce(c.n_impacted_children, 0) AS n_impacted_children,
            coalesce(c.n_impacted_children / c.n_children, 0) AS impacted_children_fraction,
@@ -307,11 +316,15 @@ def _rollup_sql() -> str:
            mt.element_id IS NOT NULL AS in_maintenance_window, g.evidence_ts
     FROM agg g
     JOIN {t} n ON n.element_id = g.element_id
-    LEFT JOIN children c ON c.window_start = g.window_start AND c.element_id = g.element_id
-    LEFT JOIN agg p ON p.window_start = g.window_start AND p.element_id = n.parent_id
-    LEFT JOIN own_alarms o ON o.window_start = g.window_start AND o.element_id = g.element_id
-    LEFT JOIN subtree_alarms s ON s.window_start = g.window_start AND s.element_id = g.element_id
-    LEFT JOIN maint mt ON mt.window_start = g.window_start AND mt.element_id = g.element_id
+    LEFT JOIN children c ON c.source_run = g.source_run AND c.window_start = g.window_start
+                        AND c.element_id = g.element_id
+    LEFT JOIN agg p ON p.source_run = g.source_run AND p.window_start = g.window_start AND p.element_id = n.parent_id
+    LEFT JOIN own_alarms o ON o.source_run = g.source_run AND o.window_start = g.window_start
+                          AND o.element_id = g.element_id
+    LEFT JOIN subtree_alarms s ON s.source_run = g.source_run AND s.window_start = g.window_start
+                              AND s.element_id = g.element_id
+    LEFT JOIN maint mt ON mt.source_run = g.source_run AND mt.window_start = g.window_start
+                      AND mt.element_id = g.element_id
     WHERE g.n_impacted_cells > 0 OR o.n_alarms > 0
     """
 
@@ -321,7 +334,7 @@ def _rollup_sql() -> str:
     comment="Topology rollup per element per 5-min window: impacted (degraded or silent) descendant cells, "
             "impacted children, parent impact, alarms on the element and in its subtree, maintenance flag. "
             "Root-cause candidate features for the RCA model. Only elements with impact or alarms are kept.",
-    cluster_by=["window_start", "element_id"],
+    cluster_by=["source_run", "window_start", "element_id"],
 )
 def gold_element_impact_5m():
     return spark.sql(_rollup_sql())
