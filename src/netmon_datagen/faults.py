@@ -38,13 +38,13 @@ class FaultSpec:
 
 
 FAULT_SPECS: dict[str, FaultSpec] = {s.fault_type: s for s in [
-    FaultSpec("AMF_OVERLOAD", "fault", {"AMF_MME": 0.01}, (15, 60), (17.0, 21.0),
+    FaultSpec("AMF_OVERLOAD", "fault", {"AMF_MME": 0.015}, (15, 60), (17.0, 21.0),
               dict(attach=40, rrc=6, users=0.2),
               description="Control-plane signalling overload: attach/registration failures region-wide"),
-    FaultSpec("CORE_CONGESTION", "fault", {"UPF_SGW": 0.0075}, (30, 120), (17.0, 21.0),
+    FaultSpec("CORE_CONGESTION", "fault", {"UPF_SGW": 0.01}, (30, 120), (17.0, 21.0),
               dict(thr=0.6, lat=80, loss=3, drop=1.5, rrc=1),
               description="User-plane congestion at busy hour: latency/throughput degrade under the UPF"),
-    FaultSpec("AGG_ROUTER_FAILURE", "fault", {"AGG_ROUTER": 0.003}, (15, 120), None,
+    FaultSpec("AGG_ROUTER_FAILURE", "fault", {"AGG_ROUTER": 0.005}, (15, 120), None,
               dict(avail=0.97, users=0.97, thr=0.98, rrc=90, attach=90, drop=20),
               description="Aggregation router down: every downstream site loses S1/NG transport"),
     FaultSpec("PLANNED_MAINTENANCE", "planned", {"AGG_ROUTER": 0.0025, "SITE": 0.00015}, (10, 45), (0.0, 1.5),
@@ -56,7 +56,7 @@ FAULT_SPECS: dict[str, FaultSpec] = {s.fault_type: s for s in [
     FaultSpec("SITE_POWER_OUTAGE", "fault", {"SITE": 0.0003}, (60, 360), None,
               dict(avail=1, users=1, thr=1, rrc=100, attach=100), silent=True,
               description="Mains failure; site runs on battery, then goes dark (cells stop reporting)"),
-    FaultSpec("TRAFFIC_SURGE", "red_herring", {"SITE": 0.00004}, (120, 240), (17.0, 20.0),
+    FaultSpec("TRAFFIC_SURGE", "red_herring", {"SITE": 0.00008}, (120, 240), (17.0, 20.0),
               description="Stadium/concert crowd: organic congestion with no faulty element"),
     FaultSpec("CELL_OUTAGE", "fault", {"CELL": 0.0003}, (20, 180), None,
               dict(avail=1, users=1, thr=1, rrc=100, attach=100),

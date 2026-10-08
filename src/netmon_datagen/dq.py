@@ -66,37 +66,33 @@ def inject_defects(df: pd.DataFrame, feed: str, dq: DQConfig, rng: np.random.Gen
     mal, nul, oor, late, dup = (perm[bounds[i]:bounds[i + 1]] for i in range(5))
     log: list[dict] = []
     rid = df["record_id"].to_numpy()
+    edits: dict[str, list[tuple[int, object]]] = {}  # column -> [(row, value)], applied once per column
 
     def note(i, dtype, sub, col, val):
         log.append(dict(feed=feed, record_id=rid[i], defect_type=dtype, defect_subtype=sub, column=col,
                         injected_value=None if val is None else str(val)))
+        if col is not None and dtype != "late_arrival":
+            edits.setdefault(col, []).append((i, val))
 
     # Malformed: unparseable timestamp everywhere; type mismatch and truncated lines only in JSON.
     variants = ["bad_timestamp", "type_mismatch", "truncated_json"] if fmt == "json" else ["bad_timestamp"]
     if fmt == "json" and not spec["numeric_cols"]:
         variants = ["bad_timestamp", "truncated_json"]
     choice = rng.integers(0, len(variants), len(mal))
+    truncate = []
     for i, v in zip(mal, choice, strict=True):
         sub = variants[v]
         if sub == "bad_timestamp":
-            val = BAD_TIMESTAMPS[rng.integers(len(BAD_TIMESTAMPS))]
-            df.at[i, spec["ts_col"]] = val
-            note(i, "malformed", sub, spec["ts_col"], val)
+            note(i, "malformed", sub, spec["ts_col"], BAD_TIMESTAMPS[rng.integers(len(BAD_TIMESTAMPS))])
         elif sub == "type_mismatch":
             col = spec["numeric_cols"][rng.integers(len(spec["numeric_cols"]))]
-            if df[col].dtype != object:
-                df[col] = df[col].astype(object)
-            val = TYPE_MISMATCH[rng.integers(len(TYPE_MISMATCH))]
-            df.at[i, col] = val
-            note(i, "malformed", sub, col, val)
+            note(i, "malformed", sub, col, TYPE_MISMATCH[rng.integers(len(TYPE_MISMATCH))])
         else:
-            df.at[i, "_truncate"] = True
+            truncate.append(i)
             note(i, "malformed", sub, None, None)
 
     for i in nul:
-        col = spec["null_cols"][rng.integers(len(spec["null_cols"]))]
-        df.at[i, col] = None
-        note(i, "null", "missing_value", col, None)
+        note(i, "null", "missing_value", spec["null_cols"][rng.integers(len(spec["null_cols"]))], None)
 
     for i in oor:
         col, lo, hi = spec["oor"][rng.integers(len(spec["oor"]))]
@@ -108,8 +104,23 @@ def inject_defects(df: pd.DataFrame, feed: str, dq: DQConfig, rng: np.random.Gen
             val = int(rng.integers(lo, hi + 1))
         else:
             val = round(float(rng.uniform(lo, hi)), 2)
-        df.at[i, col] = val
         note(i, "out_of_range", "clock_skew" if isinstance(val, str) else "impossible_value", col, val)
+
+    for col, items in edits.items():
+        rows = np.array([r for r, _ in items])
+        vals = [v for _, v in items]
+        if any(isinstance(v, str) for v in vals) and col in spec["numeric_cols"] + spec["int_cols"]:
+            df[col] = df[col].astype(object)  # type-mismatch strings in a numeric column (JSON only)
+        dtype = df[col].dtype
+        if pd.api.types.is_object_dtype(dtype):
+            arr = pd.array(vals, dtype=object)
+        elif pd.api.types.is_float_dtype(dtype):
+            arr = np.array([np.nan if v is None else v for v in vals], dtype=float)
+        else:  # nullable Int64 or string columns accept None directly
+            arr = pd.array(vals, dtype=dtype)
+        df.loc[rows, col] = arr
+    if truncate:
+        df.loc[np.array(truncate), "_truncate"] = True
 
     if len(late):
         delay = rng.uniform(LATE_MIN_S, LATE_MAX_S, len(late)).astype(np.int64).astype("timedelta64[s]")

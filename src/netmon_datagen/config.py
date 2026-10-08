@@ -75,8 +75,8 @@ class FaultConfig:
     enabled: bool = True
     rate_multiplier: float = 1.0  # scales every fault / red-herring rate
     red_herrings: bool = True  # alarm storms, planned maintenance, traffic surges, flapping elements
-    min_per_type: int = 0  # guarantee at least N incidents of every type (used by the tiny preset)
-    flapping_fraction: float = 0.002  # share of cells/sites/links that are chronically flapping
+    min_per_type: int = 1  # batch: guarantee >= N incidents of every type per run (ignored when streaming)
+    flapping_fraction: float = 0.001  # share of cells/sites/links that are chronically flapping
 
 
 @dataclass(frozen=True)
@@ -95,10 +95,7 @@ class GeneratorConfig:
 
     @classmethod
     def for_scale(cls, scale: str, **kwargs) -> GeneratorConfig:
-        preset = get_preset(scale)
-        if scale == "tiny" and "faults" not in kwargs:
-            kwargs["faults"] = FaultConfig(min_per_type=1)
-        return cls(scale=preset, **kwargs)
+        return cls(scale=get_preset(scale), **kwargs)
 
 
 def rng_for(seed: int, *keys: object) -> np.random.Generator:

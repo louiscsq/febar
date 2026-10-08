@@ -16,14 +16,13 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fault-rate-multiplier", type=float, default=1.0)
     p.add_argument("--no-faults", action="store_true", help="disable faults and red herrings (clean baseline)")
     p.add_argument("--no-red-herrings", action="store_true")
-    p.add_argument("--min-per-type", type=int, default=None,
-                   help="guarantee N incidents of every fault type (default: 1 for tiny, else 0)")
+    p.add_argument("--min-per-type", type=int, default=1,
+                   help="batch: guarantee at least N incidents of every fault type (0 = pure Poisson rates)")
 
 
 def _config(a: argparse.Namespace, **extra) -> GeneratorConfig:
-    min_per_type = a.min_per_type if a.min_per_type is not None else (1 if a.scale == "tiny" else 0)
     faults = FaultConfig(enabled=not a.no_faults, rate_multiplier=a.fault_rate_multiplier,
-                         red_herrings=not a.no_red_herrings, min_per_type=min_per_type)
+                         red_herrings=not a.no_red_herrings, min_per_type=a.min_per_type)
     return GeneratorConfig.for_scale(a.scale, seed=a.seed, dq=DQConfig().scaled(a.dq_scale), faults=faults, **extra)
 
 

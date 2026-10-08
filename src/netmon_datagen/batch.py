@@ -63,19 +63,19 @@ def generate_history(cfg: GeneratorConfig, out_dir: str | Path, log=print) -> di
     dq_total = 0
     for d in range(cfg.days):
         day0 = ws + np.timedelta64(d, "D")
-        day1 = day0 + np.timedelta64(1, "D")
-        logs = []
-        for c in range(24 // CHUNK_HOURS):
-            c0 = day0 + np.timedelta64(c * CHUNK_HOURS, "h")
-            ts = np.arange(c0, c0 + np.timedelta64(CHUNK_HOURS, "h"), step).astype("datetime64[s]")
-            logs += eng.period(ts, cfg.step_minutes, incidents, key=str(c0))
         rows = [r for h in range(24) for r in
                 background_alarms(topo, day0 + np.timedelta64(h, "h"), cfg.seed, eng.flappers)]
-        logs += eng.alarms(rows + inc_alarms.get(d, []), key=str(day0))
-        for feed in FEEDS:
-            df = eng.spool.release(feed, day1)
-            written[feed] += len(df)
-            write_partitioned(df, out, feed, fmt, stem=f"part-{d:05d}")
+        logs = eng.alarms(rows + inc_alarms.get(d, []), key=str(day0))
+        for c in range(24 // CHUNK_HOURS):
+            c0 = day0 + np.timedelta64(c * CHUNK_HOURS, "h")
+            c1 = c0 + np.timedelta64(CHUNK_HOURS, "h")
+            ts = np.arange(c0, c1, step).astype("datetime64[s]")
+            logs += eng.period(ts, cfg.step_minutes, incidents, key=str(c0))
+            # Release whatever has been emitted by the end of this chunk (bounded memory per write).
+            for feed in FEEDS:
+                df = eng.spool.release(feed, c1)
+                written[feed] += len(df)
+                write_partitioned(df, out, feed, fmt, stem=f"part-{d:05d}-{c}")
         dq_total += _write_dq(logs, out, fmt, str(day0)[:10], f"part-{d:05d}")
         log(f"  day {d + 1}/{cfg.days} {str(day0)[:10]} written ({time.time() - t_wall:.1f}s)")
 

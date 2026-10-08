@@ -10,6 +10,7 @@ Files are written atomically (dot-prefixed temp file + rename), so Auto Loader n
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -34,7 +35,8 @@ def _now_minute() -> np.datetime64:
 def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int = 60, interval_seconds: float = 60.0,
                max_batches: int | None = None, start: str | None = None,
                on_batch: Callable[[int, dict], None] | None = None, log=print) -> dict:
-    cfg = cfg.with_(fmt="json")
+    # Faults are drawn per simulated hour, so a per-window minimum would mean one of each type every hour.
+    cfg = cfg.with_(fmt="json", faults=dataclasses.replace(cfg.faults, min_per_type=0))
     out = Path(out_dir)
     eng = Engine(cfg)
     topo = eng.topo
