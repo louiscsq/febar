@@ -1,0 +1,136 @@
+"""Topology rollup, incident scoring and path helpers (netmon_pipeline.hierarchy / scoring / paths)."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+
+from netmon_datagen.config import get_preset
+from netmon_datagen.topology import build_topology
+from netmon_pipeline import hierarchy, paths, schemas, scoring
+from netmon_pipeline.settings import Settings
+
+
+@pytest.fixture(scope="module")
+def cells():
+    nodes = build_topology(get_preset("tiny"), 42).public_nodes()
+    return nodes[nodes.element_type == "CELL"].to_dict("records"), nodes
+
+
+def test_ancestor_columns_cover_every_level(cells):
+    cs, nodes = cells
+    chain = hierarchy.ancestors(cs[0])
+    assert [t for _e, t, _l in chain] == ["CELL", "SITE", "BACKHAUL_LINK", "AGG_ROUTER", "UPF_SGW", "AMF_MME"]
+    types = nodes.set_index("element_id")["element_type"]
+    assert all(types[e] == t for e, t, _l in chain)
+    assert hierarchy.stack_sql().startswith("stack(6, cell_id, 'CELL', 5, site_id, 'SITE', 4")
+
+
+def test_rollup_counts_descendants_and_impacted_children(cells):
+    cs, nodes = cells
+    site = cs[0]["site_id"]
+    site_cells = [c["element_id"] for c in cs if c["site_id"] == site]
+    out = hierarchy.rollup(cs, set(site_cells))
+    assert out[site]["n_desc_cells"] == len(site_cells) and out[site]["impacted_fraction"] == 1.0
+    assert out[site]["n_impacted_children"] == out[site]["n_children"] == len(site_cells)
+    bh = cs[0]["backhaul_id"]
+    assert out[bh]["n_impacted_children"] == 1
+    assert out[bh]["n_desc_cells"] == sum(c["backhaul_id"] == bh for c in cs)
+    amf = cs[0]["amf_id"]
+    assert out[amf]["n_desc_cells"] == sum(c["amf_id"] == amf for c in cs)
+    assert 0 < out[amf]["impacted_fraction"] < 1
+    # Router failure: every cell under the router impacted -> router fraction 1, UPF fraction < 1.
+    r = cs[0]["router_id"]
+    under = {c["element_id"] for c in cs if c["router_id"] == r}
+    o2 = hierarchy.rollup(cs, under)
+    assert o2[r]["impacted_fraction"] == 1.0
+    assert hierarchy.lowest_common_ancestor([c for c in cs if c["element_id"] in under]) == (r, "AGG_ROUTER") or \
+        len({c["backhaul_id"] for c in cs if c["router_id"] == r}) == 1
+
+
+def test_lowest_common_ancestor(cells):
+    cs, _ = cells
+    assert hierarchy.lowest_common_ancestor([cs[0]]) == (cs[0]["element_id"], "CELL")
+    assert hierarchy.lowest_common_ancestor([]) is None
+    other = next(c for c in cs if c["amf_id"] != cs[0]["amf_id"])
+    assert hierarchy.lowest_common_ancestor([cs[0], other]) is None  # different regions: no common root
+
+
+INC = {"incident_id": "INC-1", "root_element_id": "SITE-A", "root_element_ids": ["SITE-A", "SITE-B"],
+       "affected_element_ids": ["CELL-A1"], "affected_cell_ids": ["CELL-A1", "CELL-B1"],
+       "impact_start_s": 1000, "impact_end_s": 4000, "is_customer_impacting": True, "is_censored": False}
+
+
+def det(eid, start, avail, end=None):
+    return {"element_id": eid, "signal_start_s": start, "signal_end_s": end or start + 60, "available_s": avail}
+
+
+def test_matching_and_time_to_detect():
+    assert scoring.incident_elements(INC) == {"SITE-A", "SITE-B", "CELL-A1", "CELL-B1"}
+    dets = [det("CELL-X", 1100, 1150), det("CELL-B1", 1200, 1290), det("SITE-A", 1300, 1400),
+            det("CELL-A1", 9000, 9100)]  # last one is long after the impact
+    assert scoring.matches(dets[1], INC) and not scoring.matches(dets[0], INC) and not scoring.matches(dets[3], INC)
+    assert scoring.time_to_detect(INC, dets) == 290
+    assert scoring.time_to_detect(INC, [dets[0]]) is None
+    # A pre-impact alarm whose signal overlaps the impact counts, with TTD clipped at 0.
+    assert scoring.time_to_detect(INC, [det("SITE-A", 950, 980, end=1010)]) == 0.0
+    assert scoring.is_scored(INC) and not scoring.is_scored({**INC, "is_censored": True})
+
+
+def test_summary_and_percentiles():
+    s = scoring.summarise([60, 120, 240, 600, None])
+    assert s["n_incidents"] == 5 and s["n_detected"] == 4 and s["detected_pct"] == 80.0
+    assert s["median_ttd_s"] == 180 and s["within_sla_pct"] == 60.0
+    assert scoring.percentile([1, 2, 3, 4], 0.9) == pytest.approx(3.7)
+    assert scoring.summarise([])["within_sla_pct"] is None
+
+
+def test_rca_hit_scores_cluster_roots():
+    assert scoring.rca_hit(["SITE-B", "BH-1"], INC["root_element_ids"])  # any cluster site counts
+    assert not scoring.rca_hit(["BH-1", "SITE-B"], INC["root_element_ids"], k=1)
+    assert scoring.rca_hit(["BH-1", "SITE-B"], INC["root_element_ids"], k=3)
+
+
+def test_paths_landing_time_and_run():
+    p = "/Volumes/c/netmon_raw/landing/stream/kpis/date=2026-10-08/batch-20261008T104400-000012.json"
+    assert paths.run_name(p) == "stream"
+    assert paths.landed_at(p, 60) == datetime(2026, 10, 8, 10, 45, tzinfo=timezone.utc)
+    assert paths.landed_at(p.replace("000012", "final"), 60) is not None
+    assert paths.landed_at("/Volumes/c/s/landing/history/kpis/date=2026-09-01/part-00000-0.json", 60) is None
+    assert "INTERVAL 60 SECONDS" in paths.landed_at_sql("_source_file", 60)
+
+
+def test_stream_file_names_match_the_generator(tmp_path):
+    from netmon_datagen.config import DQConfig, GeneratorConfig
+    from netmon_datagen.stream import run_stream
+
+    cfg = GeneratorConfig.for_scale("tiny", dq=DQConfig.none())
+    run_stream(cfg, tmp_path / "landing" / "stream", interval_seconds=0, max_batches=2,
+               start="2026-10-08T10:44:00Z", log=lambda *a: None)
+    files = sorted(str(p) for p in (tmp_path / "landing" / "stream" / "kpis").rglob("*.json"))
+    # 1-minute KPIs are delivered 6-30 s after their period ends, so the first KPI file is batch 1
+    # (simulated 10:45-10:46), which lands at 10:46.
+    assert files[0].endswith("batch-20261008T104500-000001.json")
+    assert paths.landed_at(files[0], 60) == datetime(2026, 10, 8, 10, 46, tzinfo=timezone.utc)
+    assert {paths.run_name(f) for f in files} == {"stream"}
+
+
+def test_schemas_cover_generator_columns():
+    from netmon_datagen.alarms import ALARM_COLUMNS
+    from netmon_datagen.engine import KPI_COLUMNS_OUT
+    from netmon_datagen.sessions import SESSION_COLUMNS
+
+    assert schemas.columns(schemas.KPIS) == KPI_COLUMNS_OUT
+    assert schemas.columns(schemas.ALARMS) == ALARM_COLUMNS
+    assert schemas.columns(schemas.SESSIONS) == SESSION_COLUMNS
+    assert "root_element_ids" in schemas.columns(schemas.INCIDENTS)
+    assert schemas.with_corrupt_column(schemas.KPIS).endswith("_corrupt_record STRING")
+
+
+def test_settings_from_conf():
+    conf = {"netmon.catalog": "cat", "netmon.landing_root": "/Volumes/cat/raw/landing/",
+            "netmon.bronze_schema": "b", "netmon.silver_schema": "s", "netmon.gold_schema": "g",
+            "netmon.eval_schema": "e", "netmon.gov_schema": "gov", "netmon.stream_step_seconds": "60"}
+    s = Settings.from_conf(conf.__getitem__)
+    assert s.gold == "`cat`.`g`" and s.feed_path("kpis") == "/Volumes/cat/raw/landing/*/kpis/"
