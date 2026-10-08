@@ -43,7 +43,12 @@ dbutils.widgets.text("days", "30", "Days (batch only)")
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..", "src")))
+# Jobs install the package as a wheel (bundle artifact, job environment). Interactively, fall back to the
+# source tree in ../src relative to this notebook (Git folder / bundle sync).
+try:
+    import netmon_datagen  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..", "src")))
 
 from netmon_datagen.config import DQConfig, FaultConfig, GeneratorConfig
 from netmon_datagen.stream import run_stream

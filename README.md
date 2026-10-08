@@ -39,3 +39,29 @@ python -m pytest -q && ruff check .
 On Databricks, run `notebooks/01_generate_history.py` (batch) or `notebooks/02_stream_generator.py`
 (streaming). Both write to `/Volumes/<catalog>/<schema>/<volume>/...` and take their parameters from
 widgets.
+
+## Streaming pipeline and governance
+
+A Lakeflow Spark Declarative Pipeline (`pipelines/netmon/`, serverless, Python `pyspark.pipelines`)
+ingests the landing Volume with Auto Loader into bronze, validates and deduplicates it in silver (with
+expectations and a quarantine), and builds gold tables for the NOC: per-cell 1- and 5-minute health windows
+with baseline deviation, customer-impact detections with `detected_ts`, and a topology rollup that serves
+as root-cause features. A separate `netmon_eval` schema scores detections against the generator's ground
+truth (time-to-detect, % within 5 minutes). Unity Catalog governance in `governance/` adds IMSI / MSISDN
+column masks and a regional row filter. Regional NOC roles read only region-filtered views. It also adds
+NOC groups, least-privilege grants, and comments and tags.
+Everything is deployed as a Databricks Asset Bundle (`databricks.yml`, `resources/`).
+
+```bash
+databricks bundle deploy -p febar
+databricks bundle run -p febar netmon_bootstrap      # history -> functions -> pipeline -> grants and tags
+```
+
+Captured live run (1-minute stream, faults only, 26 incidents): customer impact detected for 100 % of
+faults, **88.5 % within 5 minutes** (median 141 s, p90 430 s). The true root element was localised for
+100 % of faults (88.5 % within 5 minutes). Fault precision is **60.1 % at alert level** (detections
+grouped per element per episode) and 98.2 % at detection-row level, counting red herrings and unsuppressed
+planned work as false positives.
+
+See [`docs/pipeline.md`](docs/pipeline.md) for the architecture, tables, expectations policy, latency
+budget, governance model and run book, and [`evidence/step2/`](evidence/step2/) for the captured run.
