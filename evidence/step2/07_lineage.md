@@ -1,6 +1,6 @@
 # Lineage: Volume → bronze → silver → gold
 
-Captured 2026-10-08 13:51 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 15:57 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 Captured automatically by Unity Catalog; queried from `system.access.table_lineage`.
 
@@ -19,70 +19,94 @@ SELECT coalesce(source_table_full_name, source_path) AS source, source_type,
 
 | source | source_type | target | target_type | entity_type | last_seen | n_events |
 |---|---|---|---|---|---|---|
-| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:48.334Z | 187 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:49.326Z | 244 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T12:44:36.327Z | 2 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_maintenance_windows | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:48.625Z | 12 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:48.341Z | 247 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T12:44:35.276Z | 2 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_topology_edges | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:49.854Z | 13 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_topology_nodes | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:50.666Z | 13 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:48.354Z | 249 |
-| telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | PIPELINE | 2026-10-08T12:44:26.722Z | 2 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_eval.bronze_gt_incidents | STREAMING_TABLE | PIPELINE | 2026-10-08T13:26:48.347Z | 17 |
-| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.991Z | 273 |
-| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.991Z | 273 |
-| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.991Z | 273 |
-| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.991Z | 273 |
-| telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_precision | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.440Z | 6 |
-| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_detection_precision | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.440Z | 6 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:17.016Z | 7 |
-| telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:17.016Z | 7 |
-| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:17.016Z | 7 |
-| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:17.016Z | 7 |
-| telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:17.016Z | 7 |
-| telco_netmon_febar_catalog.netmon_eval.bronze_gt_incidents | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:26:56.551Z | 13 |
-| telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.477Z | 7 |
-| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.477Z | 7 |
-| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_rca_baseline | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:27.034Z | 9 |
-| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_rca_baseline | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:27.034Z | 9 |
-| telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:28.669Z | 8 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_eval.netmon_pipeline_event_log | TABLE | PIPELINE | 2026-10-08T13:27:30.064Z | 179 |
-| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:09.523Z | 6 |
-| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:23:24.249Z | 149 |
-| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:23:24.249Z | 149 |
-| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:16.412Z | 147 |
-| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:16.412Z | 147 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:03.880Z | 142 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:07.299Z | 387 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T14:56:04.937Z | 1 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:08.942Z | 484 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T14:54:51.782Z | 3 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_maintenance_windows | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:08.180Z | 18 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:07.321Z | 472 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T14:54:52.605Z | 3 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_topology_edges | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:09.445Z | 17 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_bronze.bronze_topology_nodes | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:10.250Z | 17 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:07.733Z | 469 |
+| telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | PIPELINE | 2026-10-08T14:54:43.375Z | 3 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_eval.bronze_gt_incidents | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:07.288Z | 30 |
+| telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T15:02:52.225Z | 1 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:23.418Z | 429 |
+| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:23.418Z | 429 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:23.418Z | 429 |
+| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:23.418Z | 429 |
+| telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_detection_precision | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:32.100Z | 9 |
+| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_detection_precision | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:32.100Z | 9 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:24.491Z | 10 |
+| telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:24.491Z | 10 |
+| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:24.491Z | 10 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:24.491Z | 10 |
+| telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:24.491Z | 10 |
+| telco_netmon_febar_catalog.netmon_eval.bronze_gt_incidents | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T14:44:34.502Z | 14 |
+| telco_netmon_febar_catalog.netmon_eval.eval_detection_log | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:45.974Z | 10 |
+| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:45.974Z | 10 |
+| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:45.974Z | 3 |
+| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_rca_baseline | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:45.283Z | 12 |
+| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_rca_baseline | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:45.283Z | 12 |
+| telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:49.769Z | 11 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_eval.netmon_pipeline_event_log | TABLE | PIPELINE | 2026-10-08T15:26:51.128Z | 250 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:19.121Z | 9 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:24.152Z | 219 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:09:58.480Z | 1 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:24.152Z | 219 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:21.532Z | 222 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:13:43.134Z | 1 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:21.532Z | 222 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:28.101Z | 208 |
 | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:09:09.073Z | 1 |
-| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:03.880Z | 142 |
-| telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.411Z | 8 |
-| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.411Z | 8 |
-| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.411Z | 8 |
-| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:23.411Z | 8 |
-| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.308Z | 277 |
-| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T12:49:11.837Z | 1 |
-| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.308Z | 277 |
-| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.308Z | 277 |
-| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:17.308Z | 277 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:05.878Z | 175 |
-| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:05.878Z | 175 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:02.877Z | 182 |
-| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:02.877Z | 182 |
-| NULL | NULL | telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T12:44:19.873Z | 1 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_maintenance_windows | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:26:56.500Z | 13 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:06.407Z | 349 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:05.172Z | 409 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:07.066Z | 414 |
-| telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T13:04:56.851Z | 2 |
-| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:07.066Z | 526 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:04.434Z | 200 |
-| telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T12:48:45.247Z | 1 |
-| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T13:27:04.434Z | 200 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_topology_edges | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_topology_edges | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:26:58.867Z | 10 |
-| telco_netmon_febar_catalog.netmon_bronze.bronze_topology_nodes | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T13:27:00.823Z | 12 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:28.101Z | 208 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:38.944Z | 11 |
+| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:38.944Z | 11 |
+| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:38.944Z | 11 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:26:38.944Z | 11 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:22.744Z | 432 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T15:02:53.666Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:22.744Z | 432 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:22.744Z | 432 |
+| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | STREAMING_TABLE | PIPELINE | 2026-10-08T15:26:22.744Z | 432 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_cell_health_1m | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m | VIEW | JOB | 2026-10-08T15:28:56.424Z | 1 |
+| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m | VIEW | JOB | 2026-10-08T15:28:55.622Z | 1 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_impact_detections | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | TABLE | telco_netmon_febar_catalog.netmon_noc.gold_impact_detections | VIEW | JOB | 2026-10-08T15:28:54.621Z | 1 |
+| telco_netmon_febar_catalog.netmon_silver.silver_alarms | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_alarms | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_kpis | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_kpis | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_sessions | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_sessions | VIEW | NULL | 2026-10-08T15:36:31.381Z | 4 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_edges | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_topology_edges | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_topology_edges | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | TABLE | telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes | VIEW | NULL | 2026-10-08T15:36:31.381Z | 2 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:30.081Z | 279 |
+| telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T15:03:26.304Z | 1 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_alarms | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:30.081Z | 279 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:27.270Z | 269 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_kpis | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:27.270Z | 269 |
+| NULL | NULL | telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:01:46.608Z | 3 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_maintenance_windows | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T15:25:19.568Z | 15 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_alarms | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:30.593Z | 627 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:29.330Z | 712 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:31.294Z | 712 |
+| telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T15:05:29.775Z | 4 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_quarantine | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:31.294Z | 846 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:28.766Z | 299 |
+| telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T15:04:19.289Z | 2 |
+| telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | telco_netmon_febar_catalog.netmon_silver.silver_sessions | STREAMING_TABLE | PIPELINE | 2026-10-08T15:25:28.766Z | 299 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_topology_edges | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_topology_edges | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T14:44:34.419Z | 11 |
+| telco_netmon_febar_catalog.netmon_bronze.bronze_topology_nodes | STREAMING_TABLE | telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | MATERIALIZED_VIEW | PIPELINE | 2026-10-08T14:44:36.306Z | 13 |
 
-_62 row(s)_
+_86 row(s)_
 
 ## Volume → bronze
 
@@ -107,13 +131,13 @@ SELECT 'bronze_kpis' AS table_name, regexp_replace(_source_file, '/date=.*', '/'
 | table_name | volume_dir | n |
 |---|---|---|
 | bronze_alarms | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/history/alarms/ | 16730 |
-| bronze_alarms | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/alarms/ | 2929 |
+| bronze_alarms | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/alarms/ | 3711 |
 | bronze_gt_incidents | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/history/ground_truth/incidents/ | 23 |
-| bronze_gt_incidents | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/ground_truth/incidents/ | 35 |
+| bronze_gt_incidents | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/ground_truth/incidents/ | 56 |
 | bronze_kpis | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/history/kpis/ | 1932342 |
-| bronze_kpis | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/kpis/ | 340638 |
+| bronze_kpis | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/kpis/ | 512701 |
 | bronze_sessions | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/history/sessions/ | 1314879 |
-| bronze_sessions | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/sessions/ | 5101 |
+| bronze_sessions | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/sessions/ | 8273 |
 | bronze_topology_nodes | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/history/topology_nodes/ | 1887 |
 | bronze_topology_nodes | /Volumes/telco_netmon_febar_catalog/netmon_raw/landing/stream/topology_nodes/ | 1887 |
 

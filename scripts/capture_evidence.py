@@ -304,7 +304,7 @@ def governance(r: Runner, demo: bool) -> None:
         SELECT table_schema, table_name, filter_name, target_columns FROM {CAT}.information_schema.row_filters
         ORDER BY ALL""")
     d.query("Region-filtered serving views (netmon_noc)", f"""
-        SELECT table_name, left(regexp_replace(view_definition, '\\s+', ' '), 170) AS definition
+        SELECT table_name, left(replace(replace(view_definition, char(10), ' '), char(13), ' '), 170) AS definition
         FROM {CAT}.information_schema.views WHERE table_schema = 'netmon_noc' ORDER BY 1""")
     d.query("Policy function definitions", f"""
         SELECT routine_name, routine_definition FROM {CAT}.information_schema.routines

@@ -48,13 +48,19 @@ expectations and a quarantine), and builds gold tables for the NOC: per-cell 1- 
 with baseline deviation, customer-impact detections with `detected_ts`, and a topology rollup that serves
 as root-cause features. A separate `netmon_eval` schema scores detections against the generator's ground
 truth (time-to-detect, % within 5 minutes). Unity Catalog governance in `governance/` adds IMSI / MSISDN
-column masks, a regional row filter, NOC groups, least-privilege grants, and comments and tags.
+column masks and a regional row filter. Regional NOC roles read only region-filtered views. It also adds
+NOC groups, least-privilege grants, and comments and tags.
 Everything is deployed as a Databricks Asset Bundle (`databricks.yml`, `resources/`).
 
 ```bash
 databricks bundle deploy -p febar
 databricks bundle run -p febar netmon_bootstrap      # history -> functions -> pipeline -> grants and tags
 ```
+
+Captured live run (1-minute stream, faults only, 31 incidents): customer impact detected for 100 % of
+faults, **90.3 % within 5 minutes** (median 112 s, p90 265 s). The true root element was localised for
+96.8 % of faults (87.1 % within 5 minutes). Fault-detection precision is 99.8 %, counting red herrings and
+unsuppressed planned work as false positives.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the architecture, tables, expectations policy, latency
 budget, governance model and run book, and [`evidence/step2/`](evidence/step2/) for the captured run.

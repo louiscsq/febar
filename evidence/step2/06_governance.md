@@ -1,8 +1,8 @@
-# Unity Catalog governance: masks, row filters, grants, tags
+# Unity Catalog governance: masks, row filters, roles, grants, tags
 
-Captured 2026-10-08 13:31 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 15:32 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
-Policies are declared on the pipeline tables and backed by the functions in `governance/sql/01_functions.sql`; grants and tags by `02_grants.sql` / `03_comments_tags.sql`.
+Masks and row filters are declared on the pipeline tables (`silver_sessions`, `gold_impact_detections`) and backed by `governance/sql/01_functions.sql`. Regional NOC roles read only the region-filtered views in `netmon_noc` (`02_noc_views.sql`); `noc_national` also reads gold and the operational silver tables; `pii_privileged` is granted nothing (`03_grants_*.sql`). Tags: `04_comments_tags.sql`.
 
 ## Column masks
 
@@ -32,6 +32,30 @@ SELECT table_schema, table_name, filter_name, target_columns FROM telco_netmon_f
 
 _2 row(s)_
 
+## Region-filtered serving views (netmon_noc)
+
+```sql
+SELECT table_name, left(replace(replace(view_definition, char(10), ' '), char(13), ' '), 170) AS definition
+        FROM telco_netmon_febar_catalog.information_schema.views WHERE table_schema = 'netmon_noc' ORDER BY 1
+```
+
+| table_name | definition |
+|---|---|
+| gold_cell_baseline | SELECT b.*, n.region_code FROM `telco_netmon_febar_catalog`.`netmon_gold`.gold_cell_baseline b JOIN `telco_netmon_febar… |
+| gold_cell_health_1m | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_gold`.gold_cell_health_1m WHERE `telco_netmon_febar_catalog`.`netmon… |
+| gold_cell_health_5m | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_gold`.gold_cell_health_5m WHERE `telco_netmon_febar_catalog`.`netmon… |
+| gold_cell_sessions_5m | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_gold`.gold_cell_sessions_5m WHERE `telco_netmon_febar_catalog`.`netm… |
+| gold_element_impact_5m | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_gold`.gold_element_impact_5m WHERE `telco_netmon_febar_catalog`.`net… |
+| gold_impact_detections | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_gold`.gold_impact_detections WHERE `telco_netmon_febar_catalog`.`net… |
+| silver_alarms | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_silver`.silver_alarms WHERE `telco_netmon_febar_catalog`.`netmon_gov… |
+| silver_kpis | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_silver`.silver_kpis WHERE `telco_netmon_febar_catalog`.`netmon_gov`.… |
+| silver_maintenance_windows | SELECT m.*, n.region_code FROM `telco_netmon_febar_catalog`.`netmon_silver`.silver_maintenance_windows m JOIN `telco_ne… |
+| silver_sessions | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_silver`.silver_sessions WHERE `telco_netmon_febar_catalog`.`netmon_g… |
+| silver_topology_edges | SELECT e.*, n.region_code FROM `telco_netmon_febar_catalog`.`netmon_silver`.silver_topology_edges e JOIN `telco_netmon_… |
+| silver_topology_nodes | SELECT * FROM `telco_netmon_febar_catalog`.`netmon_silver`.silver_topology_nodes WHERE `telco_netmon_febar_catalog`.`ne… |
+
+_12 row(s)_
+
 ## Policy function definitions
 
 ```sql
@@ -48,112 +72,151 @@ SELECT routine_name, routine_definition FROM telco_netmon_febar_catalog.informat
 
 _4 row(s)_
 
-## Grants (catalog, gold schema, silver_sessions)
+## Workspace-local groups, roles and members
 
-Grantees are the persona service principals' application ids (UC rejects the workspace-local groups; see docs/pipeline.md). Mapping: see the persona table below.
+| group | role | members |
+|---|---|---|
+| `noc_national` | national NOC | netmon-pii-officer, netmon-noc-national, Louis Chen |
+| `noc_region_act` | regional NOC | — |
+| `noc_region_nql` | regional NOC | — |
+| `noc_region_nsw` | regional NOC | netmon-noc-nsw-analyst |
+| `noc_region_nt` | regional NOC | — |
+| `noc_region_pil` | regional NOC | — |
+| `noc_region_qld` | regional NOC | — |
+| `noc_region_sa` | regional NOC | — |
+| `noc_region_tas` | regional NOC | — |
+| `noc_region_vic` | regional NOC | — |
+| `noc_region_wa` | regional NOC | netmon-noc-wa-analyst |
+| `pii_privileged` | unmask only (no grants) | netmon-pii-officer, netmon-pii-only |
+
+## Privileges held by each persona (grantees; every netmon securable)
+
+`netmon-pii-only` (member of `pii_privileged` only) has no privileges at all; the regional analysts hold only the `netmon_noc` schema (plus USE CATALOG and the filter function).
 
 ```sql
-SELECT grantee, privilege_type, 'CATALOG' AS object, catalog_name AS name
-        FROM telco_netmon_febar_catalog.information_schema.catalog_privileges WHERE grantee NOT LIKE '%@%'
-        UNION ALL
-        SELECT grantee, privilege_type, 'SCHEMA', schema_name FROM telco_netmon_febar_catalog.information_schema.schema_privileges
-        WHERE schema_name LIKE 'netmon%' AND grantee NOT LIKE '%@%'
-        UNION ALL
-        SELECT grantee, privilege_type, 'TABLE', table_name FROM telco_netmon_febar_catalog.information_schema.table_privileges
-        WHERE table_schema = 'netmon_silver' AND grantee NOT LIKE '%@%'
-        ORDER BY 3, 4, 1, 2
+WITH p AS (
+          SELECT grantee, 'CATALOG' AS kind, catalog_name AS object, privilege_type
+          FROM telco_netmon_febar_catalog.information_schema.catalog_privileges
+          UNION ALL SELECT grantee, 'SCHEMA', schema_name, privilege_type FROM telco_netmon_febar_catalog.information_schema.schema_privileges
+          UNION ALL SELECT grantee, 'TABLE', concat(table_schema, '.', table_name), privilege_type
+            FROM telco_netmon_febar_catalog.information_schema.table_privileges
+          UNION ALL SELECT grantee, 'FUNCTION', concat(routine_schema, '.', routine_name), privilege_type
+            FROM telco_netmon_febar_catalog.information_schema.routine_privileges)
+        SELECT persona, kind, object, array_sort(collect_set(privilege_type)) AS privileges FROM (
+          SELECT CASE a.id WHEN '8855855c-202f-4260-bf4f-85f2ac215524' THEN 'netmon-pii-officer' WHEN 'fd43c8c6-65f4-433d-962f-6abb3e5bd88b' THEN 'netmon-pii-only' WHEN 'bb41b303-d6b4-4dd0-b524-b25e2f3a3433' THEN 'netmon-noc-nsw-analyst' WHEN '227a0d30-fe32-47f9-867f-9c91c13db70a' THEN 'netmon-noc-national' WHEN '2ee944da-a522-49e2-8600-6c72e454ce2c' THEN 'netmon-noc-wa-analyst' END AS persona, p.* FROM (SELECT explode(array('8855855c-202f-4260-bf4f-85f2ac215524', 'fd43c8c6-65f4-433d-962f-6abb3e5bd88b', 'bb41b303-d6b4-4dd0-b524-b25e2f3a3433', '227a0d30-fe32-47f9-867f-9c91c13db70a', '2ee944da-a522-49e2-8600-6c72e454ce2c')) AS id) a
+          LEFT JOIN p ON p.grantee = a.id)
+        GROUP BY ALL ORDER BY persona, kind, object
 ```
 
-| grantee | privilege_type | object | name |
+| persona | kind | object | privileges |
 |---|---|---|---|
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | USE_CATALOG | CATALOG | telco_netmon_febar_catalog |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | USE_CATALOG | CATALOG | telco_netmon_febar_catalog |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | USE_CATALOG | CATALOG | telco_netmon_febar_catalog |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | CATALOG | telco_netmon_febar_catalog |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | CATALOG | telco_netmon_febar_catalog |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | USE_CATALOG | CATALOG | telco_netmon_febar_catalog |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | SCHEMA | netmon_bronze |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | SCHEMA | netmon_bronze |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | SCHEMA | netmon_eval |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | SCHEMA | netmon_eval |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | SCHEMA | netmon_gold |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | USE_SCHEMA | SCHEMA | netmon_gold |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | SCHEMA | netmon_gold |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | USE_SCHEMA | SCHEMA | netmon_gold |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | SCHEMA | netmon_gold |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | USE_SCHEMA | SCHEMA | netmon_gold |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | SCHEMA | netmon_gold |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | SCHEMA | netmon_gold |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | SCHEMA | netmon_gold |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | USE_SCHEMA | SCHEMA | netmon_gold |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | USE_SCHEMA | SCHEMA | netmon_gov |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | USE_SCHEMA | SCHEMA | netmon_gov |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | USE_SCHEMA | SCHEMA | netmon_gov |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | SCHEMA | netmon_gov |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | SCHEMA | netmon_gov |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | USE_SCHEMA | SCHEMA | netmon_gov |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | SCHEMA | netmon_raw |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | SCHEMA | netmon_raw |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | USE_SCHEMA | SCHEMA | netmon_silver |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | USE_SCHEMA | SCHEMA | netmon_silver |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | USE_SCHEMA | SCHEMA | netmon_silver |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | SCHEMA | netmon_silver |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | SCHEMA | netmon_silver |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | USE_SCHEMA | SCHEMA | netmon_silver |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_alarms_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_alarms_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_kpis_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_kpis_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_maintenance_windows_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_maintenance_windows_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_quarantine_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_quarantine_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_sessions_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_sessions_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_topology_edges_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_topology_edges_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_topology_nodes_1 |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_topology_nodes_1 |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | TABLE | silver_alarms |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | TABLE | silver_alarms |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | TABLE | silver_alarms |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_alarms |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_alarms |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | TABLE | silver_alarms |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | TABLE | silver_kpis |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | TABLE | silver_kpis |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | TABLE | silver_kpis |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_kpis |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_kpis |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | TABLE | silver_kpis |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | TABLE | silver_maintenance_windows |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | TABLE | silver_maintenance_windows |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | TABLE | silver_maintenance_windows |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_maintenance_windows |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_maintenance_windows |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | TABLE | silver_maintenance_windows |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_quarantine |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_quarantine |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | TABLE | silver_sessions |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | TABLE | silver_sessions |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | TABLE | silver_sessions |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_sessions |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_sessions |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | TABLE | silver_sessions |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | TABLE | silver_topology_edges |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | TABLE | silver_topology_edges |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | TABLE | silver_topology_edges |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_topology_edges |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_topology_edges |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | TABLE | silver_topology_edges |
-| 227a0d30-fe32-47f9-867f-9c91c13db70a | SELECT | TABLE | silver_topology_nodes |
-| 2ee944da-a522-49e2-8600-6c72e454ce2c | SELECT | TABLE | silver_topology_nodes |
-| 8855855c-202f-4260-bf4f-85f2ac215524 | SELECT | TABLE | silver_topology_nodes |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | ALL_PRIVILEGES | TABLE | silver_topology_nodes |
-| aec5be3d-de3c-404c-8e60-feed0f265fd3 | MANAGE | TABLE | silver_topology_nodes |
-| bb41b303-d6b4-4dd0-b524-b25e2f3a3433 | SELECT | TABLE | silver_topology_nodes |
+| netmon-noc-national | CATALOG | telco_netmon_febar_catalog | ["USE_CATALOG"] |
+| netmon-noc-national | FUNCTION | netmon_gov.region_filter | ["EXECUTE"] |
+| netmon-noc-national | SCHEMA | netmon_gold | ["SELECT","USE_SCHEMA"] |
+| netmon-noc-national | SCHEMA | netmon_gov | ["USE_SCHEMA"] |
+| netmon-noc-national | SCHEMA | netmon_noc | ["SELECT","USE_SCHEMA"] |
+| netmon-noc-national | SCHEMA | netmon_silver | ["USE_SCHEMA"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_sessions_5m_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_element_impact_5m_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_impact_detections_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_cell_baseline | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_cell_health_1m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_cell_health_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_cell_sessions_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_element_impact_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_impact_detections | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.gold_cell_baseline | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.gold_cell_health_1m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.gold_cell_health_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.gold_cell_sessions_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.gold_element_impact_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.gold_impact_detections | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.silver_alarms | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.silver_kpis | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.silver_maintenance_windows | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.silver_sessions | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.silver_topology_edges | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_noc.silver_topology_nodes | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_silver.silver_alarms | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_silver.silver_kpis | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_silver.silver_maintenance_windows | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_silver.silver_sessions | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_silver.silver_topology_edges | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_silver.silver_topology_nodes | ["SELECT"] |
+| netmon-noc-nsw-analyst | CATALOG | telco_netmon_febar_catalog | ["USE_CATALOG"] |
+| netmon-noc-nsw-analyst | FUNCTION | netmon_gov.region_filter | ["EXECUTE"] |
+| netmon-noc-nsw-analyst | SCHEMA | netmon_gov | ["USE_SCHEMA"] |
+| netmon-noc-nsw-analyst | SCHEMA | netmon_noc | ["SELECT","USE_SCHEMA"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.gold_cell_baseline | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.gold_cell_health_1m | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.gold_cell_health_5m | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.gold_cell_sessions_5m | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.gold_element_impact_5m | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.gold_impact_detections | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.silver_alarms | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.silver_kpis | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.silver_maintenance_windows | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.silver_sessions | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.silver_topology_edges | ["SELECT"] |
+| netmon-noc-nsw-analyst | TABLE | netmon_noc.silver_topology_nodes | ["SELECT"] |
+| netmon-noc-wa-analyst | CATALOG | telco_netmon_febar_catalog | ["USE_CATALOG"] |
+| netmon-noc-wa-analyst | FUNCTION | netmon_gov.region_filter | ["EXECUTE"] |
+| netmon-noc-wa-analyst | SCHEMA | netmon_gov | ["USE_SCHEMA"] |
+| netmon-noc-wa-analyst | SCHEMA | netmon_noc | ["SELECT","USE_SCHEMA"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.gold_cell_baseline | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.gold_cell_health_1m | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.gold_cell_health_5m | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.gold_cell_sessions_5m | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.gold_element_impact_5m | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.gold_impact_detections | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.silver_alarms | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.silver_kpis | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.silver_maintenance_windows | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.silver_sessions | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.silver_topology_edges | ["SELECT"] |
+| netmon-noc-wa-analyst | TABLE | netmon_noc.silver_topology_nodes | ["SELECT"] |
+| netmon-pii-officer | CATALOG | telco_netmon_febar_catalog | ["USE_CATALOG"] |
+| netmon-pii-officer | FUNCTION | netmon_gov.region_filter | ["EXECUTE"] |
+| netmon-pii-officer | SCHEMA | netmon_gold | ["SELECT","USE_SCHEMA"] |
+| netmon-pii-officer | SCHEMA | netmon_gov | ["USE_SCHEMA"] |
+| netmon-pii-officer | SCHEMA | netmon_noc | ["SELECT","USE_SCHEMA"] |
+| netmon-pii-officer | SCHEMA | netmon_silver | ["USE_SCHEMA"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_sessions_5m_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_element_impact_5m_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_impact_detections_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_cell_baseline | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_cell_health_1m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_cell_health_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_cell_sessions_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_element_impact_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_impact_detections | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.gold_cell_baseline | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.gold_cell_health_1m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.gold_cell_health_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.gold_cell_sessions_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.gold_element_impact_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.gold_impact_detections | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.silver_alarms | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.silver_kpis | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.silver_maintenance_windows | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.silver_sessions | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.silver_topology_edges | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_noc.silver_topology_nodes | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_silver.silver_alarms | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_silver.silver_kpis | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_silver.silver_maintenance_windows | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_silver.silver_sessions | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_silver.silver_topology_edges | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_silver.silver_topology_nodes | ["SELECT"] |
+| netmon-pii-only | NULL | NULL | [] |
 
-_86 row(s)_
+_105 row(s)_
 
 ## Tags: schemas and tables
 
@@ -176,6 +239,10 @@ SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM telco_
 | schema | netmon_gold | contains_pii | false |
 | schema | netmon_gold | domain | operations |
 | schema | netmon_gold | layer | gold |
+| schema | netmon_noc | consumer | regional_noc |
+| schema | netmon_noc | domain | operations |
+| schema | netmon_noc | netmon_layer | serving |
+| schema | netmon_noc | row_filter | by_region |
 | schema | netmon_raw | domain | operations |
 | schema | netmon_raw | netmon_layer | landing |
 | schema | netmon_silver | contains_pii | true |
@@ -230,7 +297,7 @@ SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM telco_
 | table | netmon_silver.silver_topology_nodes | domain | operations |
 | table | netmon_silver.silver_topology_nodes | netmon_domain | network_inventory |
 
-_62 row(s)_
+_66 row(s)_
 
 ## Tags: PII columns
 
@@ -257,11 +324,11 @@ SELECT schema_name, table_name, column_name, tag_name, tag_value FROM telco_netm
 
 _13 row(s)_
 
-## Table and column comments (key tables)
+## Table comments (key tables)
 
 ```sql
 SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon_febar_catalog.information_schema.tables
-        WHERE table_schema IN ('netmon_silver', 'netmon_gold', 'netmon_eval') ORDER BY 1, 2
+        WHERE table_schema IN ('netmon_silver', 'netmon_gold', 'netmon_eval', 'netmon_noc') ORDER BY 1, 2
 ```
 
 | table_schema | table_name | comment |
@@ -269,50 +336,62 @@ SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_bronze_gt_dq_injections_1 | GROUND TRUTH audit log of every injected data-quality defect. Evaluation only. |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_bronze_gt_incidents_1 | GROUND TRUTH incident labels as written by the generator. Evaluation only: never a feature source. |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_detection_log_1 | Unfiltered copy of the impact detections for offline scoring (gold_impact_detections is row-filtered for NOC users). Sa… |
-| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_detection_precision_1 | Share of detections explained by any ground-truth event (incl. red herrings, planned work and censored incidents), per … |
+| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_detection_precision_1 | Fault-detection precision per source run and signal source. Each detection is labelled by the ground truth it overlaps,… |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_dq_capture_1 | Data-quality defects injected by the generator (ground truth) vs how the pipeline handled them: quarantined (malformed/… |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_gt_incidents_1 | GROUND TRUTH incidents, typed (UTC), one row per (source_run, incident_id). Labels only. |
-| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_incident_detection_1 | Per scored incident (customer-impacting, not censored): first matching detection, time-to-detect (ttd_s, from impact_st… |
+| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_incident_detection_1 | Per scored incident (customer-impacting, not censored), two separate metrics. (a) impact detection: first detection on … |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_rca_baseline_1 | Topology-heuristic RCA baseline for the later ML model: in the incident's region and first 15 minutes of impact, rank g… |
-| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_ttd_summary_1 | Time-to-detect summary per source run (history = 15-min ROP backfill, stream = 1-min live feed), overall, per event cla… |
+| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_ttd_summary_1 | Per source run (history = 15-min ROP backfill, stream = 1-min live feed), per event class (fault first) and fault type:… |
 | netmon_eval | bronze_gt_dq_injections | GROUND TRUTH audit log of every injected data-quality defect. Evaluation only. |
 | netmon_eval | bronze_gt_incidents | GROUND TRUTH incident labels as written by the generator. Evaluation only: never a feature source. |
 | netmon_eval | eval_detection_log | Unfiltered copy of the impact detections for offline scoring (gold_impact_detections is row-filtered for NOC users). Sa… |
-| netmon_eval | eval_detection_precision | Share of detections explained by any ground-truth event (incl. red herrings, planned work and censored incidents), per … |
+| netmon_eval | eval_detection_precision | Fault-detection precision per source run and signal source. Each detection is labelled by the ground truth it overlaps,… |
 | netmon_eval | eval_dq_capture | Data-quality defects injected by the generator (ground truth) vs how the pipeline handled them: quarantined (malformed/… |
 | netmon_eval | eval_gt_incidents | GROUND TRUTH incidents, typed (UTC), one row per (source_run, incident_id). Labels only. |
-| netmon_eval | eval_incident_detection | Per scored incident (customer-impacting, not censored): first matching detection, time-to-detect (ttd_s, from impact_st… |
+| netmon_eval | eval_incident_detection | Per scored incident (customer-impacting, not censored), two separate metrics. (a) impact detection: first detection on … |
 | netmon_eval | eval_rca_baseline | Topology-heuristic RCA baseline for the later ML model: in the incident's region and first 15 minutes of impact, rank g… |
-| netmon_eval | eval_ttd_summary | Time-to-detect summary per source run (history = 15-min ROP backfill, stream = 1-min live feed), overall, per event cla… |
+| netmon_eval | eval_ttd_summary | Per source run (history = 15-min ROP backfill, stream = 1-min live feed), per event class (fault first) and fault type:… |
 | netmon_eval | netmon_pipeline_event_log | NULL |
-| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 days strictly before valid_date. Join o… |
+| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 local days strictly before valid_date. … |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | Per-cell 1-minute KPI windows (event time, UTC) with baseline means, z-scores, fired rules and is_degraded. Append-only… |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | Per-cell 5-minute KPI windows with baseline deviation. Feeds the topology rollup and ML features. |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_sessions_5m_1 | Per-cell 5-minute session outcomes by session end time: setup failures, drops, no-service and approximate distinct subs… |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_element_impact_5m_1 | Topology rollup per element per 5-min window: impacted (degraded or silent) descendant cells, impacted children, parent… |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_impact_detections_1 | Customer-impact detections per cell (KPI rules vs baseline) or element (element-down alarms), with detected_ts (wall cl… |
-| netmon_gold | gold_cell_baseline | Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 days strictly before valid_date. Join o… |
+| netmon_gold | gold_cell_baseline | Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 local days strictly before valid_date. … |
 | netmon_gold | gold_cell_health_1m | Per-cell 1-minute KPI windows (event time, UTC) with baseline means, z-scores, fired rules and is_degraded. Append-only… |
 | netmon_gold | gold_cell_health_5m | Per-cell 5-minute KPI windows with baseline deviation. Feeds the topology rollup and ML features. |
 | netmon_gold | gold_cell_sessions_5m | Per-cell 5-minute session outcomes by session end time: setup failures, drops, no-service and approximate distinct subs… |
 | netmon_gold | gold_element_impact_5m | Topology rollup per element per 5-min window: impacted (degraded or silent) descendant cells, impacted children, parent… |
 | netmon_gold | gold_impact_detections | Customer-impact detections per cell (KPI rules vs baseline) or element (element-down alarms), with detected_ts (wall cl… |
+| netmon_noc | gold_cell_baseline | Region-filtered cell baseline |
+| netmon_noc | gold_cell_health_1m | Region-filtered 1-minute cell health |
+| netmon_noc | gold_cell_health_5m | Region-filtered 5-minute cell health |
+| netmon_noc | gold_cell_sessions_5m | Region-filtered per-cell session outcomes |
+| netmon_noc | gold_element_impact_5m | Region-filtered topology rollup |
+| netmon_noc | gold_impact_detections | gold_impact_detections: row filter of the table applies |
+| netmon_noc | silver_alarms | Region-filtered silver_alarms |
+| netmon_noc | silver_kpis | Region-filtered silver_kpis |
+| netmon_noc | silver_maintenance_windows | Region-filtered change calendar |
+| netmon_noc | silver_sessions | silver_sessions: row filter and IMSI/MSISDN masks of the table apply |
+| netmon_noc | silver_topology_edges | Region-filtered topology edges (region of the child element) |
+| netmon_noc | silver_topology_nodes | Region-filtered network inventory |
 | netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_alarms_1 | Validated alarm RAISE/CLEAR events with the element's region and ancestors. is_service_down marks element-down alarms t… |
-| netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_kpis_1 | Validated per-cell KPI records: typed, UTC timestamps plus local time from the cell's IANA zone, deduplicated on record… |
+| netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_kpis_1 | Validated per-cell KPI records: typed, UTC timestamps plus local time / local date from the cell's IANA zone, deduplica… |
 | netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_maintenance_windows_1 | Approved change windows (UTC). Operational data the NOC uses to suppress planned work. |
 | netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_quarantine_1 | Rows rejected by silver expectations (malformed, null, out-of-range, unknown element) and unparseable JSON lines, with … |
 | netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_sessions_1 | Validated sampled xDR sessions. IMSI/MSISDN are column-masked and rows are filtered by the reader's regional NOC group.… |
 | netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_topology_edges_1 | Directed topology edges, upstream -> downstream. |
 | netmon_silver | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_silver_topology_nodes_1 | Network inventory (one row per element, latest snapshot). Ancestor columns (amf_id .. site_id) include the element itse… |
 | netmon_silver | silver_alarms | Validated alarm RAISE/CLEAR events with the element's region and ancestors. is_service_down marks element-down alarms t… |
-| netmon_silver | silver_kpis | Validated per-cell KPI records: typed, UTC timestamps plus local time from the cell's IANA zone, deduplicated on record… |
+| netmon_silver | silver_kpis | Validated per-cell KPI records: typed, UTC timestamps plus local time / local date from the cell's IANA zone, deduplica… |
 | netmon_silver | silver_maintenance_windows | Approved change windows (UTC). Operational data the NOC uses to suppress planned work. |
 | netmon_silver | silver_quarantine | Rows rejected by silver expectations (malformed, null, out-of-range, unknown element) and unparseable JSON lines, with … |
 | netmon_silver | silver_sessions | Validated sampled xDR sessions. IMSI/MSISDN are column-masked and rows are filtered by the reader's regional NOC group.… |
 | netmon_silver | silver_topology_edges | Directed topology edges, upstream -> downstream. |
 | netmon_silver | silver_topology_nodes | Network inventory (one row per element, latest snapshot). Ancestor columns (amf_id .. site_id) include the element itse… |
 
-_45 row(s)_
+_57 row(s)_
 
 ## Column comments on silver_sessions
 
@@ -336,33 +415,7 @@ SELECT column_name, data_type, comment FROM telco_netmon_febar_catalog.informati
 
 _9 row(s)_
 
-## Workspace-local groups and members
-
-| group | members |
-|---|---|
-| `noc_national` | netmon-pii-officer, netmon-noc-national, Louis Chen |
-| `noc_region_act` | — |
-| `noc_region_nql` | — |
-| `noc_region_nsw` | netmon-noc-nsw-analyst |
-| `noc_region_nt` | — |
-| `noc_region_pil` | — |
-| `noc_region_qld` | — |
-| `noc_region_sa` | — |
-| `noc_region_tas` | — |
-| `noc_region_vic` | — |
-| `noc_region_wa` | netmon-noc-wa-analyst |
-| `pii_privileged` | netmon-pii-officer |
-
-## Persona service principals (grantees)
-
-| application id | display name |
-|---|---|
-| `227a0d30-fe32-47f9-867f-9c91c13db70a` | netmon-noc-national |
-| `bb41b303-d6b4-4dd0-b524-b25e2f3a3433` | netmon-noc-nsw-analyst |
-| `2ee944da-a522-49e2-8600-6c72e454ce2c` | netmon-noc-wa-analyst |
-| `8855855c-202f-4260-bf4f-85f2ac215524` | netmon-pii-officer |
-
-## Current principal (capturing user)
+## State 1 - noc_national (capturing user): principal
 
 ```sql
 SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
@@ -376,11 +429,61 @@ SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
 
 _1 row(s)_
 
-## Masked output for a non-privileged reader (capturing user is not in pii_privileged)
+## State 1 - noc_national (capturing user): rows visible in every object a regional role is granted
 
 ```sql
-SELECT record_id, imsi, msisdn, region_code, outcome FROM telco_netmon_febar_catalog.netmon_silver.silver_sessions
-        ORDER BY record_id LIMIT 5
+SELECT 'silver_kpis' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_kpis
+UNION ALL SELECT 'silver_alarms' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_alarms
+UNION ALL SELECT 'silver_sessions' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+UNION ALL SELECT 'silver_topology_nodes' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes
+UNION ALL SELECT 'silver_topology_edges' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_edges
+UNION ALL SELECT 'silver_maintenance_windows' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows
+UNION ALL SELECT 'gold_cell_baseline' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline
+UNION ALL SELECT 'gold_cell_health_1m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_1m
+UNION ALL SELECT 'gold_cell_health_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m
+UNION ALL SELECT 'gold_impact_detections' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_impact_detections
+UNION ALL SELECT 'gold_element_impact_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m
+UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m
+```
+
+| netmon_noc_view | visible_rows | regions |
+|---|---|---|
+| silver_kpis | 2410993 | NQL,NSW,VIC,WA |
+| silver_alarms | 20155 | NQL,NSW,VIC,WA |
+| silver_sessions | 1304712 | NQL,NSW,VIC,WA |
+| silver_topology_nodes | 1887 | NQL,NSW,VIC,WA |
+| silver_topology_edges | 1883 | NQL,NSW,VIC,WA |
+| silver_maintenance_windows | 6 | NQL,NSW,VIC,WA |
+| gold_cell_baseline | 1016375 | NQL,NSW,VIC,WA |
+| gold_cell_health_1m | 2401794 | NQL,NSW,VIC,WA |
+| gold_cell_health_5m | 2006088 | NQL,NSW,VIC,WA |
+| gold_impact_detections | 23752 | NQL,NSW,VIC,WA |
+| gold_element_impact_5m | 87480 | NQL,NSW,VIC,WA |
+| gold_cell_sessions_5m | 1094380 | NQL,NSW,VIC,WA |
+
+_12 row(s)_
+
+## State 1 - noc_national (capturing user): IMSI / MSISDN shape (values never printed in full)
+
+```sql
+SELECT count(*) AS n_rows,
+               count_if(imsi RLIKE '^00101[0-9]{10}$') AS imsi_full_value,
+               count_if(imsi RLIKE '^00101[*]{8}[0-9]{2}$') AS imsi_masked,
+               count_if(msisdn RLIKE '^[+]999[0-9]{9}$') AS msisdn_full_value,
+               count_if(msisdn RLIKE '^[+]999[*]{6}[0-9]{3}$') AS msisdn_masked
+        FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+```
+
+| n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
+|---|---|---|---|---|
+| 1304712 | 0 | 1304712 | 0 | 1304712 |
+
+_1 row(s)_
+
+## State 1: masked sample for a NOC user outside pii_privileged
+
+```sql
+SELECT record_id, imsi, msisdn, region_code, outcome FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions ORDER BY record_id LIMIT 5
 ```
 
 | record_id | imsi | msisdn | region_code | outcome |
@@ -393,46 +496,7 @@ SELECT record_id, imsi, msisdn, region_code, outcome FROM telco_netmon_febar_cat
 
 _5 row(s)_
 
-## Mask shape check, non-privileged
-
-```sql
-SELECT count(*) AS n_rows,
-               count_if(imsi RLIKE '^00101[0-9]{10}$') AS imsi_full_value,
-               count_if(imsi RLIKE '^00101[*]{8}[0-9]{2}$') AS imsi_masked,
-               count_if(msisdn RLIKE '^[+]999[0-9]{9}$') AS msisdn_full_value,
-               count_if(msisdn RLIKE '^[+]999[*]{6}[0-9]{3}$') AS msisdn_masked
-        FROM telco_netmon_febar_catalog.netmon_silver.silver_sessions
-```
-
-| n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
-|---|---|---|---|---|
-| 1301595 | 0 | 1301595 | 0 | 1301595 |
-
-_1 row(s)_
-
-## Rows visible per region as noc_national
-
-```sql
-SELECT 'silver_sessions' AS table_name, region_code, count(*) AS visible_rows FROM telco_netmon_febar_catalog.netmon_silver.silver_sessions GROUP BY 2
-        UNION ALL
-        SELECT 'gold_impact_detections', region_code, count(*) FROM telco_netmon_febar_catalog.netmon_gold.gold_impact_detections GROUP BY 2
-        ORDER BY 1, 2
-```
-
-| table_name | region_code | visible_rows |
-|---|---|---|
-| gold_impact_detections | NQL | 959 |
-| gold_impact_detections | NSW | 19459 |
-| gold_impact_detections | VIC | 10119 |
-| gold_impact_detections | WA | 2646 |
-| silver_sessions | NQL | 73380 |
-| silver_sessions | NSW | 518073 |
-| silver_sessions | VIC | 512597 |
-| silver_sessions | WA | 197545 |
-
-_8 row(s)_
-
-## Row filter demo: same user, now only in noc_region_nsw
+## State 2 - noc_region_nsw only: principal
 
 ```sql
 SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
@@ -446,39 +510,160 @@ SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
 
 _1 row(s)_
 
-## Rows visible per region as noc_region_nsw (only NSW rows remain)
+## State 2 - noc_region_nsw only: rows visible in every object a regional role is granted
+
+Only NSW rows remain in every object.
 
 ```sql
-SELECT 'silver_sessions' AS table_name, region_code, count(*) AS visible_rows FROM telco_netmon_febar_catalog.netmon_silver.silver_sessions GROUP BY 2
-        UNION ALL
-        SELECT 'gold_impact_detections', region_code, count(*) FROM telco_netmon_febar_catalog.netmon_gold.gold_impact_detections GROUP BY 2
-        ORDER BY 1, 2
+SELECT 'silver_kpis' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_kpis
+UNION ALL SELECT 'silver_alarms' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_alarms
+UNION ALL SELECT 'silver_sessions' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+UNION ALL SELECT 'silver_topology_nodes' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes
+UNION ALL SELECT 'silver_topology_edges' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_edges
+UNION ALL SELECT 'silver_maintenance_windows' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows
+UNION ALL SELECT 'gold_cell_baseline' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline
+UNION ALL SELECT 'gold_cell_health_1m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_1m
+UNION ALL SELECT 'gold_cell_health_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m
+UNION ALL SELECT 'gold_impact_detections' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_impact_detections
+UNION ALL SELECT 'gold_element_impact_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m
+UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m
 ```
 
-| table_name | region_code | visible_rows |
+| netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| gold_impact_detections | NSW | 19459 |
-| silver_sessions | NSW | 518073 |
+| silver_kpis | 1048635 | NSW |
+| silver_alarms | 6549 | NSW |
+| silver_sessions | 520220 | NSW |
+| silver_topology_nodes | 814 | NSW |
+| silver_topology_edges | 813 | NSW |
+| silver_maintenance_windows | 1 | NSW |
+| gold_cell_baseline | 440910 | NSW |
+| gold_cell_health_1m | 1044625 | NSW |
+| gold_cell_health_5m | 871207 | NSW |
+| gold_impact_detections | 10661 | NSW |
+| gold_element_impact_5m | 34104 | NSW |
+| gold_cell_sessions_5m | 442267 | NSW |
 
-_2 row(s)_
+_12 row(s)_
 
-## Row filter demo: in no NOC group at all
-
-No rows at all: the filter returns false for every region.
+## State 3 - no NOC group: principal
 
 ```sql
-SELECT 'silver_sessions' AS table_name, region_code, count(*) AS visible_rows FROM telco_netmon_febar_catalog.netmon_silver.silver_sessions GROUP BY 2
-        UNION ALL
-        SELECT 'gold_impact_detections', region_code, count(*) FROM telco_netmon_febar_catalog.netmon_gold.gold_impact_detections GROUP BY 2
-        ORDER BY 1, 2
+SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
+               is_member('noc_region_nsw') AS in_noc_region_nsw, is_member('pii_privileged') AS in_pii_privileged,
+               telco_netmon_febar_catalog.netmon_gov.is_pii_privileged() AS pii_privileged_fn
 ```
 
-| table_name | region_code | visible_rows |
+| user | in_noc_national | in_noc_region_nsw | in_pii_privileged | pii_privileged_fn |
+|---|---|---|---|---|
+| louis.chen@databricks.com | false | false | false | false |
+
+_1 row(s)_
+
+## State 3 - no NOC group: rows visible in every object a regional role is granted
+
+No rows in any object: the filter is false for every region.
+
+```sql
+SELECT 'silver_kpis' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_kpis
+UNION ALL SELECT 'silver_alarms' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_alarms
+UNION ALL SELECT 'silver_sessions' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+UNION ALL SELECT 'silver_topology_nodes' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes
+UNION ALL SELECT 'silver_topology_edges' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_edges
+UNION ALL SELECT 'silver_maintenance_windows' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows
+UNION ALL SELECT 'gold_cell_baseline' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline
+UNION ALL SELECT 'gold_cell_health_1m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_1m
+UNION ALL SELECT 'gold_cell_health_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m
+UNION ALL SELECT 'gold_impact_detections' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_impact_detections
+UNION ALL SELECT 'gold_element_impact_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m
+UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m
+```
+
+| netmon_noc_view | visible_rows | regions |
 |---|---|---|
+| silver_kpis | 0 |  |
+| silver_alarms | 0 |  |
+| silver_sessions | 0 |  |
+| silver_topology_nodes | 0 |  |
+| silver_topology_edges | 0 |  |
+| silver_maintenance_windows | 0 |  |
+| gold_cell_baseline | 0 |  |
+| gold_cell_health_1m | 0 |  |
+| gold_cell_health_5m | 0 |  |
+| gold_impact_detections | 0 |  |
+| gold_element_impact_5m | 0 |  |
+| gold_cell_sessions_5m | 0 |  |
 
-_0 row(s)_
+_12 row(s)_
 
-## Mask demo: same user added to pii_privileged
+## State 4 - pii_privileged only (no NOC role): principal
+
+```sql
+SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
+               is_member('noc_region_nsw') AS in_noc_region_nsw, is_member('pii_privileged') AS in_pii_privileged,
+               telco_netmon_febar_catalog.netmon_gov.is_pii_privileged() AS pii_privileged_fn
+```
+
+| user | in_noc_national | in_noc_region_nsw | in_pii_privileged | pii_privileged_fn |
+|---|---|---|---|---|
+| louis.chen@databricks.com | false | false | true | true |
+
+_1 row(s)_
+
+## State 4 - pii_privileged only (no NOC role): rows visible in every object a regional role is granted
+
+Still no rows: pii_privileged grants no data access on its own (and holds no privileges, see the persona table above).
+
+```sql
+SELECT 'silver_kpis' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_kpis
+UNION ALL SELECT 'silver_alarms' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_alarms
+UNION ALL SELECT 'silver_sessions' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+UNION ALL SELECT 'silver_topology_nodes' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes
+UNION ALL SELECT 'silver_topology_edges' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_edges
+UNION ALL SELECT 'silver_maintenance_windows' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows
+UNION ALL SELECT 'gold_cell_baseline' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline
+UNION ALL SELECT 'gold_cell_health_1m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_1m
+UNION ALL SELECT 'gold_cell_health_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m
+UNION ALL SELECT 'gold_impact_detections' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_impact_detections
+UNION ALL SELECT 'gold_element_impact_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m
+UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m
+```
+
+| netmon_noc_view | visible_rows | regions |
+|---|---|---|
+| silver_kpis | 0 |  |
+| silver_alarms | 0 |  |
+| silver_sessions | 0 |  |
+| silver_topology_nodes | 0 |  |
+| silver_topology_edges | 0 |  |
+| silver_maintenance_windows | 0 |  |
+| gold_cell_baseline | 0 |  |
+| gold_cell_health_1m | 0 |  |
+| gold_cell_health_5m | 0 |  |
+| gold_impact_detections | 0 |  |
+| gold_element_impact_5m | 0 |  |
+| gold_cell_sessions_5m | 0 |  |
+
+_12 row(s)_
+
+## State 4 - pii_privileged only (no NOC role): IMSI / MSISDN shape (values never printed in full)
+
+```sql
+SELECT count(*) AS n_rows,
+               count_if(imsi RLIKE '^00101[0-9]{10}$') AS imsi_full_value,
+               count_if(imsi RLIKE '^00101[*]{8}[0-9]{2}$') AS imsi_masked,
+               count_if(msisdn RLIKE '^[+]999[0-9]{9}$') AS msisdn_full_value,
+               count_if(msisdn RLIKE '^[+]999[*]{6}[0-9]{3}$') AS msisdn_masked
+        FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+```
+
+| n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
+|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | 0 |
+
+_1 row(s)_
+
+## State 5 - noc_national + pii_privileged: principal
 
 ```sql
 SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
@@ -492,7 +677,43 @@ SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
 
 _1 row(s)_
 
-## Mask shape check, privileged (full values visible; values themselves not printed)
+## State 5 - noc_national + pii_privileged: rows visible in every object a regional role is granted
+
+A NOC role plus pii_privileged: every region, and IMSI / MSISDN unmasked (checked by pattern).
+
+```sql
+SELECT 'silver_kpis' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_kpis
+UNION ALL SELECT 'silver_alarms' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_alarms
+UNION ALL SELECT 'silver_sessions' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
+UNION ALL SELECT 'silver_topology_nodes' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes
+UNION ALL SELECT 'silver_topology_edges' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_edges
+UNION ALL SELECT 'silver_maintenance_windows' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.silver_maintenance_windows
+UNION ALL SELECT 'gold_cell_baseline' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_baseline
+UNION ALL SELECT 'gold_cell_health_1m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_1m
+UNION ALL SELECT 'gold_cell_health_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m
+UNION ALL SELECT 'gold_impact_detections' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_impact_detections
+UNION ALL SELECT 'gold_element_impact_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_element_impact_5m
+UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible_rows, array_join(array_sort(collect_set(region_code)), ',') AS regions FROM telco_netmon_febar_catalog.netmon_noc.gold_cell_sessions_5m
+```
+
+| netmon_noc_view | visible_rows | regions |
+|---|---|---|
+| silver_kpis | 2410993 | NQL,NSW,VIC,WA |
+| silver_alarms | 20155 | NQL,NSW,VIC,WA |
+| silver_sessions | 1304712 | NQL,NSW,VIC,WA |
+| silver_topology_nodes | 1887 | NQL,NSW,VIC,WA |
+| silver_topology_edges | 1883 | NQL,NSW,VIC,WA |
+| silver_maintenance_windows | 6 | NQL,NSW,VIC,WA |
+| gold_cell_baseline | 1016375 | NQL,NSW,VIC,WA |
+| gold_cell_health_1m | 2401794 | NQL,NSW,VIC,WA |
+| gold_cell_health_5m | 2006088 | NQL,NSW,VIC,WA |
+| gold_impact_detections | 23752 | NQL,NSW,VIC,WA |
+| gold_element_impact_5m | 87480 | NQL,NSW,VIC,WA |
+| gold_cell_sessions_5m | 1094380 | NQL,NSW,VIC,WA |
+
+_12 row(s)_
+
+## State 5 - noc_national + pii_privileged: IMSI / MSISDN shape (values never printed in full)
 
 ```sql
 SELECT count(*) AS n_rows,
@@ -500,12 +721,12 @@ SELECT count(*) AS n_rows,
                count_if(imsi RLIKE '^00101[*]{8}[0-9]{2}$') AS imsi_masked,
                count_if(msisdn RLIKE '^[+]999[0-9]{9}$') AS msisdn_full_value,
                count_if(msisdn RLIKE '^[+]999[*]{6}[0-9]{3}$') AS msisdn_masked
-        FROM telco_netmon_febar_catalog.netmon_silver.silver_sessions
+        FROM telco_netmon_febar_catalog.netmon_noc.silver_sessions
 ```
 
 | n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
 |---|---|---|---|---|
-| 1301595 | 1301595 | 0 | 1301595 | 0 |
+| 1304712 | 1304712 | 0 | 1304712 | 0 |
 
 _1 row(s)_
 

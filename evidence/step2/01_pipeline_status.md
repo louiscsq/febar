@@ -1,6 +1,6 @@
 # Pipeline runs and update status
 
-Captured 2026-10-08 13:53 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 15:30 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 ## Pipeline
 
@@ -25,7 +25,7 @@ SELECT origin.update_id, min(timestamp) AS started, max(timestamp) AS last_event
 
 | update_id | started | last_event | final_state | cause | full_refresh |
 |---|---|---|---|---|---|
-| NULL | 2026-10-08T11:17:47.086Z | 2026-10-08T13:21:09.211Z | NULL | NULL | NULL |
+| NULL | 2026-10-08T11:17:47.086Z | 2026-10-08T15:24:01.206Z | NULL | NULL | NULL |
 | d0784fab-0a3a-421f-8558-1495518ad781 | 2026-10-08T11:23:14.884Z | 2026-10-08T11:24:06.823Z | FAILED | API_CALL | false |
 | 81410d2e-dd4d-45ac-91bb-fd19d798ed93 | 2026-10-08T11:24:10.951Z | 2026-10-08T11:24:54.406Z | FAILED | RETRY_ON_FAILURE | false |
 | d758dbad-f4e4-4d41-95f8-441ead683d07 | 2026-10-08T11:24:55.589Z | 2026-10-08T11:26:05.876Z | FAILED | RETRY_ON_FAILURE | false |
@@ -46,8 +46,11 @@ SELECT origin.update_id, min(timestamp) AS started, max(timestamp) AS last_event
 | 35be89c6-9d7c-4339-a4ff-aba779c9545b | 2026-10-08T12:33:41.834Z | 2026-10-08T13:20:42.514Z | CANCELED | API_CALL | false |
 | 07fec833-3d59-4a51-b0a3-dd1b2c3118a1 | 2026-10-08T13:21:15.214Z | 2026-10-08T13:23:44.770Z | COMPLETED | API_CALL | false |
 | a5846662-11bb-4bd2-a1a6-d217f9368a7f | 2026-10-08T13:25:42.071Z | 2026-10-08T13:27:28.695Z | COMPLETED | API_CALL | false |
+| 08840d73-a1e7-4da6-97c8-66f62c74dd3b | 2026-10-08T14:42:49.940Z | 2026-10-08T14:47:55.093Z | COMPLETED | API_CALL | true |
+| 68844ef9-5e45-4a67-8371-5167be49d04e | 2026-10-08T14:49:40.497Z | 2026-10-08T15:23:40.460Z | CANCELED | API_CALL | false |
+| dae710b3-ba55-476e-9244-fbe195e42a4a | 2026-10-08T15:24:07.428Z | 2026-10-08T15:26:49.799Z | COMPLETED | API_CALL | false |
 
-_21 row(s)_
+_24 row(s)_
 
 ## Flows of the latest completed update
 
@@ -79,21 +82,21 @@ WITH u AS (SELECT origin.update_id AS id FROM telco_netmon_febar_catalog.netmon_
 | telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_eval.bronze_gt_incidents | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_eval.eval_detection_log | COMPLETED | NULL |
-| telco_netmon_febar_catalog.netmon_eval.eval_detection_precision | COMPLETED | 4 |
-| telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | COMPLETED | 40 |
-| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | COMPLETED | 58 |
-| telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | COMPLETED | 35 |
-| telco_netmon_febar_catalog.netmon_eval.eval_rca_baseline | COMPLETED | 35 |
-| telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary | NULL | 22 |
-| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | COMPLETED | 975575 |
+| telco_netmon_febar_catalog.netmon_eval.eval_detection_precision | NULL | 6 |
+| telco_netmon_febar_catalog.netmon_eval.eval_dq_capture | NULL | 40 |
+| telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents | NULL | 79 |
+| telco_netmon_febar_catalog.netmon_eval.eval_incident_detection | NULL | 54 |
+| telco_netmon_febar_catalog.netmon_eval.eval_rca_baseline | NULL | 54 |
+| telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary | NULL | 23 |
+| telco_netmon_febar_catalog.netmon_gold.gold_cell_baseline | NULL | 1016375 |
 | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_1m | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_gold.gold_cell_sessions_5m | COMPLETED | NULL |
-| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | COMPLETED | 88787 |
+| telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | NULL | 87480 |
 | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_silver.silver_alarms | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_silver.silver_kpis | COMPLETED | NULL |
-| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | COMPLETED | 11 |
+| telco_netmon_febar_catalog.netmon_silver.silver_maintenance_windows | COMPLETED | 6 |
 | telco_netmon_febar_catalog.netmon_silver.silver_sessions | COMPLETED | NULL |
 | telco_netmon_febar_catalog.netmon_silver.silver_topology_edges | COMPLETED | 1883 |
 | telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | COMPLETED | 1887 |

@@ -1,63 +1,81 @@
 # Step 2 evidence: pipeline and governance run on the workspace
 
 All files are text, captured on 2026-10-08 (UTC) from workspace profile `febar` by
-`scripts/capture_evidence.py` (SQL on the serverless starter warehouse, plus the Databricks CLI).
-Samples are small, and IMSI / MSISDN only ever appear masked.
+`scripts/capture_evidence.py` (SQL on the serverless starter warehouse, plus the Databricks CLI). This is
+the second capture, after the review fixes: every table was rebuilt with a full refresh and a fresh live
+stream. Samples are small, and IMSI / MSISDN only ever appear masked.
+
+## Headline: faults only (live 1-minute stream)
+
+Scored incidents are customer-impacting and not censored. Two separate metrics; see
+[`docs/pipeline.md`](../../docs/pipeline.md#detection-and-evaluation) for why.
+
+| live stream, `event_class = fault` (31 incidents) | rate | median | p90 | within 5 min |
+|---|---|---|---|---|
+| **(a) customer-impact detection**: first detection on the incident's footprint | 100 % | 112 s | 265 s | **90.3 %** |
+| **(b) root-element localisation**: a detection or the rollup on an element of `root_element_ids` | **96.8 %** | 114 s | | 87.1 % |
+| **fault-detection precision** (TP / (TP + FP); red herrings and unsuppressed planned work are FP, censored excluded) | **99.8 %** | | | |
+| maintenance suppression (planned-work detections flagged `in_maintenance`) | 97.4 % | | | |
+| pipeline latency, file landed → detection row | | 40 s | | |
+
+- Per fault type (live): `CELL_OUTAGE` 19/19 and `AGG_ROUTER_FAILURE` 4/4 were detected and localised
+  within 5 min. `SITE_POWER_OUTAGE` had 5/5 detected within 5 min and 4/5 localised.
+  `BACKHAUL_DEGRADATION` had 0/3 within 5 min (detected after 6, 7 and 10 min): it ramps in over 10–30 min
+  by design. All three backhaul faults were localised, through the rollup, after the SLA.
+- Batch history (15-minute ROP, cannot meet a 5-minute SLA by construction), faults only (16 incidents):
+  impact detected 93.8 %, 75.0 % within 5 min, root localised 87.5 % (68.8 % within 5 min), fault
+  precision 81.8 %. The 171 detections on the `TRAFFIC_SURGE` red herring now count as false positives.
+- RCA topology heuristic (the bar for the step-3 model): hit@1 34.3 % / hit@3 51.4 % live, 63.2 % / 73.7 %
+  history.
+- Every injected DQ defect type in both runs (77,929 history + 12,539 live defects) was handled by its
+  intended mechanism (`handled_pct = 100`; session dedupe is not re-scored).
+
+## Files
 
 | file | content |
 |---|---|
-| [`01_pipeline_status.md`](01_pipeline_status.md) | pipeline spec (serverless, continuous during the live run), every update and its final state, flows of the last completed update, errors from the deploy-and-fix iterations |
-| [`02_expectations.md`](02_expectations.md) | expectation pass/fail counts per dataset and rule from the event log, dropped rows, quarantine by rule, quarantine sample, injected-defect reconciliation (`eval_dq_capture`) |
+| [`01_pipeline_status.md`](01_pipeline_status.md) | pipeline spec, every update and its final state, flows of the last completed update, errors from the deploy-and-fix iterations |
+| [`02_expectations.md`](02_expectations.md) | expectation pass/fail counts per dataset and rule from the event log (since the last full refresh), dropped rows, quarantine by rule, quarantine sample, injected-defect reconciliation (`eval_dq_capture`) |
 | [`03_row_counts.md`](03_row_counts.md) | row counts for every table, bronze and silver per generator run |
 | [`04_gold_samples.md`](04_gold_samples.md) | sample rows of every gold table, live pipeline latency |
-| [`05_time_to_detect.md`](05_time_to_detect.md) | time-to-detect against ground truth (median / p90 / % within 5 min), per incident, detection precision, RCA heuristic baseline |
-| [`06_governance.md`](06_governance.md) | column masks, row filters, policy functions, grants, tags, comments, groups and personas, plus the mask and row-filter demo |
+| [`05_time_to_detect.md`](05_time_to_detect.md) | fault-only headline, every event class, per fault type, per live fault incident, ground-truth mix, fault precision and maintenance suppression, RCA heuristic |
+| [`06_governance.md`](06_governance.md) | masks, row filters, region-filtered views, policy functions, roles and members, every persona's privileges, tags, comments, and the five-state membership demo |
 | [`07_lineage.md`](07_lineage.md) | `system.access.table_lineage` edges, and the Volume → bronze hop via `_metadata.file_path` |
 
-## What was run
+## What was run (second capture)
 
-1. `databricks bundle deploy` created 6 schemas, the landing Volume, the pipeline and 4 jobs.
-2. `banksia-netmon-generate-history`: `small` preset (4 regions, 300 sites, 1,431 cells), 14 days of
-   15-minute KPIs as JSON lines with default DQ defects, about 4 minutes on serverless.
-3. `banksia-netmon-governance` stage `functions`, then `banksia-netmon-pipeline` (triggered, full refresh):
-   backfill COMPLETED in about 5 minutes.
-4. Live: pipeline redeployed **continuous**, then `banksia-netmon-stream-generator` ran for **41 minutes**
-   (12:38–13:19 UTC, 240 micro-batches). That is one simulated minute every 10 s, 4 simulated hours in
-   total, with fault-rate multiplier 100. The pipeline processed it as it landed. It was then switched
-   back to triggered and a final update (COMPLETED) refreshed the materialized views.
-5. `banksia-netmon-governance` stage `policies`: groups, personas, grants, tags. Then evidence capture,
-   with the mask and row-filter demo.
+1. `databricks bundle deploy`, which also created the `netmon_noc` schema. The previous live data was
+   deleted, then `banksia-netmon-pipeline` ran with a full refresh over the 14-day `small` history
+   (COMPLETED).
+2. Live: pipeline redeployed **continuous**, then `banksia-netmon-stream-generator` ran for **30 minutes**
+   (14:52–15:22 UTC wall clock, 360 one-minute micro-batches at 5 s each, 6 simulated hours, fault-rate
+   multiplier 200). The pipeline processed it as it landed. Ground truth: 31 uncensored and 14 censored
+   faults, 4 planned, 7 red herrings. The pipeline was then switched back to triggered, and a final
+   update (COMPLETED) refreshed the materialized views.
+3. `banksia-netmon-governance` stage `all`: functions, groups, personas, `netmon_noc` views, persona grant
+   reset and role grants, tags. Then this capture, with the membership demo.
 
-`banksia-netmon-bootstrap` chains steps 2–5 as one job. It was deployed and validated, but the steps
-above were run individually.
+## Governance demo (06_governance.md)
 
-## Headline results
+The capturing user's group membership is changed, and every object a regional role can read (the 12
+`netmon_noc` views) is queried in each state:
 
-| | history (15-min ROP backfill) | live stream (1-min) |
+| state | rows visible | IMSI / MSISDN |
 |---|---|---|
-| scored incidents (customer-impacting, not censored) | 19 | 16 (13 more were censored at the bounded stop and excluded) |
-| detected | 18 (94.7 %) | 16 (100 %) |
-| median / p90 time-to-detect | 59 s / 1,201 s | **120 s / 365 s** |
-| **detected within 5 minutes** | 73.7 % | **87.5 %** (faults only: 71.4 %, 5 of 7; planned: 9 of 9) |
-| median pipeline latency (file landed → detection row) | n/a (backfill) | 36 s |
-| detections explained by ground truth | KPI 87.7 %, alarm 100 % | KPI 100 %, alarm 100 % |
+| `noc_national` | all regions | masked (0 full values) |
+| `noc_region_nsw` only | **NSW only, in every view** | masked |
+| no NOC group | **no rows in any view** | — |
+| `pii_privileged` only (no NOC role) | **no rows in any view**; the `netmon-pii-only` persona holds no privileges | — |
+| `noc_national` + `pii_privileged` | all regions | **unmasked** (checked by pattern, never printed) |
 
-The two live misses are both `BACKHAUL_DEGRADATION`, which ramps in over 10–30 minutes by design and
-was detected after 9 and 14 minutes. Every injected DQ defect of every type, in both runs, was handled by
-its intended mechanism (`handled_pct = 100` in `eval_dq_capture`; session dedupe is not re-scored).
-Governance demo: as a non-`pii_privileged` reader, 0 of 1.3 M IMSI / MSISDN values are visible in full;
-with the same user added to `pii_privileged` all of them are (checked by pattern, values not printed).
-Membership of `noc_region_nsw` only shows NSW rows in `silver_sessions` and `gold_impact_detections`, and
-membership of no NOC group shows none.
+The capturing user owns the catalog and can always read the base tables, so it cannot itself show a
+grant denial. Grant-level least privilege is shown from `information_schema` for every persona: the
+regional analysts hold only `netmon_noc`, and `pii_privileged` holds nothing.
 
-## Issues found on the real run (fixed and kept in the event log)
+## Issues found on the real runs (fixed; earlier errors are kept in the event log)
 
-- Liquid clustering needs stats on the clustering columns, so the health tables now put `window_start`
-  in the leading 32 columns.
-- `gold_cell_sessions_5m` tried to redefine the watermark inherited from the silver dedupe. It now has
-  its own path.
-- The first two live attempts dropped the whole live stream: history late arrivals are "delivered" up to
-  36 h after the history window, in the future relative to the stream, which pushed the delivery-time
-  dedupe watermark a day ahead. The watermark is now capped at the file's landing time. Both partial
-  live runs were discarded and the run above was started clean.
-- The metastore enforces governed tag policies, so the tags now use allowed values plus `netmon_*` keys.
+- Liquid clustering needs stats on the clustering columns, so the window columns come first.
+- `gold_cell_sessions_5m` redefined an inherited watermark. It now has its own path.
+- First run: a delivery-time dedupe watermark was pushed a day ahead by history late arrivals and dropped
+  the live stream. Review fix: the watermark is now on the monotonic ingestion time.
+- The metastore enforces governed tag policies, so tags use allowed values plus `netmon_*` keys.

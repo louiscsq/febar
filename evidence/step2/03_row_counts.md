@@ -1,6 +1,6 @@
 # Row counts per table
 
-Captured 2026-10-08 13:30 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 15:31 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 ## All pipeline tables
 
@@ -36,31 +36,31 @@ UNION ALL SELECT 'netmon_eval.eval_rca_baseline' AS table_name, count(*) AS n_ro
 
 | table_name | n_rows |
 |---|---|
-| netmon_silver.silver_sessions | 1301595 |
-| netmon_silver.silver_maintenance_windows | 11 |
-| netmon_gold.gold_impact_detections | 33183 |
-| netmon_eval.eval_gt_incidents | 58 |
-| netmon_bronze.bronze_kpis | 2272980 |
-| netmon_bronze.bronze_alarms | 19659 |
-| netmon_bronze.bronze_sessions | 1319980 |
+| netmon_silver.silver_sessions | 1304712 |
+| netmon_silver.silver_maintenance_windows | 6 |
+| netmon_gold.gold_impact_detections | 23752 |
+| netmon_eval.eval_gt_incidents | 79 |
+| netmon_bronze.bronze_kpis | 2445043 |
+| netmon_bronze.bronze_alarms | 20441 |
+| netmon_bronze.bronze_sessions | 1323152 |
 | netmon_bronze.bronze_topology_nodes | 3774 |
 | netmon_bronze.bronze_topology_edges | 3766 |
-| netmon_bronze.bronze_maintenance_windows | 11 |
-| netmon_silver.silver_kpis | 2241328 |
-| netmon_silver.silver_alarms | 19383 |
-| netmon_silver.silver_quarantine | 32345 |
+| netmon_bronze.bronze_maintenance_windows | 6 |
+| netmon_silver.silver_kpis | 2410993 |
+| netmon_silver.silver_alarms | 20155 |
+| netmon_silver.silver_quarantine | 33926 |
 | netmon_silver.silver_topology_nodes | 1887 |
 | netmon_silver.silver_topology_edges | 1883 |
-| netmon_gold.gold_cell_baseline | 975575 |
-| netmon_gold.gold_cell_health_1m | 2233947 |
-| netmon_gold.gold_cell_health_5m | 1973278 |
-| netmon_gold.gold_element_impact_5m | 88787 |
-| netmon_gold.gold_cell_sessions_5m | 1091467 |
-| netmon_eval.bronze_gt_incidents | 58 |
-| netmon_eval.bronze_gt_dq_injections | 86259 |
-| netmon_eval.eval_detection_log | 33183 |
-| netmon_eval.eval_incident_detection | 35 |
-| netmon_eval.eval_rca_baseline | 35 |
+| netmon_gold.gold_cell_baseline | 1016375 |
+| netmon_gold.gold_cell_health_1m | 2401794 |
+| netmon_gold.gold_cell_health_5m | 2006088 |
+| netmon_gold.gold_element_impact_5m | 87480 |
+| netmon_gold.gold_cell_sessions_5m | 1094380 |
+| netmon_eval.bronze_gt_incidents | 79 |
+| netmon_eval.bronze_gt_dq_injections | 90468 |
+| netmon_eval.eval_detection_log | 23752 |
+| netmon_eval.eval_incident_detection | 54 |
+| netmon_eval.eval_rca_baseline | 54 |
 
 _25 row(s)_
 
@@ -76,11 +76,11 @@ SELECT 'kpis' AS feed, _source_run AS run, count(*) AS bronze FROM telco_netmon_
 | feed | run | bronze |
 |---|---|---|
 | alarms | history | 16730 |
-| alarms | stream | 2929 |
+| alarms | stream | 3711 |
 | kpis | history | 1932342 |
-| kpis | stream | 340638 |
+| kpis | stream | 512701 |
 | sessions | history | 1314879 |
-| sessions | stream | 5101 |
+| sessions | stream | 8273 |
 
 _6 row(s)_
 
@@ -99,10 +99,10 @@ SELECT 'kpis' AS feed, source_run AS run, count(*) AS silver, count_if(is_late) 
 | feed | run | silver | late_kept | min_event_ts | max_event_ts |
 |---|---|---|---|---|---|
 | alarms | history | 16494 | 166 | 2026-09-24T00:00:03.000Z | 2026-10-08T01:47:14.000Z |
-| alarms | stream | 2889 | 30 | 2026-10-08T12:39:28.000Z | 2026-10-08T16:37:41.000Z |
+| alarms | stream | 3661 | 35 | 2026-10-08T14:51:35.000Z | 2026-10-08T20:50:00.000Z |
 | kpis | history | 1905432 | 19228 | 2026-09-24T00:00:00.000Z | 2026-10-07T23:45:00.000Z |
-| kpis | stream | 335896 | 3393 | 2026-10-08T12:38:00.000Z | 2026-10-08T16:37:00.000Z |
+| kpis | stream | 505561 | 5112 | 2026-10-08T14:51:00.000Z | 2026-10-08T20:50:00.000Z |
 | sessions | history | 1296569 | 13079 | 2026-09-24T00:00:00.000Z | 2026-10-07T23:59:59.000Z |
-| sessions | stream | 5026 | 50 | 2026-10-08T12:38:07.000Z | 2026-10-08T16:37:46.000Z |
+| sessions | stream | 8143 | 72 | 2026-10-08T14:51:00.000Z | 2026-10-08T20:50:59.000Z |
 
 _6 row(s)_
