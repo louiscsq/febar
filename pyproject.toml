@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netmon-datagen"
+version = "0.1.0"
+description = "Synthetic mobile-network telemetry generator (topology, KPIs, alarms, sessions, faults) for NOC monitoring demos"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyarrow>=12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4"]
+
+[project.scripts]
+netmon-datagen = "netmon_datagen.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "NPY"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Databricks source notebooks: magic commands, `spark`/`dbutils` globals, late imports.
+"notebooks/*.py" = ["E402", "F821", "I001"]
