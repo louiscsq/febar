@@ -66,7 +66,7 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
         if hour is None or h != hour:
             hour = h
             new = schedule_incidents(topo, h, h + HOUR, cfg.faults, rng_for(cfg.seed, "stream-faults", str(h)),
-                                     existing=active, id_prefix=f"INC-{stamp(h)[:10]}")
+                                     existing=active, id_prefix=f"INC-{stamp(h)[:11].replace('T', '')}")
             active += new
             pending_truth += new
             mw = maintenance_frame(new)

@@ -119,12 +119,13 @@ def generate_kpis(topo: Topology, ts: np.ndarray, step_minutes: float, effects, 
     users = np.round(users * (1 - effects.users))
 
     prb = np.clip(100 * (0.06 + 0.88 * load) + z_prb, 0, 100) * (1 - effects.avail)
-    cong = np.clip((prb / 100 - 0.70) / 0.30, 0, 1)
-    latency = base_lat * (1 + 2.2 * cong**2) * np.exp(z_lat) + effects.lat
-    loss = np.clip(0.03 + 1.2 * cong**2 + z_loss + effects.loss, 0, 100)
-    dl = peak * (1 - 0.72 * (prb / 100) ** 1.5) * np.exp(z_thr) * (1 - effects.thr)
+    util = prb / 100
+    cong = np.clip((util - 0.70) / 0.30, 0, 1)  # congestion knee above 70 % PRB
+    latency = base_lat * (1 + 0.8 * util + 2.2 * cong**2) * np.exp(z_lat) + effects.lat
+    loss = np.clip(0.03 + 0.1 * util + 1.2 * cong**2 + z_loss + effects.loss, 0, 100)
+    dl = peak * (1 - 0.72 * util**1.5) * np.exp(z_thr) * (1 - effects.thr)
     ul = dl * z_ul
-    drop = np.clip(drop_base + 2.0 * cong**3 + z_drop + effects.drop, 0, 100)
+    drop = np.clip(drop_base + 0.3 * util + 2.0 * cong**3 + z_drop + effects.drop, 0, 100)
     rrc = np.clip(rrc_base - 3.5 * cong**3 - z_rrc, 0, 100) * (1 - effects.rrc / 100)
     attach = np.clip(99.85 - 0.8 * cong**3 - z_att, 0, 100) * (1 - effects.attach / 100)
     avail = 100 * (1 - effects.avail)
