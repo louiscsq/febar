@@ -197,7 +197,8 @@ def _labelled_sql() -> str:
           GROUP BY d.source_run, d.detection_id
         ),
         labelled AS (
-          SELECT d.source_run, d.detection_id, d.signal_source, d.element_id, d.signal_start_ts, d.in_maintenance,
+          SELECT d.source_run, d.detection_id, d.signal_source, d.element_id, d.signal_start_ts, d.signal_end_ts,
+                 d.in_maintenance,
                  CASE WHEN m.m_fault = 1 THEN 'fault'
                       WHEN m.m_censored = 1 THEN 'censored'
                       WHEN m.m_planned = 1 THEN 'planned'
@@ -241,7 +242,8 @@ def eval_detection_precision():
 @dp.materialized_view(
     name=f"{S.eval}.eval_alert_precision",
     comment=f"Alert-level fault precision: detections grouped per (source_run, element_id) into episodes "
-            f"(a gap of more than {scoring.ALERT_GAP_S // 60} min starts a new alert, i.e. a new page). An alert "
+            f"(starting more than {scoring.ALERT_GAP_S // 60} min after the previous signal ended starts a new "
+            "alert, i.e. a new page). An alert "
             "takes the highest-priority label of its detections and is suppressed when its first detection is in "
             "a change window. alert_fault_precision_pct = TP alerts / (TP + FP alerts).",
 )
@@ -251,7 +253,8 @@ def eval_alert_precision():
         ep AS (
           SELECT *, sum(new_alert) OVER (PARTITION BY source_run, element_id ORDER BY signal_start_ts, detection_id)
                     AS alert_seq
-          FROM (SELECT *, CASE WHEN unix_timestamp(signal_start_ts) - unix_timestamp(lag(signal_start_ts) OVER (
+          -- a new alert when the detection starts > gap after the element's previous signal ended
+          FROM (SELECT *, CASE WHEN unix_timestamp(signal_start_ts) - unix_timestamp(lag(signal_end_ts) OVER (
                                       PARTITION BY source_run, element_id ORDER BY signal_start_ts, detection_id))
                                     <= {scoring.ALERT_GAP_S} THEN 0 ELSE 1 END AS new_alert
                 FROM labelled)

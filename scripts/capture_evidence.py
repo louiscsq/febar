@@ -284,7 +284,8 @@ def evaluation(r: Runner) -> None:
     d.query("Alert-level fault precision (detections grouped per element per episode)", f"""
         SELECT * FROM {E}.eval_alert_precision
         ORDER BY source_run DESC, CASE signal_source WHEN 'ALL' THEN 0 ELSE 1 END, signal_source""",
-            note="An alert = the detections on one element of one run with no gap above 10 min (one page). It takes "
+            note="An alert = the detections on one element of one run until one starts > 10 min after the previous "
+                 "signal ended (one page). It takes "
                  "the highest-priority label of its rows; suppressed when its first row is in a change window. "
                  "`alert_fault_precision_pct` = TP alerts / (TP + FP alerts).")
     d.query("Detection-row fault precision and maintenance suppression", f"""

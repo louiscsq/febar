@@ -24,7 +24,7 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 
 SLA_S = 300  # 5-minute detection SLA
-ALERT_GAP_S = 600  # detections on one element more than 10 min apart start a new alert
+ALERT_GAP_S = 600  # a detection starting > 10 min after the element's previous signal ended is a new alert
 MATCH_SLACK_S = 600
 
 
@@ -136,8 +136,9 @@ def fault_precision(labelled: Iterable[tuple[str, bool]]) -> dict:
 
 
 def alerts(dets: Iterable[Mapping], gap_s: float = ALERT_GAP_S) -> list[list[Mapping]]:
-    """Group detection rows into alerts: per (source_run, element_id), consecutive detections whose
-    signal starts are at most `gap_s` apart belong to one alert (one page to the NOC)."""
+    """Group detection rows into alerts: per (source_run, element_id), a detection belongs to the current
+    alert (one page to the NOC) unless it starts more than `gap_s` after the previous signal ended. Measuring
+    from the previous end keeps back-to-back 15-minute history periods in one alert."""
     by_key: dict[tuple, list[Mapping]] = {}
     for d in dets:
         by_key.setdefault((d.get("source_run"), d["element_id"]), []).append(d)
@@ -146,7 +147,7 @@ def alerts(dets: Iterable[Mapping], gap_s: float = ALERT_GAP_S) -> list[list[Map
         rows = sorted(rows, key=lambda d: d["signal_start_s"])
         cur = [rows[0]]
         for prev, d in zip(rows, rows[1:], strict=False):
-            if d["signal_start_s"] - prev["signal_start_s"] > gap_s:
+            if d["signal_start_s"] - prev.get("signal_end_s", prev["signal_start_s"]) > gap_s:
                 out.append(cur)
                 cur = []
             cur.append(d)

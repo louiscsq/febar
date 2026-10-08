@@ -195,3 +195,6 @@ def test_alerts_group_detections_per_element_episode():
                {"source_run": "s", "element_id": "S1", "signal_start_s": 60, "label": "planned",
                 "in_maintenance": False}]
     assert scoring.alert_label(planned) == ("planned", True)
+    # Back-to-back 15-minute periods (end = next start) stay one alert although starts are 15 min apart.
+    hist = [{"element_id": "C9", "signal_start_s": t, "signal_end_s": t + 900, "label": "fault"} for t in (0, 900, 1800)]
+    assert len(scoring.alerts(hist)) == 1

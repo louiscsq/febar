@@ -219,8 +219,8 @@ it via the change calendar.
     degraded cell-minute or alarm. A long outage over many cells contributes thousands of TP rows, so this
     figure is flattering on its own.
   - `eval_alert_precision` gives **alert-level precision** (`alert_fault_precision_pct`). Detections of one
-    element in one run form one alert while consecutive detections are at most 10 minutes apart (one page
-    to the NOC). An alert takes the highest-priority label of its rows and is suppressed when its first row
+    element in one run form one alert until a detection starts more than 10 minutes after the previous
+    signal ended (one page to the NOC; back-to-back 15-minute history periods stay one alert). An alert takes the highest-priority label of its rows and is suppressed when its first row
     is in a change window.
   - Both report `maintenance_suppression_pct`, and both join and group on `(source_run, detection_id)`.
 - **`eval_rca_baseline`**: a topology heuristic that ranks the rollup's elements and scores hit@1 / hit@3
