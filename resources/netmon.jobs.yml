@@ -1,0 +1,98 @@
+# Jobs: history backfill, live stream generator, governance, and an end-to-end bootstrap.
+# All tasks run on serverless; the generator wheel (artifact `netmon_wheel`) is installed through the
+# job environment, so the notebooks import `netmon_datagen` without touching sys.path.
+resources:
+  jobs:
+    netmon_generate_history:
+      name: banksia-netmon-generate-history
+      parameters: &gen_params
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: schema, default: "${resources.schemas.netmon_raw.name}"}
+        - {name: volume, default: "${resources.volumes.landing.name}"}
+      environments: &envs
+        - environment_key: netmon
+          spec:
+            client: "4"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: generate_history
+          environment_key: netmon
+          notebook_task:
+            notebook_path: ../notebooks/01_generate_history.py
+            base_parameters: &history_params
+              subdir: history
+              scale: ${var.history_scale}
+              days: ${var.history_days}
+              format: json
+              seed: "42"
+              overwrite: "true"
+
+    netmon_stream_generator:
+      name: banksia-netmon-stream-generator
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: schema, default: "${resources.schemas.netmon_raw.name}"}
+        - {name: volume, default: "${resources.volumes.landing.name}"}
+        - {name: subdir, default: stream}
+        - {name: max_batches, default: "180"}
+        - {name: interval_seconds, default: "10"}
+        - {name: fault_rate_multiplier, default: "100"}
+      environments: *envs
+      tasks:
+        - task_key: stream
+          environment_key: netmon
+          timeout_seconds: 7200
+          notebook_task:
+            notebook_path: ../notebooks/02_stream_generator.py
+            base_parameters:
+              scale: small
+              seed: "42"
+              step_seconds: "60"
+              dq_scale: "1.0"
+
+    netmon_governance:
+      name: banksia-netmon-governance
+      parameters:
+        - {name: stage, default: all}
+      environments: *envs
+      tasks:
+        - task_key: apply_governance
+          environment_key: netmon
+          notebook_task:
+            notebook_path: ../governance/apply_governance.py
+            base_parameters: &gov_params
+              catalog: ${var.catalog}
+              raw_schema: ${resources.schemas.netmon_raw.name}
+              bronze_schema: ${resources.schemas.netmon_bronze.name}
+              silver_schema: ${resources.schemas.netmon_silver.name}
+              gold_schema: ${resources.schemas.netmon_gold.name}
+              eval_schema: ${resources.schemas.netmon_eval.name}
+              gov_schema: ${resources.schemas.netmon_gov.name}
+
+    # End to end: history -> mask/filter functions -> pipeline -> grants, tags and comments.
+    netmon_bootstrap:
+      name: banksia-netmon-bootstrap
+      parameters: *gen_params
+      environments: *envs
+      tasks:
+        - task_key: generate_history
+          environment_key: netmon
+          notebook_task:
+            notebook_path: ../notebooks/01_generate_history.py
+            base_parameters: *history_params
+        - task_key: governance_functions
+          environment_key: netmon
+          notebook_task:
+            notebook_path: ../governance/apply_governance.py
+            base_parameters: {<<: *gov_params, stage: functions}
+        - task_key: pipeline
+          depends_on: [{task_key: generate_history}, {task_key: governance_functions}]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.netmon_pipeline.id}
+        - task_key: governance_policies
+          depends_on: [{task_key: pipeline}]
+          environment_key: netmon
+          notebook_task:
+            notebook_path: ../governance/apply_governance.py
+            base_parameters: {<<: *gov_params, stage: policies}

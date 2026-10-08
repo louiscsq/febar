@@ -1,0 +1,35 @@
+# Streaming Lakeflow Spark Declarative Pipeline: Volume -> bronze -> silver -> gold (+ eval).
+#
+# Execution mode: triggered by default in dev (`pipeline_continuous: false`) so history backfills run to
+# completion and cost nothing when idle. For the live 5-minute-SLA demo deploy with
+# `--var pipeline_continuous=true`: the pipeline then processes each micro-batch file as it lands
+# (see docs/pipeline.md, "Latency budget").
+resources:
+  pipelines:
+    netmon_pipeline:
+      name: banksia-netmon-pipeline
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.netmon_bronze.name}
+      serverless: true
+      continuous: ${var.pipeline_continuous}
+      channel: CURRENT
+      photon: true
+      root_path: ../pipelines/netmon
+      libraries:
+        - glob:
+            include: ../pipelines/netmon/transformations/**
+      configuration:
+        netmon.catalog: ${var.catalog}
+        netmon.landing_root: /Volumes/${var.catalog}/${resources.schemas.netmon_raw.name}/${resources.volumes.landing.name}
+        netmon.bronze_schema: ${resources.schemas.netmon_bronze.name}
+        netmon.silver_schema: ${resources.schemas.netmon_silver.name}
+        netmon.gold_schema: ${resources.schemas.netmon_gold.name}
+        netmon.eval_schema: ${resources.schemas.netmon_eval.name}
+        netmon.gov_schema: ${resources.schemas.netmon_gov.name}
+        netmon.stream_step_seconds: "60"
+        # Shared pure-Python helpers (src/netmon_pipeline), synced with the bundle files.
+        netmon.src_path: ${workspace.file_path}/src
+      event_log:
+        catalog: ${var.catalog}
+        schema: ${resources.schemas.netmon_eval.name}
+        name: netmon_pipeline_event_log

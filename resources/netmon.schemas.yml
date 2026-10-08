@@ -1,0 +1,37 @@
+# Unity Catalog schemas and the landing Volume. One schema per layer keeps grants simple:
+# NOC groups get gold (and masked/filtered silver sessions); bronze, quarantine and eval stay with the
+# engineering owner. Governance objects (mask / filter functions) live in their own schema.
+resources:
+  schemas:
+    netmon_raw:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: Landing zone for the Banksia Mobile NOC feeds (UC Volume written by the generators).
+    netmon_bronze:
+      catalog_name: ${var.catalog}
+      name: ${var.bronze_schema}
+      comment: Bronze - raw Auto Loader streaming tables, one per feed. Engineering only.
+    netmon_silver:
+      catalog_name: ${var.catalog}
+      name: ${var.silver_schema}
+      comment: Silver - typed, deduplicated, validated feeds with quarantine.
+    netmon_gold:
+      catalog_name: ${var.catalog}
+      name: ${var.gold_schema}
+      comment: Gold - cell health windows, impact detections and root-cause features for the NOC.
+    netmon_eval:
+      catalog_name: ${var.catalog}
+      name: ${var.eval_schema}
+      comment: Ground truth and evaluation of detection / DQ handling. Never a feature source.
+    netmon_gov:
+      catalog_name: ${var.catalog}
+      name: ${var.gov_schema}
+      comment: Governance objects - column-mask and row-filter functions.
+
+  volumes:
+    landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.netmon_raw.name}
+      name: ${var.volume}
+      volume_type: MANAGED
+      comment: Generator output, one sub-directory per run (history/, stream/). JSON lines, partitioned by emitted date.
