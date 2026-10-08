@@ -9,3 +9,28 @@ MLflow, a GenAI root-cause assistant, Genie, and a Databricks App with network t
 visualisation. All data is synthetic.
 
 See `BUILD.md` for design decisions and trade-offs.
+
+## Data generator
+
+`src/netmon_datagen` generates the synthetic network: topology, per-cell KPIs, alarms, subscriber
+sessions, injected faults with ground truth, and data-quality defects. See
+[`docs/data_model.md`](docs/data_model.md) for schemas, the fault taxonomy and volume figures.
+
+```bash
+pip install -e ".[dev]"
+
+# 30 days of history (default "large" preset: ~5k sites / ~23k cells, ~2 GB Parquet, ~3.5 min)
+netmon-datagen batch --out ./data/local/history --days 30 --seed 42
+
+# quick, small history as JSON lines
+netmon-datagen batch --out ./data/local/small --scale small --days 3 --format json
+
+# live JSON micro-batches every 10 s (1 simulated minute each), with extra faults for demos
+netmon-datagen stream --out ./data/local/stream --scale small --interval-seconds 10 --fault-rate-multiplier 5
+
+python -m pytest -q && ruff check .
+```
+
+On Databricks, run `notebooks/01_generate_history.py` (batch) or `notebooks/02_stream_generator.py`
+(streaming). Both write to `/Volumes/<catalog>/<schema>/<volume>/...` and take their parameters from
+widgets.
