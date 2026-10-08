@@ -2,13 +2,13 @@
 # MAGIC %md
 # MAGIC # Generate synthetic network history into a UC Volume
 # MAGIC
-# MAGIC Writes N days of synthetic telemetry for a mobile network (topology, per-cell KPIs, element alarms,
+# MAGIC Writes N days of synthetic telemetry for Banksia Mobile, a fictional Australian operator (topology, per-cell KPIs, element alarms,
 # MAGIC subscriber sessions) plus ground truth (incidents, DQ injections) into
 # MAGIC `/Volumes/<catalog>/<schema>/<volume>/<subdir>/`, partitioned by emitted date.
 # MAGIC
 # MAGIC The generator is plain Python (numpy/pandas) and runs on the driver, so serverless notebook compute
-# MAGIC is fine. Default `large` scale (~5k sites / ~23k cells, 15-min KPIs, 30 days) takes ~3.5 minutes,
-# MAGIC writes ~2 GB of Parquet and peaks at ~2.5 GB of driver memory. Use `small` for a quick look.
+# MAGIC is fine. Default `large` scale (~5k sites / ~23k cells, 15-min KPIs, 30 days) takes ~4 minutes,
+# MAGIC writes ~2.2 GB of Parquet and peaks at ~2.5 GB of driver memory. Use `small` for a quick look.
 # MAGIC See `docs/data_model.md` for the schemas.
 
 # COMMAND ----------

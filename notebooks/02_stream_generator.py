@@ -6,8 +6,9 @@
 # MAGIC `/Volumes/<catalog>/<schema>/<volume>/<subdir>/<feed>/date=YYYY-MM-DD/batch-*.json`, one batch every
 # MAGIC `interval_seconds`, each advancing simulated time by `step_seconds`. Faults are injected live and
 # MAGIC propagate down the topology. Ground truth for each incident appears under `ground_truth/incidents/`
-# MAGIC once the incident has fully played out. When a bounded run stops, in-flight incidents are written with
-# MAGIC `is_censored = true`. Score time-to-detect against `impact_start_ts`. Files are written atomically
+# MAGIC once the incident has fully played out and all of its KPI/alarm records have landed (with DQ on, that
+# MAGIC includes late arrivals, so set `dq_scale` to 0 for live labels). When a bounded run stops, in-flight
+# MAGIC incidents are written with `is_censored = true`. Score time-to-detect against `impact_start_ts`. Files are written atomically
 # MAGIC (temp + rename) so Auto Loader only ever sees complete files.
 # MAGIC
 # MAGIC Run as a notebook task in a job for a long-running feed, or interactively with `max_batches`.
