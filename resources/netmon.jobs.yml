@@ -30,6 +30,11 @@ resources:
 
     netmon_stream_generator:
       name: banksia-netmon-stream-generator
+      # One live feed at a time: a second trigger is skipped, not queued behind the first (a queued run
+      # would start a second, overlapping stream into the same landing directory).
+      max_concurrent_runs: 1
+      queue:
+        enabled: false
       parameters:
         - {name: catalog, default: "${var.catalog}"}
         - {name: schema, default: "${resources.schemas.netmon_raw.name}"}
