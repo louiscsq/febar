@@ -43,6 +43,19 @@ LATE_MIN_S, LATE_MAX_S = 30 * 60, 36 * 3600
 LOG_COLUMNS = ["feed", "record_id", "defect_type", "defect_subtype", "column", "injected_value"]
 
 
+def _fit_counts(counts: list[int], n: int) -> list[int]:
+    """Stochastic rounding can overshoot n by < 1 per defect type when the total rate is ~1; trim it."""
+    over = sum(counts) - n
+    out = list(counts)
+    for k in reversed(range(len(out))):
+        if over <= 0:
+            break
+        take = min(over, out[k])
+        out[k] -= take
+        over -= take
+    return out
+
+
 def _count(rng, n, rate):
     return int(np.floor(rate * n + rng.random())) if rate > 0 else 0
 
@@ -62,6 +75,7 @@ def inject_defects(df: pd.DataFrame, feed: str, dq: DQConfig, rng: np.random.Gen
     perm = rng.permutation(n)
     counts = [_count(rng, n, r) for r in
               (dq.malformed_rate, dq.null_rate, dq.out_of_range_rate, dq.late_rate, dq.duplicate_rate)]
+    counts = _fit_counts(counts, n)
     bounds = np.cumsum([0] + counts)
     mal, nul, oor, late, dup = (perm[bounds[i]:bounds[i + 1]] for i in range(5))
     log: list[dict] = []

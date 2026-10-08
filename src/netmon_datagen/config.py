@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import zlib
 from dataclasses import dataclass, field, replace
 
@@ -55,12 +56,26 @@ class DQConfig:
     null_rate: float = 0.005  # one mandatory field nulled
     out_of_range_rate: float = 0.002  # physically impossible value (e.g. success rate 140%)
 
+    def __post_init__(self) -> None:
+        # Defects are disjoint per record (drawn from one permutation), so the rates must partition at
+        # most the whole population; otherwise later defect types would be silently under-delivered.
+        rates = dataclasses.asdict(self)
+        bad = {k: v for k, v in rates.items() if not 0.0 <= v <= 1.0}
+        if bad:
+            raise ValueError(f"DQ rates must be within [0, 1], got {bad}")
+        if self.total > 1.0 + 1e-9:
+            raise ValueError(f"DQ rates must sum to <= 1 (each record gets at most one defect); got "
+                             f"{self.total:.4f} from {rates}. Lower the rates or the --dq-scale factor.")
+
     @classmethod
     def none(cls) -> DQConfig:
         return cls(0.0, 0.0, 0.0, 0.0, 0.0)
 
     def scaled(self, factor: float) -> DQConfig:
-        return DQConfig(*(min(1.0, v * factor) for v in (
+        """Multiply every rate by `factor` (raises ValueError if the result is not a valid config)."""
+        if factor < 0:
+            raise ValueError(f"DQ scale factor must be >= 0, got {factor}")
+        return DQConfig(*(v * factor for v in (
             self.duplicate_rate, self.late_rate, self.malformed_rate, self.null_rate, self.out_of_range_rate)))
 
     @property

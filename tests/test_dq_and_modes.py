@@ -143,3 +143,36 @@ def test_streaming_injects_faults_live(tmp_path):
     affected = set().union(*inc.loc[inc.is_customer_impacting, "affected_cell_ids"].map(set))
     assert changed.any()
     assert set(m.loc[changed, "cell_id"]) <= affected
+
+
+@pytest.mark.parametrize("kwargs", [
+    dict(duplicate_rate=0.5, late_rate=0.4, malformed_rate=0.2),  # sums to 1.1
+    dict(null_rate=1.5),
+    dict(late_rate=-0.1),
+])
+def test_dq_config_rejects_invalid_rates(kwargs):
+    with pytest.raises(ValueError, match="DQ rates"):
+        DQConfig(**kwargs)
+
+
+def test_dq_scale_beyond_population_is_rejected():
+    DQConfig().scaled(40)  # total 0.96: allowed
+    with pytest.raises(ValueError, match="sum to <= 1"):
+        DQConfig().scaled(50)  # total 1.2
+
+
+def test_dq_rates_summing_to_one_are_delivered_in_full():
+    from netmon_datagen.dq import inject_defects
+
+    n = 1000
+    df = pd.DataFrame({"record_id": [f"r{i}" for i in range(n)], "event_ts": "2026-09-01T00:00:00Z",
+                       "cell_id": "C", "availability_pct": 100.0, "active_users": 5, "granularity_s": 900,
+                       "rrc_setup_success_pct": 99.0, "dl_throughput_mbps": 50.0, "latency_ms": 20.0,
+                       "prb_util_pct": 40.0,
+                       "_emitted": np.datetime64("2026-09-01T00:20:00", "s")})
+    cfg = DQConfig(duplicate_rate=0.2, late_rate=0.2, malformed_rate=0.2, null_rate=0.2, out_of_range_rate=0.2)
+    out, log = inject_defects(df, "kpis", cfg, np.random.default_rng(0), "json")
+    per_type = log.groupby("defect_type").size()
+    assert per_type.sum() == n and (per_type == 200).all()
+    assert log.drop_duplicates("record_id").shape[0] == n  # one defect per record
+    assert len(out) == n + 200

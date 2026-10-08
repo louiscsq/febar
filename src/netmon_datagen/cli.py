@@ -45,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--max-batches", type=int, default=None, help="stop after N batches (default: run forever)")
 
     a = ap.parse_args(argv)
+    try:
+        DQConfig().scaled(a.dq_scale)
+    except ValueError as e:
+        ap.error(f"--dq-scale {a.dq_scale}: {e}")
     if a.mode == "batch":
         from netmon_datagen.batch import generate_history
 
