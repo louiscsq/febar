@@ -70,7 +70,7 @@ CAPACITY_USERS = {("4G", "urban"): 300, ("4G", "suburban"): 220, ("4G", "rural")
                   ("5G", "urban"): 450, ("5G", "suburban"): 330, ("5G", "rural"): 220}
 PEAK_DL_MBPS = {"4G": 90.0, "5G": 480.0}
 BASE_LATENCY_MS = {"4G": 28.0, "5G": 12.0}
-BASE_LOAD = {"urban": 0.75, "suburban": 0.6, "rural": 0.45}
+BASE_LOAD = {"urban": 0.65, "suburban": 0.52, "rural": 0.38}
 
 
 @dataclass
