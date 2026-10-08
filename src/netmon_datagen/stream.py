@@ -51,7 +51,8 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
                                                  "step_seconds": step_seconds})
     flaps = flapping_incidents(eng.flappers, topo, t0, t0 + np.timedelta64(3650, "D"), prefix="FLAP")
     if flaps:
-        write_frame(incidents_frame(flaps, topo), out / "ground_truth" / "incidents" / "flapping.json", "json")
+        write_frame(incidents_frame(flaps, topo),
+                    out / "ground_truth" / "incidents" / f"date={str(t0)[:10]}" / "flapping.json", "json")
 
     active: list[Incident] = []
     pending_truth: list[Incident] = []

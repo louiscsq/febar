@@ -22,7 +22,7 @@ def data(counterfactual_pair):
     m["t"] = pd.to_datetime(m["event_ts"])
     m["missing"] = m["availability_pct_fault"].isna()
     m["changed"] = m["missing"] | np.logical_or.reduce(
-        [~np.isclose(m[f"{c}_base"], m[f"{c}_fault"]) for c in SIGNAL])
+        [~np.isclose(m[f"{c}_base"].astype(float), m[f"{c}_fault"].astype(float)) for c in SIGNAL])
     inc = read_table(with_f, "ground_truth/incidents")
     for c in ["start_ts", "end_ts", "impact_start_ts", "impact_end_ts"]:
         inc[c] = pd.to_datetime(inc[c])
