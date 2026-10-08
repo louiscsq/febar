@@ -155,7 +155,8 @@ first day of history has no baseline, so only the hard rules apply there.
   (RRC < 80 %). Healthy cells always report 100 % availability and > 98 % attach success, so these have no
   organic false positives (tested on generator output).
 - deviation, z > 4 **and** an absolute floor: `latency_degradation` (+40 ms), `packet_loss` (+1.5 pp),
-  `throughput_collapse`, `rrc_degradation` (−3 pp), `drop_rate_spike` (+2 pp).
+  `throughput_collapse` (and below 50 % of the baseline mean: organic load swings move throughput a lot,
+  and the faults that matter cut it by 60–65 %), `rrc_degradation` (−3 pp), `drop_rate_spike` (+2 pp).
 - element-down alarms for dark elements, which send no KPIs: `CELL_OUT_OF_SERVICE`, site
   `NE_UNREACHABLE` and CRITICAL `S1_NG_LINK_FAILURE`, CRITICAL backhaul `LINK_DOWN`, router `NODE_DOWN` /
   `NE_UNREACHABLE`. Codes that the generator uses for background noise or flapping (`LOS`, MAJOR
@@ -247,11 +248,11 @@ databricks bundle run -p febar netmon_pipeline
 databricks bundle run -p febar netmon_governance --params stage=policies
 #    (steps 1-4 in one go: databricks bundle run -p febar netmon_bootstrap)
 
-# 5. live: switch the pipeline to continuous and stream for ~30 min (180 simulated minutes, 6x speed)
+# 5. live: switch the pipeline to continuous and stream for ~40 min (240 simulated minutes, 6x speed)
 databricks bundle deploy -p febar --var pipeline_continuous=true
 databricks bundle run -p febar netmon_pipeline --no-wait
 databricks bundle run -p febar netmon_stream_generator \
-    --params max_batches=180,interval_seconds=10,fault_rate_multiplier=100
+    --params max_batches=240,interval_seconds=10,fault_rate_multiplier=100
 # stop the continuous pipeline afterwards
 databricks pipelines stop <pipeline-id> -p febar
 databricks bundle deploy -p febar          # back to triggered

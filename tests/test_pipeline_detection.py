@@ -42,7 +42,8 @@ def test_deviation_rule_needs_z_and_absolute_floor():
     assert not lat.fires({"latency_ms": 500.0}, None)  # no baseline: deviation rules stay silent
     thr = next(r for r in d.DEVIATION_RULES if r.column == "dl_throughput_mbps")
     bt = {"b_dl_throughput_mbps_mean": 100.0, "b_dl_throughput_mbps_std": 8.0}
-    assert thr.fires({"dl_throughput_mbps": 50.0}, bt) and not thr.fires({"dl_throughput_mbps": 80.0}, bt)
+    # z = -6.25 but only -50 %: the relative floor (50 % of the mean) holds it back
+    assert thr.fires({"dl_throughput_mbps": 40.0}, bt) and not thr.fires({"dl_throughput_mbps": 50.0}, bt)
     assert "b_latency_ms_mean IS NOT NULL" in lat.sql
 
 

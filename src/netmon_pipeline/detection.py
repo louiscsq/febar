@@ -43,18 +43,20 @@ class HardRule:
 
 @dataclass(frozen=True)
 class DeviationRule:
-    """Fires when (value - mean) * direction > max(Z * std, floor)."""
+    """Fires when (value - mean) * direction > max(Z * std, floor, rel_floor * |mean|)."""
 
     name: str
     column: str
     direction: int  # +1: higher is worse, -1: lower is worse
     floor: float  # minimum absolute change
+    rel_floor: float = 0.0  # minimum change relative to the baseline mean
 
     @property
     def sql(self) -> str:
-        c, s = self.column, f"greatest(b_{self.column}_std, {MIN_STD[self.column]})"
+        c, s = self.column, f"greatest(coalesce(b_{self.column}_std, 0), {MIN_STD[self.column]})"
         delta = f"({c} - b_{c}_mean)" if self.direction > 0 else f"(b_{c}_mean - {c})"
-        return f"(b_{c}_mean IS NOT NULL AND {delta} > greatest({Z} * {s}, {self.floor}))"
+        return (f"(b_{c}_mean IS NOT NULL AND {delta} > "
+                f"greatest({Z} * {s}, {self.floor}, {self.rel_floor} * abs(b_{c}_mean)))")
 
     def fires(self, r: dict, b: dict | None) -> bool:
         v = r.get(self.column)
@@ -62,7 +64,7 @@ class DeviationRule:
             return False
         mean = b[f"b_{self.column}_mean"]
         std = max(b.get(f"b_{self.column}_std") or 0.0, MIN_STD[self.column])
-        return (v - mean) * self.direction > max(Z * std, self.floor)
+        return (v - mean) * self.direction > max(Z * std, self.floor, self.rel_floor * abs(mean))
 
 
 HARD_RULES = [
@@ -73,7 +75,8 @@ HARD_RULES = [
 DEVIATION_RULES = [
     DeviationRule("latency_degradation", "latency_ms", +1, 40.0),
     DeviationRule("packet_loss", "packet_loss_pct", +1, 1.5),
-    DeviationRule("throughput_collapse", "dl_throughput_mbps", -1, 0.0),
+    # Organic load swings move throughput a lot; the faults that matter cut it by 60-65 %.
+    DeviationRule("throughput_collapse", "dl_throughput_mbps", -1, 0.0, rel_floor=0.5),
     DeviationRule("rrc_degradation", "rrc_setup_success_pct", -1, 3.0),
     DeviationRule("drop_rate_spike", "session_drop_rate_pct", +1, 2.0),
 ]
