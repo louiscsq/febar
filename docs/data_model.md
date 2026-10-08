@@ -220,6 +220,14 @@ with session length. Faults therefore show up in this feed as bursts of `SETUP_F
 There is one row per incident, red herring, planned outage and flapping element. Use it as ML labels
 and to measure time-to-detect against `impact_start_ts`.
 
+**Observation-window guarantee.** In batch mode the scheduler only accepts an incident whose full
+extent lies inside `[window_start, window_end)`. The extent covers root start and end, every cell's
+onset (including propagation delay) and recovery, and every alarm the incident raises or clears.
+Candidates that would cross the edge are redrawn. Every batch row is therefore uncensored
+(`is_censored = false`): each labelled impact has matching KPI and session telemetry, and incident
+alarms never fall outside the window. Flapping elements span exactly the window. In streaming mode,
+see `is_censored` below.
+
 | column | type | description |
 |---|---|---|
 | `incident_id` | string | `INC-00001` (batch) / `INC-<yyyymmddHH>-00001` (stream) / `FLAP-00001` |
@@ -229,7 +237,8 @@ and to measure time-to-detect against `impact_start_ts`.
 | `region_code` | string | |
 | `start_ts`, `end_ts` | string | root-cause start (e.g. mains failure) / restoration |
 | `impact_start_ts`, `impact_end_ts` | string | first and last moment any cell is impacted (null if no customer impact) |
-| `is_customer_impacting` | bool | false for alarm storms, flapping, and power outages that end before the battery runs out |
+| `is_customer_impacting` | bool | false for alarm storms, flapping, and power outages that end before the battery runs out. For censored rows: only impact that was actually observed counts |
+| `is_censored` | bool | the incident was not fully observed. Always false in batch. In streaming, a bounded run (`max_batches`) that stops mid-incident writes the row with `end_ts` / `impact_end_ts` clipped to the end of the observed window. Flapping elements are open-ended, with a null `end_ts`. Exclude censored rows from duration and impact metrics |
 | `severity` | string | `critical` (≥ 2,000 subscribers, or router/core failure), `major` (≥ 200), `minor`, `none` |
 | `affected_element_ids` | array<string> | every element downstream of the root (for surges: venue + neighbouring sites and their cells) |
 | `affected_cell_ids` | array<string> | cells whose KPIs are altered |
@@ -266,7 +275,17 @@ and to measure time-to-detect against `impact_start_ts`.
 
 On top of these Poisson rates, every batch run includes at least `min_per_type` (default 1) of each
 type, so short histories still contain every story. In streaming mode the minimum is off, and
-`fault_rate_multiplier` makes demos busier.
+`fault_rate_multiplier` makes demos busier. Batch runs only keep incidents that fit the window, so a
+very short window (for example 1 day) can hold fewer than `min_per_type` of the long or busy-hour
+types.
+
+**Streaming ground truth timing.** Live incidents are scheduled per simulated hour, never before the
+stream start. Each incident's row is written to `ground_truth/incidents/` once its full extent has
+played out, so a label never runs ahead of the telemetry it describes; score time-to-detect offline
+against `impact_start_ts`. On a bounded stop:
+- incidents still in flight are written with `is_censored = true` and clipped times;
+- incidents that had not started yet are dropped, together with their pending alarms;
+- the spool is flushed of every record whose event time was observed (`batch-<t>-final.json`).
 
 **Propagation.** Each incident resolves to the set of cells under its root, taken from the ancestor
 columns. Each affected cell gets an onset time, an end time and a peak severity. For every KPI period,
@@ -305,7 +324,10 @@ defect, duplicates are copies of clean records, and every defect is logged in `d
 | `null` | 0.5 % | one mandatory field nulled (id, timestamp, or a key KPI) | `expect … IS NOT NULL` |
 | `out_of_range` | 0.2 % | impossible values: success rate 100.5–160 %, PRB > 100 %, negative latency/users/bytes/duration; alarms timestamped 1970 or 2099 (`clock_skew`) | range expectations |
 
-Rates are set with `DQConfig` or scaled with `--dq-scale`; 0 turns DQ off. The tests check that the
+Rates are set with `DQConfig` or scaled with `--dq-scale`; 0 turns DQ off. Each record gets at most one
+defect, so every rate must be within [0, 1] and the rates must sum to at most 1. `DQConfig` raises a
+`ValueError` otherwise, and the CLI rejects a `--dq-scale` that would push the total over 1; with the
+default rates (2.4 % in total) the maximum scale is about 41. The tests check that the
 observed rates match the configured ones, that duplicates are exactly the repeated `record_id`s, that
 truncated lines are exactly the unparseable lines, and that late records can be identified from
 timestamps alone.
