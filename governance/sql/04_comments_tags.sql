@@ -32,6 +32,7 @@ ALTER TABLE ${silver_schema}.silver_topology_nodes SET TAGS ('domain' = 'operati
 ALTER TABLE ${gold_schema}.gold_impact_detections SET TAGS ('domain' = 'operations', 'netmon_domain' = 'service_assurance', 'sla' = '5min', 'row_filter' = 'by_region', 'consumer' = 'noc,lakebase,app');
 ALTER TABLE ${gold_schema}.gold_cell_health_1m SET TAGS ('domain' = 'operations', 'netmon_domain' = 'network_performance', 'grain' = 'cell_1m');
 ALTER TABLE ${gold_schema}.gold_cell_health_5m SET TAGS ('domain' = 'operations', 'netmon_domain' = 'network_performance', 'grain' = 'cell_5m');
+ALTER TABLE ${gold_schema}.gold_cell_health_5m_retrospective SET TAGS ('domain' = 'operations', 'netmon_domain' = 'network_performance', 'grain' = 'cell_5m', 'use' = 'retrospective_only');
 ALTER TABLE ${gold_schema}.gold_cell_baseline SET TAGS ('domain' = 'operations', 'netmon_domain' = 'network_performance', 'grain' = 'cell_hour_daytype');
 ALTER TABLE ${gold_schema}.gold_element_impact_5m SET TAGS ('domain' = 'operations', 'netmon_domain' = 'root_cause_analysis', 'consumer' = 'ml_rca_model', 'grain' = 'element_5m');
 ALTER TABLE ${gold_schema}.gold_cell_sessions_5m SET TAGS ('domain' = 'operations', 'netmon_domain' = 'customer_experience', 'grain' = 'cell_5m', 'contains_pii' = 'false');
