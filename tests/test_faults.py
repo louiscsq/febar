@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 
 from conftest import read_table
+from netmon_datagen.faults import FAULT_SPECS
+from netmon_datagen.topology import ANCESTOR_COL
 
 SIGNAL = ["availability_pct", "active_users", "latency_ms", "dl_throughput_mbps", "attach_success_pct",
           "prb_util_pct", "session_drop_rate_pct"]
@@ -54,10 +56,11 @@ def test_changes_happen_only_inside_incident_windows(data):
 
 def test_router_failure_degrades_all_descendants_and_nothing_else(data):
     m, inc, topo = data
-    r = inc[inc.fault_type == "AGG_ROUTER_FAILURE"].iloc[0]
+    rf = inc[inc.fault_type == "AGG_ROUTER_FAILURE"]
+    r = rf.loc[(rf.end_ts - rf.impact_start_ts).idxmax()]  # longest one: needs whole periods inside the outage
     desc_cells = topo.index[(topo.router_id == r.root_element_id) & (topo.element_type == "CELL")]
     assert set(r.affected_cell_ids) == set(desc_cells)
-    t0 = r.impact_start_ts.ceil("15min") + pd.Timedelta(minutes=15)
+    t0 = (r.impact_start_ts + pd.Timedelta(minutes=3)).ceil("15min")  # every cell's onset is within 1-3 min
     t1 = r.end_ts.floor("15min")
     assert t1 > t0
     inside = _window(m, desc_cells, t0, t1)
@@ -116,3 +119,25 @@ def test_alarm_storm_has_alarms_but_no_customer_impact(counterfactual_pair):
     on_root = alarms[(alarms.element_id == storm.root_element_id) & (alarms.event_type == "RAISE")
                      & (t >= pd.Timestamp(storm.start_ts)) & (t <= pd.Timestamp(storm.end_ts))]
     assert len(on_root) >= 50
+
+
+@pytest.mark.parametrize("ftype", ["BUSHFIRE_GRID_OUTAGE", "CYCLONE_BACKHAUL_CUT", "LONG_HAUL_FIBRE_CUT"])
+def test_au_faults_change_only_cells_under_their_roots(data, ftype):
+    m, inc, topo = data
+    r = inc[inc.fault_type == ftype].iloc[0]
+    col = ANCESTOR_COL[r.root_element_type]
+    under = set(topo.index[(topo.element_type == "CELL") & topo[col].isin(r.root_element_ids)])
+    assert r.is_customer_impacting and set(r.affected_cell_ids) == under
+    lo, hi = r.impact_start_ts.floor("15min"), r.impact_end_ts
+    others = set()
+    for _, o in inc[inc.is_customer_impacting & (inc.incident_id != r.incident_id)].iterrows():
+        if o.impact_start_ts < hi and o.impact_end_ts > lo:
+            others |= set(o.affected_cell_ids)
+    w = m[(m.t >= lo) & (m.t < hi) & m.changed]
+    assert w.cell_id.isin(under).any()
+    assert set(w.cell_id) - others <= under
+    if FAULT_SPECS[ftype].silent:  # dark sites: missing KPI rows, not zeros
+        assert w[w.cell_id.isin(under)].missing.any()
+    else:
+        mine = _window(m, under, lo, hi).dropna(subset=["availability_pct_fault"])
+        assert (mine.availability_pct_fault - mine.availability_pct_base).mean() < 0

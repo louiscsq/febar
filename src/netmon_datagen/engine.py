@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,7 @@ KPI_COLUMNS_OUT = ["record_id", "event_ts", "emitted_ts", "cell_id", "granularit
                    "packet_loss_pct"]
 COLUMNS = {"kpis": KPI_COLUMNS_OUT, "alarms": ALARM_COLUMNS, "sessions": SESSION_COLUMNS}
 FEEDS = list(COLUMNS)
+DQ_LOG = "dq_injections"  # spool key for DQ-log rows awaiting their record's emission (streaming)
 
 
 def stamp(t: np.datetime64) -> str:
@@ -41,6 +43,10 @@ class Engine:
         self.flappers = select_flapping(self.topo, cfg.faults, cfg.seed)
         self.spool = Spool()
         self.generated = dict.fromkeys(FEEDS, 0)
+        # Streaming bookkeeping: an observer called with (feed, post-DQ frame) for every generated batch of
+        # records, and private emission/event times on DQ-log rows so they can be spooled with their records.
+        self.observer: Callable[[str, pd.DataFrame], None] | None = None
+        self.dq_log_times = False
 
     # -- reference data ---------------------------------------------------------------------------
     def write_topology(self, out: Path, fmt: str) -> None:
@@ -58,6 +64,14 @@ class Engine:
         df["_emitted"] = df["_event_time"].to_numpy() + np.round(df["_emit_delay_s"].to_numpy()).astype(
             "timedelta64[s]")
         df, log = inject_defects(df, feed, self.cfg.dq, rng_for(self.cfg.seed, "dq", feed, key), self.cfg.fmt)
+        if len(log) and self.dq_log_times:
+            # Private emission/event time of the logged record (first delivery for duplicates), so the log
+            # can be spooled and released together with the record it describes.
+            first = df.groupby("record_id", sort=False).agg(_emitted=("_emitted", "min"),
+                                                            _event_time=("_event_time", "first"))
+            log = log.join(first, on="record_id")
+        if self.observer is not None:
+            self.observer(feed, df)
         self.spool.push(feed, df)
         return log
 

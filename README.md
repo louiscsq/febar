@@ -12,14 +12,19 @@ See `BUILD.md` for design decisions and trade-offs.
 
 ## Data generator
 
-`src/netmon_datagen` generates the synthetic network: topology, per-cell KPIs, alarms, subscriber
-sessions, injected faults with ground truth, and data-quality defects. See
-[`docs/data_model.md`](docs/data_model.md) for schemas, the fault taxonomy and volume figures.
+`src/netmon_datagen` generates the synthetic network of **Banksia Mobile**, a fictional tier-1
+Australian operator, as seen by its national NOC: ten regions from Sydney to the Pilbara with real
+coordinates and time zones, per-cell KPIs and sessions that follow local time (DST included; stored
+timestamps are UTC), alarms, injected faults with ground truth, and data-quality defects. Faults include
+Australian ones: bushfire grid outages, cyclone backhaul cuts in the tropical north and long-haul fibre
+cuts that isolate remote areas. Identifiers stay on reserved test ranges. See
+[`docs/data_model.md`](docs/data_model.md) for schemas, regions, the fault taxonomy, streaming ordering
+guarantees and volume figures.
 
 ```bash
 pip install -e ".[dev]"
 
-# 30 days of history (default "large" preset: ~5k sites / ~23k cells, ~2 GB Parquet, ~3.5 min)
+# 30 days of history (default "large" preset: ~5k sites / ~23k cells, ~2.2 GB Parquet, ~4 min)
 netmon-datagen batch --out ./data/local/history --days 30 --seed 42
 
 # quick, small history as JSON lines

@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from netmon_datagen.kpis import KpiResult, to_iso
-from netmon_datagen.topology import Topology
+from netmon_datagen.topology import REGION_BY_CODE, Topology
 
 IMSI_PREFIX = "00101"  # MCC 001 + MNC 01 (ITU test network)
 MSISDN_PREFIX = "+999"  # unassigned E.164 country code
@@ -44,7 +44,13 @@ class SubscriberBase:
 
     @classmethod
     def build(cls, topo: Topology, n_subscribers: int) -> SubscriberBase:
-        w = topo.cells["capacity_users"].to_numpy(dtype=float) * topo.cells["base_load"].to_numpy()
+        # Within a region subscribers follow cell demand; across regions they follow resident population
+        # (remote areas carry many sites per head for coverage, not for subscribers).
+        cells = topo.cells
+        w = cells["capacity_users"].to_numpy(dtype=float) * cells["base_load"].to_numpy()
+        pop = cells["region_code"].map(lambda c: REGION_BY_CODE[c].population_m).to_numpy(dtype=float)
+        region_w = pd.Series(w).groupby(cells["region_code"].to_numpy()).transform("sum").to_numpy()
+        w = w / region_w * pop
         size = np.maximum(1, np.round(n_subscribers * w / w.sum())).astype(np.int64)
         lo = np.concatenate([[0], np.cumsum(size)[:-1]])
         return cls(lo, size, int(size.sum()))
