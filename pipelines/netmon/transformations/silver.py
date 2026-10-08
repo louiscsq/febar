@@ -15,7 +15,7 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
 from netmon_pipeline import paths, rules
-from netmon_pipeline.detection import DAY_TYPE_SQL, alarm_signal_sql
+from netmon_pipeline.detection import DAY_TYPE_SQL, LOCAL_TS_SQL, alarm_signal_sql
 from netmon_pipeline.settings import Settings
 
 S = Settings.from_conf(spark.conf.get)
@@ -36,13 +36,10 @@ def typed(feed: str, ts_cols: list[str], dedupe: bool = True):
     if dedupe:
         df = (
             df.withColumn("_dedupe_key", F.expr("coalesce(record_id, sha2(to_json(struct(*)), 256))"))
-            # Redeliveries arrive 1-600 s after the original; the watermark is on delivery time, so late
-            # arrivals (old event time, fresh delivery) are kept rather than dropped as late. Delivery time
-            # is capped at the file's landing time: a record cannot be delivered after the file holding it
-            # was written (batch history "delivers" late records up to 36 h past the window, i.e. in the
-            # future, which would otherwise push the watermark ahead of the live stream).
-            .withColumn("_wm_ts", F.least("emitted_ts", "_file_modification_time"))
-            .withWatermark("_wm_ts", rules.DEDUPE_WATERMARK)
+            # Watermark on the ingestion time, which only moves forward: no row is ever late for the
+            # deduper, whatever its event / delivery time or however late its file is discovered. Event and
+            # delivery times are used for lateness metrics only (is_late). See netmon_pipeline.dedupe.
+            .withWatermark(rules.DEDUPE_WATERMARK_COLUMN, rules.DEDUPE_WATERMARK)
             .dropDuplicatesWithinWatermark(["_dedupe_key"])
         )
     return (
@@ -121,16 +118,17 @@ def kpis_typed():
         .withColumn("event_end_ts", F.expr("timestampadd(SECOND, granularity_s, event_ts)"))
         .withColumn("lag_s", F.expr("unix_timestamp(emitted_ts) - unix_timestamp(event_end_ts)"))
         .withColumn("is_late", F.expr(f"coalesce(lag_s > {LATE}, false)"))
-        .withColumn("event_ts_local", F.expr("from_utc_timestamp(event_ts, timezone)"))
+        .withColumn("event_ts_local", F.expr(LOCAL_TS_SQL.format(ts="event_ts")))
+        .withColumn("local_date", F.expr("to_date(event_ts_local)"))  # baseline day (local calendar)
         .withColumn("local_hour", F.expr("hour(event_ts_local)"))
         .withColumn("day_type", F.expr(DAY_TYPE_SQL.format(ts="event_ts_local")))
-        .withColumn("event_date", F.expr("to_date(event_ts)"))
+        .withColumn("event_date", F.expr("to_date(event_ts)"))  # UTC date, for clustering only
     )
 
 
 @dp.table(
     name=f"{S.silver}.silver_kpis",
-    comment="Validated per-cell KPI records: typed, UTC timestamps plus local time from the cell's IANA zone, "
+    comment="Validated per-cell KPI records: typed, UTC timestamps plus local time / local date from the cell's IANA zone, "
             "deduplicated on record_id, enriched with the cell's ancestors. Late arrivals kept (is_late).",
     cluster_by=["event_date", "cell_id"],
     table_properties={"quality": "silver"},
@@ -140,7 +138,8 @@ def kpis_typed():
 def silver_kpis():
     return spark.readStream.table("kpis_typed").select(
         "record_id", "cell_id", "site_id", "backhaul_id", "router_id", "upf_id", "amf_id", "region_code", "timezone",
-        "event_ts", "event_end_ts", "emitted_ts", "event_ts_local", "local_hour", "day_type", "event_date",
+        "event_ts", "event_end_ts", "emitted_ts", "event_ts_local", "local_date", "local_hour", "day_type",
+        "event_date",
         "granularity_s", *KPI_METRICS, "lag_s", "is_late", "landed_ts", "evidence_ts", "source_run",
         "_rescued_data", "_source_file", "_file_modification_time", "_ingested_at")
 

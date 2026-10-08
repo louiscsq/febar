@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 Z = 4.0  # deviation threshold in baseline standard deviations
 MIN_STD = {  # floor on the baseline std, so z-scores stay meaningful for very stable cells
@@ -151,6 +153,19 @@ def zscore_sql(column: str) -> str:
     return (f"({column} - b_{column}_mean) / greatest(coalesce(b_{column}_std, 0), {MIN_STD[column]})")
 
 
+# Local calendar keys of a UTC timestamp in the element's IANA zone (DST-aware in Spark and in Python).
+# The baseline aggregates, looks back and joins on the *local* date, so a record just after local midnight
+# belongs to the new local day even though its UTC date is the previous one.
+LOCAL_TS_SQL = "from_utc_timestamp({ts}, timezone)"
+LOCAL_DATE_SQL = "to_date(from_utc_timestamp({ts}, timezone))"
+
+
+def local_keys(ts_utc: datetime, tz: str) -> tuple[date, int, str]:
+    """(local_date, local_hour, day_type) of an aware UTC datetime: Python mirror of the silver columns."""
+    loc = ts_utc.astimezone(ZoneInfo(tz))
+    return loc.date(), loc.hour, day_type(loc.isoweekday() % 7 + 1)
+
+
 def day_type(local_dow: int) -> str:
     """Spark `dayofweek` numbering (1 = Sunday .. 7 = Saturday) -> 'weekend' / 'weekday'."""
     return "weekend" if local_dow in (1, 7) else "weekday"
@@ -160,5 +175,6 @@ DAY_TYPE_SQL = "CASE WHEN dayofweek({ts}) IN (1, 7) THEN 'weekend' ELSE 'weekday
 
 
 def baseline_window(valid_date_ordinal: int) -> tuple[int, int]:
-    """Inclusive range of day ordinals feeding the baseline used on `valid_date`: strictly earlier days."""
+    """Inclusive range of local-date ordinals feeding the baseline used on local date `valid_date`:
+    strictly earlier local days."""
     return valid_date_ordinal - BASELINE_LOOKBACK_DAYS, valid_date_ordinal - 1

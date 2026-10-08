@@ -26,9 +26,10 @@ ANCESTOR_COLS = ["site_id", "backhaul_id", "router_id", "upf_id", "amf_id"]
 
 
 # ---------------------------------------------------------------------------------------------------
-# (a) Baseline: same cell, same local hour and day type, trailing 14 days strictly before the day it is
-# used on. Each row is valid for exactly one UTC date, so scoring a record never sees its own day or the
-# future (no leakage, also when the whole history is backfilled at once).
+# (a) Baseline: same cell, same local hour and day type, trailing 14 local days strictly before the local
+# day it is used on. Days are the cell's local calendar days (local_date, DST-aware), so the aggregation,
+# the lookback and the join agree with local_hour / day_type. Each row is valid for exactly one local date,
+# so scoring a record never sees its own day or the future (no leakage, even in a one-shot backfill).
 # ---------------------------------------------------------------------------------------------------
 
 def _baseline_sql() -> str:
@@ -39,19 +40,19 @@ def _baseline_sql() -> str:
         for m in BASE)
     return f"""
     WITH daily AS (
-      SELECT cell_id, local_hour, day_type, event_date, count(*) AS n, {moments}
+      SELECT cell_id, local_hour, day_type, local_date, count(*) AS n, {moments}
       FROM {S.silver}.silver_kpis
       -- outage periods would drag the baseline down; hard-rule failures are excluded from it
       WHERE availability_pct >= 99 AND attach_success_pct >= 95 AND rrc_setup_success_pct >= 80
-      GROUP BY cell_id, local_hour, day_type, event_date
+      GROUP BY cell_id, local_hour, day_type, local_date
     ),
     dates AS (
-      SELECT explode(sequence(date_add(min(event_date), 1), date_add(max(event_date), 1))) AS valid_date FROM daily
+      SELECT explode(sequence(date_add(min(local_date), 1), date_add(max(local_date), 1))) AS valid_date FROM daily
     )
     SELECT d.valid_date, x.cell_id, x.local_hour, x.day_type, sum(x.n) AS n_samples, count(*) AS n_days,
            {stats}
     FROM dates d
-    JOIN daily x ON x.event_date BETWEEN date_sub(d.valid_date, {detection.BASELINE_LOOKBACK_DAYS})
+    JOIN daily x ON x.local_date BETWEEN date_sub(d.valid_date, {detection.BASELINE_LOOKBACK_DAYS})
                                      AND date_sub(d.valid_date, 1)
     GROUP BY d.valid_date, x.cell_id, x.local_hour, x.day_type
     """
@@ -59,8 +60,8 @@ def _baseline_sql() -> str:
 
 @dp.materialized_view(
     name=f"{S.gold}.gold_cell_baseline",
-    comment="Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 days strictly "
-            "before valid_date. Join on (cell_id, local_hour, day_type, valid_date = UTC event date).",
+    comment="Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 local days strictly "
+            "before valid_date. Join on (cell_id, local_hour, day_type, valid_date = local_date of the record).",
     cluster_by=["valid_date", "cell_id"],
 )
 def gold_cell_baseline():
@@ -70,10 +71,10 @@ def gold_cell_baseline():
 @dp.temporary_view(name="kpis_scored")
 def kpis_scored():
     """Silver KPI stream joined to its baseline, with z-scores and the detection rules that fire."""
-    base = spark.read.table(f"{S.gold}.gold_cell_baseline").withColumnRenamed("valid_date", "event_date") \
-        .select("cell_id", "local_hour", "day_type", "event_date", "n_days", *BASE_COLS)
+    base = spark.read.table(f"{S.gold}.gold_cell_baseline").withColumnRenamed("valid_date", "local_date") \
+        .select("cell_id", "local_hour", "day_type", "local_date", "n_days", *BASE_COLS)
     df = spark.readStream.table(f"{S.silver}.silver_kpis").join(
-        F.broadcast(base), ["cell_id", "local_hour", "day_type", "event_date"], "left")
+        F.broadcast(base), ["cell_id", "local_hour", "day_type", "local_date"], "left")
     for m in BASE:
         df = df.withColumn(f"{m}_z", F.expr(detection.zscore_sql(m)))
     return df.withColumn("flags", F.expr(detection.flags_sql()))

@@ -26,9 +26,12 @@ from datetime import datetime, timedelta, timezone
 # A record is late when it reaches the collector this long after its period / session ended. Normal
 # collection lag is < 4 min for 15-min KPIs and < 2 min for everything else; DQ late arrivals are 30 min+.
 LATE_THRESHOLD_S = 20 * 60
-# Duplicates are re-delivered 1-600 s after the original (data_model.md), so a 15-minute watermark on
-# the delivery time (`emitted_ts`) catches every one without holding much state.
-DEDUPE_WATERMARK = "15 minutes"
+# Silver deduplicates on record_id behind a watermark on the ingestion time (`_ingested_at`, monotonic),
+# never on event, delivery or file times, so a file discovered late is never dropped (netmon_pipeline.dedupe).
+# Redeliveries come 1-600 s after the original (data_model.md); the horizon leaves 6x headroom for them
+# to be ingested in a later micro-batch. Redeliveries beyond it are admitted and measured, not dropped.
+DEDUPE_WATERMARK_COLUMN = "_ingested_at"
+DEDUPE_WATERMARK = "1 hour"
 # Alarm clock skew: an alarm cannot be raised after it was delivered, or days before.
 ALARM_MAX_AGE_S = 3 * 24 * 3600
 ALARM_MAX_FUTURE_S = 15 * 60
