@@ -91,6 +91,9 @@ class Incident:
     affected_element_ids: list[str] = field(default_factory=list)
     planned_window: tuple[np.datetime64, np.datetime64] | None = None
     estimated_impacted_subscribers: int = 0
+    # Censored = not fully observed (streaming stopped mid-incident); times are clipped to `observed_until`.
+    is_censored: bool = False
+    observed_until: np.datetime64 | None = None
 
     @property
     def spec(self) -> FaultSpec:
@@ -107,6 +110,16 @@ class Incident:
     @property
     def customer_impacting(self) -> bool:
         return len(self.cell_idx) > 0 and bool((self.cell_end > self.onset).any())
+
+    def extent(self) -> tuple[np.datetime64, np.datetime64]:
+        """Earliest and latest instant the incident touches anything: root start/end, per-cell onset and
+        recovery, and every alarm RAISE/CLEAR it generates."""
+        lo = [self.start] + ([self.onset.min()] if len(self.onset) else [])
+        hi = [self.end] + ([self.cell_end.max()] if len(self.cell_end) else [])
+        for a in self.alarms:
+            lo.append(a["raise_ts"])
+            hi.append(a["clear_ts"] if a["clear_ts"] is not None else a["raise_ts"])
+        return min(lo), max(hi)
 
 
 @dataclass
@@ -252,12 +265,18 @@ def _build_impact(spec: FaultSpec, root: str, start: np.datetime64, dur_min: flo
 
 def schedule_incidents(topo: Topology, ws: np.datetime64, we: np.datetime64, cfg: FaultConfig,
                        rng: np.random.Generator, existing: list[Incident] | None = None,
-                       id_prefix: str = "INC") -> list[Incident]:
-    """Draw incidents starting in [ws, we). Customer-impacting incidents never overlap in (cells, time),
-    so every degraded cell-period has exactly one ground-truth cause."""
+                       id_prefix: str = "INC", bounds: tuple | None = None) -> list[Incident]:
+    """Draw incidents starting in [ws, we).
+
+    Every accepted incident's full `extent()` (propagation delays, recovery and all of its alarms) lies
+    inside `bounds` = (lo, hi), default (ws, we); `hi=None` means unbounded (streaming). Candidates that
+    do not fit are redrawn, so batch ground truth never describes impact outside the telemetry window.
+    Customer-impacting incidents never overlap in (cells, time), so every degraded cell-period has
+    exactly one ground-truth cause."""
     if not cfg.enabled:
         return []
     ws, we = ws.astype("datetime64[s]"), we.astype("datetime64[s]")
+    b_lo, b_hi = bounds if bounds is not None else (ws, we)
     days = (we - ws) / np.timedelta64(1, "D")
     busy: list[tuple[np.ndarray, np.datetime64, np.datetime64]] = [
         (i.cell_idx, i.onset.min() - 30 * MIN, i.cell_end.max() + 30 * MIN)
@@ -291,19 +310,23 @@ def schedule_incidents(topo: Topology, ws: np.datetime64, we: np.datetime64, cfg
                         spec, root, start, dur, topo, rng)
                     if len(idx):
                         lo, hi = onset.min() - 30 * MIN, cend.max() + 30 * MIN
-                        if any(b_lo < hi and lo < b_hi and np.intersect1d(b_idx, idx, assume_unique=True).size
-                               for b_idx, b_lo, b_hi in busy):
+                        if any(o_lo < hi and lo < o_hi and np.intersect1d(o_idx, idx, assume_unique=True).size
+                               for o_idx, o_lo, o_hi in busy):
                             continue
-                        busy.append((idx, lo, hi))
-                    seq += 1
                     root_row = topo.nodes.loc[root]
                     inc = Incident(
-                        incident_id=f"{id_prefix}-{seq:05d}", fault_type=ftype, event_class=spec.event_class,
+                        incident_id=f"{id_prefix}-{seq + 1:05d}", fault_type=ftype, event_class=spec.event_class,
                         root_element_id=root, root_element_type=rtype, region_code=root_row["region_code"],
                         start=start, end=end,
                         cell_idx=idx, onset=onset, cell_end=cend, severity=sev, ramp_s=ramp_s,
                         load_boost=boost, planned_window=planned)
                     _finalise(inc, topo, rng)
+                    e_lo, e_hi = inc.extent()
+                    if e_lo < b_lo or (b_hi is not None and e_hi > b_hi):
+                        continue  # would run past the observed window: redraw
+                    if len(idx):
+                        busy.append((idx, lo, hi))
+                    seq += 1
                     out.append(inc)
                     break
     out.sort(key=lambda i: i.start)
@@ -422,8 +445,17 @@ def _severity_label(inc: Incident) -> str:
 def incidents_frame(incidents: list[Incident], topo: Topology) -> pd.DataFrame:
     cell_ids = topo.cells["element_id"].to_numpy()
     rows = []
+    def iso(t):
+        return None if t is None or np.isnat(t) else to_iso(np.array([t]))[0]
+
+    def clip(t):
+        return t if not inc.is_censored or inc.observed_until is None else min(t, inc.observed_until)
+
     for inc in incidents:
         imp = inc.customer_impacting
+        if inc.is_censored:  # only what was observed counts
+            imp = imp and inc.observed_until is not None and inc.impact_start < inc.observed_until
+        end = inc.end if not (inc.is_censored and inc.observed_until is None) else None
         rows.append({
             "incident_id": inc.incident_id,
             "event_class": inc.event_class,
@@ -431,11 +463,13 @@ def incidents_frame(incidents: list[Incident], topo: Topology) -> pd.DataFrame:
             "root_element_id": inc.root_element_id,
             "root_element_type": inc.root_element_type,
             "region_code": inc.region_code,
-            "start_ts": to_iso(np.array([inc.start]))[0],
-            "end_ts": to_iso(np.array([inc.end]))[0],
-            "impact_start_ts": to_iso(np.array([inc.impact_start]))[0] if imp else None,
-            "impact_end_ts": to_iso(np.array([inc.impact_end]))[0] if imp else None,
+            "start_ts": iso(inc.start),
+            "end_ts": iso(clip(end)) if end is not None else None,
+            "impact_start_ts": iso(inc.impact_start) if imp else None,
+            "impact_end_ts": (iso(clip(inc.impact_end)) if not (inc.is_censored and inc.observed_until is None)
+                              else None) if imp else None,
             "is_customer_impacting": bool(imp),
+            "is_censored": bool(inc.is_censored),
             "severity": _severity_label(inc),
             "affected_element_ids": inc.affected_element_ids,
             "affected_cell_ids": sorted(cell_ids[inc.cell_idx].tolist()) if imp else [],
@@ -445,7 +479,7 @@ def incidents_frame(incidents: list[Incident], topo: Topology) -> pd.DataFrame:
             "description": inc.spec.description,
         })
     cols = ["incident_id", "event_class", "fault_type", "root_element_id", "root_element_type", "region_code",
-            "start_ts", "end_ts", "impact_start_ts", "impact_end_ts", "is_customer_impacting", "severity",
+            "start_ts", "end_ts", "impact_start_ts", "impact_end_ts", "is_customer_impacting", "is_censored", "severity",
             "affected_element_ids", "affected_cell_ids", "n_affected_cells", "estimated_impacted_subscribers",
             "n_alarms", "description"]
     return pd.DataFrame(rows, columns=cols)

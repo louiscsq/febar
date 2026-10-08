@@ -3,7 +3,11 @@
 Each micro-batch advances simulated time by `step_seconds` (KPIs at that granularity, default 1 min)
 and sleeps so that batches land every `interval_seconds` of wall-clock time (0 = as fast as possible).
 Faults are scheduled live, one simulated hour at a time, and propagate exactly as in batch mode.
-Ground truth for each incident is written when the incident starts, under ground_truth/.
+Ground truth for an incident is written under ground_truth/ once it has fully played out (impact,
+recovery and alarms), so every uncensored label is backed by telemetry. When a bounded run stops
+(`max_batches`), incidents still in flight are written with `is_censored = true`, times clipped to
+the end of the observed window, and the spool is flushed of every record whose event time was observed.
+Chronic flapping elements are written at start as open-ended (`end_ts` null, censored).
 
 Files are written atomically (dot-prefixed temp file + rename), so Auto Loader never sees partial files.
 """
@@ -49,7 +53,9 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
     write_json_manifest(out / "_manifest.json", {"generator": "netmon-datagen", "mode": "stream",
                                                  "config": config_dict(cfg), "start": str(t0) + "Z",
                                                  "step_seconds": step_seconds})
-    flaps = flapping_incidents(eng.flappers, topo, t0, t0 + np.timedelta64(3650, "D"), prefix="FLAP")
+    flaps = flapping_incidents(eng.flappers, topo, t0, t0, prefix="FLAP")
+    for f in flaps:  # chronic, open-ended condition: no end time yet
+        f.is_censored = True
     if flaps:
         write_frame(incidents_frame(flaps, topo),
                     out / "ground_truth" / "incidents" / f"date={str(t0)[:10]}" / "flapping.json", "json")
@@ -68,8 +74,10 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
         h = t.astype("datetime64[h]").astype("datetime64[s]")
         if hour is None or h != hour:
             hour = h
-            new = schedule_incidents(topo, h, h + HOUR, cfg.faults, rng_for(cfg.seed, "stream-faults", str(h)),
-                                     existing=active, id_prefix=f"INC-{stamp(h)[:11].replace('T', '')}")
+            # Nothing may start (or alarm) before the stream does; there is no upper bound while running.
+            new = schedule_incidents(topo, max(h, t0), h + HOUR, cfg.faults,
+                                     rng_for(cfg.seed, "stream-faults", str(h)), existing=active,
+                                     id_prefix=f"INC-{stamp(h)[:11].replace('T', '')}", bounds=(t0, None))
             active += new
             pending_truth += new
             mw = maintenance_frame(new)
@@ -80,12 +88,10 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
 
         logs += eng.period(np.array([t], dtype="datetime64[s]"), step_seconds / 60, active, key=str(t))
 
-        due = [inc for inc in pending_truth if inc.start < bend]
-        if due:
-            pending_truth = [inc for inc in pending_truth if inc.start >= bend]
-            day = str(t)[:10]
-            write_frame(incidents_frame(due, topo), out / "ground_truth" / "incidents" / f"date={day}" / f"{name}.json",
-                        "json")
+        finished = [inc for inc in pending_truth if inc.extent()[1] < bend]
+        if finished:
+            pending_truth = [inc for inc in pending_truth if inc.extent()[1] >= bend]
+            _write_truth(finished, topo, out, t, name)
         stats = {}
         for feed in FEEDS:
             df = eng.spool.release(feed, bend)
@@ -105,4 +111,22 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
         i += 1
         if max_batches is None or i < max_batches:
             time.sleep(max(0.0, interval_seconds - (time.time() - wall)))
-    return {"batches": i, "written": totals}
+
+    # Bounded run finished: censor in-flight incidents and flush records for observed event times.
+    t_end = t0 + i * step
+    started = [inc for inc in pending_truth if inc.extent()[0] < t_end]
+    for inc in started:
+        inc.is_censored, inc.observed_until = True, t_end
+    if started:
+        _write_truth(started, topo, out, t_end, f"batch-{stamp(t_end)}-final")
+    for feed in FEEDS:
+        df = eng.spool.release(feed, None)
+        df = df[df["_event_time"].to_numpy() < t_end] if len(df) else df
+        totals[feed] += len(df)
+        write_partitioned(df, out, feed, "json", stem=f"batch-{stamp(t_end)}-final")
+    return {"batches": i, "written": totals, "censored_incidents": len(started)}
+
+
+def _write_truth(incs: list[Incident], topo, out: Path, t: np.datetime64, name: str) -> None:
+    write_frame(incidents_frame(incs, topo), out / "ground_truth" / "incidents" / f"date={str(t)[:10]}" / f"{name}.json",
+                "json")
