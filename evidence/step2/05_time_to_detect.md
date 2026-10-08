@@ -1,6 +1,6 @@
 # Time-to-detect, localisation and precision against ground truth
 
-Captured 2026-10-08 18:04 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 19:38 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 Scored incidents: customer-impacting and not censored. Two separate metrics (docs/pipeline.md):
 
@@ -18,7 +18,7 @@ SELECT source_run, event_class, n_incidents, n_impact_detected, impact_detected_
 
 | source_run | event_class | n_incidents | n_impact_detected | impact_detected_pct | impact_median_ttd_s | impact_p90_ttd_s | impact_within_5min_pct | n_root_localised | root_localised_pct | localisation_median_ttd_s | localised_within_5min_pct | median_evidence_lag_s | median_pipeline_latency_s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| stream | fault | 26 | 26 | 100.0 | 126.8 | 244.8 | 92.3 | 26 | 100.0 | 126.8 | 92.3 | 88.5 | 36.3 |
+| stream | fault | 26 | 26 | 100.0 | 141.4 | 430.4 | 88.5 | 26 | 100.0 | 144.4 | 88.5 | 94.0 | 39.2 |
 | history | fault | 16 | 15 | 93.8 | 61.5 | 1057.0 | 75.0 | 14 | 87.5 | 61.5 | 68.8 | 61.5 | NULL |
 
 _2 row(s)_
@@ -32,15 +32,14 @@ SELECT source_run, event_class, n_incidents, n_impact_detected, impact_detected_
 
 | source_run | event_class | n_incidents | n_impact_detected | impact_detected_pct | impact_median_ttd_s | impact_p90_ttd_s | impact_within_5min_pct | n_root_localised | root_localised_pct | localisation_median_ttd_s | localised_within_5min_pct | median_evidence_lag_s | median_pipeline_latency_s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| stream | fault | 26 | 26 | 100.0 | 126.8 | 244.8 | 92.3 | 26 | 100.0 | 126.8 | 92.3 | 88.5 | 36.3 |
-| stream | planned | 2 | 2 | 100.0 | 160.7 | 167.5 | 100.0 | 2 | 100.0 | 160.7 | 100.0 | 80.5 | 80.2 |
-| stream | ALL | 28 | 28 | 100.0 | 127.9 | 235.4 | 92.9 | 28 | 100.0 | 127.9 | 92.9 | 88.5 | 37.0 |
+| stream | fault | 26 | 26 | 100.0 | 141.4 | 430.4 | 88.5 | 26 | 100.0 | 144.4 | 88.5 | 94.0 | 39.2 |
+| stream | ALL | 26 | 26 | 100.0 | 141.4 | 430.4 | 88.5 | 26 | 100.0 | 144.4 | 88.5 | 94.0 | 39.2 |
 | history | fault | 16 | 15 | 93.8 | 61.5 | 1057.0 | 75.0 | 14 | 87.5 | 61.5 | 68.8 | 61.5 | NULL |
 | history | planned | 2 | 2 | 100.0 | 33.0 | 35.4 | 100.0 | 2 | 100.0 | 33.0 | 100.0 | 33.0 | NULL |
 | history | red_herring | 1 | 1 | 100.0 | 1070.0 | 1070.0 | 0.0 | 1 | 100.0 | 2150.0 | 0.0 | 1070.0 | NULL |
 | history | ALL | 19 | 18 | 94.7 | 59.0 | 1200.8 | 73.7 | 17 | 89.5 | 59.0 | 68.4 | 59.0 | NULL |
 
-_7 row(s)_
+_6 row(s)_
 
 ## Per fault type
 
@@ -53,10 +52,10 @@ SELECT source_run, event_class, fault_type, n_incidents, impact_detected_pct, im
 
 | source_run | event_class | fault_type | n_incidents | impact_detected_pct | impact_median_ttd_s | impact_within_5min_pct | root_localised_pct | localisation_median_ttd_s | localised_within_5min_pct |
 |---|---|---|---|---|---|---|---|---|---|
-| stream | fault | BACKHAUL_DEGRADATION | 2 | 100.0 | 621.5 | 0.0 | 100.0 | 939.0 | 0.0 |
-| stream | fault | CELL_OUTAGE | 22 | 100.0 | 119.0 | 100.0 | 100.0 | 119.0 | 100.0 |
-| stream | fault | SITE_POWER_OUTAGE | 2 | 100.0 | 205.3 | 100.0 | 100.0 | 205.3 | 100.0 |
-| stream | planned | PLANNED_MAINTENANCE | 2 | 100.0 | 160.7 | 100.0 | 100.0 | 160.7 | 100.0 |
+| stream | fault | AGG_ROUTER_FAILURE | 1 | 100.0 | 23.4 | 100.0 | 100.0 | 206.0 | 100.0 |
+| stream | fault | BACKHAUL_DEGRADATION | 3 | 100.0 | 807.9 | 0.0 | 100.0 | 1166.0 | 0.0 |
+| stream | fault | CELL_OUTAGE | 20 | 100.0 | 132.7 | 100.0 | 100.0 | 132.7 | 100.0 |
+| stream | fault | SITE_POWER_OUTAGE | 2 | 100.0 | 235.5 | 100.0 | 100.0 | 235.5 | 100.0 |
 | history | fault | AGG_ROUTER_FAILURE | 2 | 100.0 | 0.0 | 100.0 | 100.0 | 20.0 | 100.0 |
 | history | fault | AMF_OVERLOAD | 1 | 100.0 | 390.0 | 0.0 | 100.0 | 1499.0 | 0.0 |
 | history | fault | BACKHAUL_DEGRADATION | 1 | 100.0 | 1724.0 | 0.0 | 100.0 | 1909.0 | 0.0 |
@@ -84,32 +83,32 @@ SELECT incident_id, fault_type, root_element_type, impact_start_ts, impact_detec
 
 | incident_id | fault_type | root_element_type | impact_start_ts | impact_detected | first_signal_source | first_element_type | evidence_lag_s | pipeline_latency_s | impact_ttd_s | impact_within_sla | root_localised | localisation_source | localisation_ttd_s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| INC-2026100817-00001 | CELL_OUTAGE | CELL | 2026-10-08T17:27:34.000Z | true | alarm | CELL | 86 | 135.2 | 221.2 | true | true | detection | 221.2 |
-| INC-2026100818-00001 | CELL_OUTAGE | CELL | 2026-10-08T18:04:53.000Z | true | alarm | CELL | 67 | 48.2 | 115.2 | true | true | detection | 115.2 |
-| INC-2026100818-00002 | CELL_OUTAGE | CELL | 2026-10-08T18:10:40.000Z | true | alarm | CELL | 80 | 38.2 | 118.2 | true | true | detection | 118.2 |
-| INC-2026100818-00004 | CELL_OUTAGE | CELL | 2026-10-08T18:23:29.000Z | true | kpi | CELL | 91 | 35.0 | 126.0 | true | true | detection | 126.0 |
-| INC-2026100818-00005 | CELL_OUTAGE | CELL | 2026-10-08T18:28:54.000Z | true | alarm | CELL | 66 | 24.9 | 90.9 | true | true | detection | 90.9 |
-| INC-2026100818-00006 | CELL_OUTAGE | CELL | 2026-10-08T18:36:58.000Z | true | kpi | CELL | 62 | 30.0 | 92.0 | true | true | detection | 92.0 |
-| INC-2026100818-00007 | BACKHAUL_DEGRADATION | BACKHAUL_LINK | 2026-10-08T18:40:43.000Z | true | kpi | CELL | 377 | 43.3 | 420.3 | false | true | rollup | 677.0 |
-| INC-2026100818-00008 | CELL_OUTAGE | CELL | 2026-10-08T18:48:54.000Z | true | alarm | CELL | 66 | 31.4 | 97.4 | true | true | detection | 97.4 |
-| INC-2026100818-00009 | CELL_OUTAGE | CELL | 2026-10-08T18:49:56.000Z | true | kpi | CELL | 64 | 35.3 | 99.3 | true | true | detection | 99.3 |
-| INC-2026100818-00003 | SITE_POWER_OUTAGE | SITE | 2026-10-08T19:05:22.000Z | true | alarm | SITE | 98 | 44.4 | 142.4 | true | true | detection | 142.4 |
-| INC-2026100819-00001 | CELL_OUTAGE | CELL | 2026-10-08T19:12:29.000Z | true | kpi | CELL | 91 | 37.2 | 128.2 | true | true | detection | 128.2 |
-| INC-2026100819-00003 | CELL_OUTAGE | CELL | 2026-10-08T19:22:09.000Z | true | alarm | CELL | 51 | 35.8 | 86.8 | true | true | detection | 86.8 |
-| INC-2026100819-00005 | CELL_OUTAGE | CELL | 2026-10-08T19:29:23.000Z | true | alarm | CELL | 97 | 44.1 | 141.1 | true | true | detection | 141.1 |
-| INC-2026100819-00007 | CELL_OUTAGE | CELL | 2026-10-08T19:57:28.000Z | true | alarm | CELL | 92 | 35.6 | 127.6 | true | true | detection | 127.6 |
-| INC-2026100820-00001 | CELL_OUTAGE | CELL | 2026-10-08T20:14:15.000Z | true | alarm | CELL | 45 | 44.3 | 89.3 | true | true | detection | 89.3 |
-| INC-2026100820-00002 | CELL_OUTAGE | CELL | 2026-10-08T20:16:43.000Z | true | kpi | CELL | 77 | 34.3 | 111.3 | true | true | detection | 111.3 |
-| INC-2026100820-00003 | CELL_OUTAGE | CELL | 2026-10-08T20:23:10.000Z | true | alarm | CELL | 110 | 35.8 | 145.8 | true | true | detection | 145.8 |
-| INC-2026100820-00004 | CELL_OUTAGE | CELL | 2026-10-08T20:26:14.000Z | true | alarm | CELL | 106 | 34.0 | 140.0 | true | true | detection | 140.0 |
-| INC-2026100820-00005 | CELL_OUTAGE | CELL | 2026-10-08T20:34:08.000Z | true | alarm | CELL | 112 | 34.4 | 146.4 | true | true | detection | 146.4 |
-| INC-2026100819-00002 | SITE_POWER_OUTAGE | SITE | 2026-10-08T20:36:10.000Z | true | alarm | SITE | 230 | 38.3 | 268.3 | true | true | detection | 268.3 |
-| INC-2026100820-00006 | BACKHAUL_DEGRADATION | BACKHAUL_LINK | 2026-10-08T20:36:59.000Z | true | kpi | CELL | 781 | 41.7 | 822.7 | false | true | rollup | 1201.0 |
-| INC-2026100820-00007 | CELL_OUTAGE | CELL | 2026-10-08T20:54:00.000Z | true | alarm | CELL | 120 | 32.5 | 152.5 | true | true | detection | 152.5 |
-| INC-2026100820-00009 | CELL_OUTAGE | CELL | 2026-10-08T20:55:15.000Z | true | alarm | CELL | 45 | 32.5 | 77.5 | true | true | detection | 77.5 |
-| INC-2026100821-00002 | CELL_OUTAGE | CELL | 2026-10-08T21:59:22.000Z | true | alarm | CELL | 98 | 42.8 | 140.8 | true | true | detection | 140.8 |
-| INC-2026100822-00001 | CELL_OUTAGE | CELL | 2026-10-08T22:01:37.000Z | true | alarm | CELL | 83 | 36.8 | 119.8 | true | true | detection | 119.8 |
-| INC-2026100822-00006 | CELL_OUTAGE | CELL | 2026-10-08T22:37:30.000Z | true | alarm | CELL | 30 | 42.7 | 72.7 | true | true | detection | 72.7 |
+| INC-2026100819-00001 | CELL_OUTAGE | CELL | 2026-10-08T19:01:54.000Z | true | alarm | CELL | 66 | 164.6 | 230.6 | true | true | detection | 230.6 |
+| INC-2026100819-00002 | CELL_OUTAGE | CELL | 2026-10-08T19:12:29.000Z | true | alarm | CELL | 91 | 109.6 | 200.6 | true | true | detection | 200.6 |
+| INC-2026100819-00004 | CELL_OUTAGE | CELL | 2026-10-08T19:16:19.000Z | true | alarm | CELL | 41 | 94.6 | 135.6 | true | true | detection | 135.6 |
+| INC-2026100819-00006 | CELL_OUTAGE | CELL | 2026-10-08T19:29:23.000Z | true | alarm | CELL | 97 | 52.4 | 149.4 | true | true | detection | 149.4 |
+| INC-2026100820-00001 | CELL_OUTAGE | CELL | 2026-10-08T20:14:15.000Z | true | alarm | CELL | 45 | 30.8 | 75.8 | true | true | detection | 75.8 |
+| INC-2026100820-00002 | CELL_OUTAGE | CELL | 2026-10-08T20:16:43.000Z | true | kpi | CELL | 77 | 28.8 | 105.8 | true | true | detection | 105.8 |
+| INC-2026100820-00003 | CELL_OUTAGE | CELL | 2026-10-08T20:23:10.000Z | true | alarm | CELL | 110 | 32.8 | 142.8 | true | true | detection | 142.8 |
+| INC-2026100820-00004 | CELL_OUTAGE | CELL | 2026-10-08T20:26:14.000Z | true | alarm | CELL | 106 | 33.9 | 139.9 | true | true | detection | 139.9 |
+| INC-2026100820-00005 | CELL_OUTAGE | CELL | 2026-10-08T20:34:08.000Z | true | alarm | CELL | 112 | 38.5 | 150.5 | true | true | detection | 150.5 |
+| INC-2026100819-00005 | SITE_POWER_OUTAGE | SITE | 2026-10-08T20:36:10.000Z | true | alarm | SITE | 230 | 43.6 | 273.6 | true | true | detection | 273.6 |
+| INC-2026100820-00006 | BACKHAUL_DEGRADATION | BACKHAUL_LINK | 2026-10-08T20:36:59.000Z | true | kpi | CELL | 781 | 50.2 | 831.2 | false | true | rollup | 1201.0 |
+| INC-2026100820-00007 | CELL_OUTAGE | CELL | 2026-10-08T20:54:00.000Z | true | alarm | CELL | 120 | 39.2 | 159.2 | true | true | detection | 159.2 |
+| INC-2026100820-00009 | CELL_OUTAGE | CELL | 2026-10-08T20:55:15.000Z | true | alarm | CELL | 45 | 39.2 | 84.2 | true | true | detection | 84.2 |
+| INC-2026100820-00010 | CELL_OUTAGE | CELL | 2026-10-08T20:57:14.000Z | true | kpi | CELL | 106 | 40.7 | 146.7 | true | true | detection | 146.7 |
+| INC-2026100820-00008 | SITE_POWER_OUTAGE | SITE | 2026-10-08T21:46:15.000Z | true | alarm | SITE | 165 | 32.4 | 197.4 | true | true | detection | 197.4 |
+| INC-2026100821-00001 | CELL_OUTAGE | CELL | 2026-10-08T21:58:16.000Z | true | alarm | CELL | 44 | 29.6 | 73.6 | true | true | detection | 73.6 |
+| INC-2026100821-00002 | CELL_OUTAGE | CELL | 2026-10-08T21:59:22.000Z | true | alarm | CELL | 98 | 31.9 | 129.9 | true | true | detection | 129.9 |
+| INC-2026100822-00001 | CELL_OUTAGE | CELL | 2026-10-08T22:01:37.000Z | true | alarm | CELL | 83 | 38.4 | 121.4 | true | true | detection | 121.4 |
+| INC-2026100822-00003 | CELL_OUTAGE | CELL | 2026-10-08T22:11:06.000Z | true | alarm | CELL | 54 | 37.6 | 91.6 | true | true | detection | 91.6 |
+| INC-2026100822-00004 | BACKHAUL_DEGRADATION | BACKHAUL_LINK | 2026-10-08T22:27:34.000Z | true | kpi | CELL | 746 | 61.9 | 807.9 | false | true | rollup | 1166.0 |
+| INC-2026100822-00006 | CELL_OUTAGE | CELL | 2026-10-08T22:37:30.000Z | true | alarm | CELL | 30 | 43.8 | 73.8 | true | true | detection | 73.8 |
+| INC-2026100822-00007 | BACKHAUL_DEGRADATION | BACKHAUL_LINK | 2026-10-08T22:41:33.000Z | true | kpi | CELL | 507 | 80.2 | 587.2 | false | true | rollup | 927.0 |
+| INC-2026100823-00004 | AGG_ROUTER_FAILURE | AGG_ROUTER | 2026-10-08T23:18:34.000Z | true | alarm | BACKHAUL_LINK | 0 | 57.4 | 23.4 | true | true | rollup | 206.0 |
+| INC-2026100823-00007 | CELL_OUTAGE | CELL | 2026-10-08T23:35:06.000Z | true | alarm | CELL | 54 | 31.9 | 85.9 | true | true | detection | 85.9 |
+| INC-2026100900-00001 | CELL_OUTAGE | CELL | 2026-10-09T00:03:10.000Z | true | kpi | CELL | 110 | 35.9 | 145.9 | true | true | detection | 145.9 |
+| INC-2026100900-00002 | CELL_OUTAGE | CELL | 2026-10-09T00:09:28.000Z | true | alarm | CELL | 32 | 72.3 | 104.3 | true | true | detection | 104.3 |
 
 _26 row(s)_
 
@@ -122,20 +121,19 @@ SELECT event_class, fault_type, is_customer_impacting, is_censored, count(*) AS 
 
 | event_class | fault_type | is_customer_impacting | is_censored | n |
 |---|---|---|---|---|
-| fault | AGG_ROUTER_FAILURE | true | true | 1 |
-| fault | BACKHAUL_DEGRADATION | true | false | 2 |
-| fault | BACKHAUL_DEGRADATION | true | true | 4 |
-| fault | CELL_OUTAGE | false | true | 1 |
-| fault | CELL_OUTAGE | true | false | 22 |
-| fault | CELL_OUTAGE | true | true | 5 |
-| fault | SITE_POWER_OUTAGE | false | true | 1 |
+| fault | AGG_ROUTER_FAILURE | true | false | 1 |
+| fault | BACKHAUL_DEGRADATION | true | false | 3 |
+| fault | BACKHAUL_DEGRADATION | true | true | 6 |
+| fault | CELL_OUTAGE | true | false | 20 |
+| fault | CELL_OUTAGE | true | true | 9 |
+| fault | LONG_HAUL_FIBRE_CUT | true | true | 1 |
 | fault | SITE_POWER_OUTAGE | true | false | 2 |
-| fault | SITE_POWER_OUTAGE | true | true | 1 |
-| planned | PLANNED_MAINTENANCE | true | false | 2 |
-| red_herring | ALARM_STORM | false | false | 4 |
+| fault | SITE_POWER_OUTAGE | true | true | 2 |
+| red_herring | ALARM_STORM | false | false | 6 |
+| red_herring | ALARM_STORM | false | true | 1 |
 | red_herring | FLAPPING_ELEMENT | false | true | 2 |
 
-_12 row(s)_
+_11 row(s)_
 
 ## Alert-level fault precision (detections grouped per element per episode)
 
@@ -148,9 +146,9 @@ SELECT * FROM telco_netmon_febar_catalog.netmon_eval.eval_alert_precision
 
 | source_run | signal_source | n_alerts | n_fault_tp | n_censored_excluded | n_planned | n_planned_suppressed | n_planned_unsuppressed_fp | n_red_herring_fp | n_unexplained_fp | alert_fault_precision_pct | maintenance_suppression_pct |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| stream | ALL | 191 | 65 | 74 | 11 | 11 | 0 | 0 | 41 | 61.3 | 100.0 |
-| stream | alarm | 20 | 2 | 16 | 2 | 2 | 0 | 0 | 0 | 100.0 | 100.0 |
-| stream | kpi | 171 | 63 | 58 | 9 | 9 | 0 | 0 | 41 | 60.6 | 100.0 |
+| stream | ALL | 231 | 104 | 58 | 0 | 0 | 0 | 0 | 69 | 60.1 | NULL |
+| stream | alarm | 21 | 17 | 4 | 0 | 0 | 0 | 0 | 0 | 100.0 | NULL |
+| stream | kpi | 210 | 87 | 54 | 0 | 0 | 0 | 0 | 69 | 55.8 | NULL |
 | history | ALL | 1567 | 961 | 0 | 176 | 176 | 0 | 27 | 403 | 69.1 | 100.0 |
 | history | alarm | 78 | 74 | 0 | 4 | 4 | 0 | 0 | 0 | 100.0 | 100.0 |
 | history | kpi | 1489 | 887 | 0 | 172 | 172 | 0 | 27 | 403 | 67.4 | 100.0 |
@@ -168,14 +166,89 @@ SELECT * FROM telco_netmon_febar_catalog.netmon_eval.eval_detection_precision
 
 | source_run | signal_source | n_rows | n_fault_tp | n_censored_excluded | n_planned | n_planned_suppressed | n_planned_unsuppressed_fp | n_red_herring_fp | n_unexplained_fp | row_fault_precision_pct | maintenance_suppression_pct |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| stream | ALL | 6721 | 4699 | 1608 | 360 | 360 | 0 | 0 | 54 | 98.9 | 100.0 |
-| stream | alarm | 79 | 24 | 44 | 11 | 11 | 0 | 0 | 0 | 100.0 | 100.0 |
-| stream | kpi | 6642 | 4675 | 1564 | 349 | 349 | 0 | 0 | 54 | 98.9 | 100.0 |
+| stream | ALL | 8335 | 5313 | 2924 | 0 | 0 | 0 | 0 | 98 | 98.2 | NULL |
+| stream | alarm | 73 | 60 | 13 | 0 | 0 | 0 | 0 | 0 | 100.0 | NULL |
+| stream | kpi | 8262 | 5253 | 2911 | 0 | 0 | 0 | 0 | 98 | 98.2 | NULL |
 | history | ALL | 3739 | 2635 | 0 | 517 | 517 | 0 | 171 | 416 | 81.8 | 100.0 |
 | history | alarm | 354 | 181 | 0 | 173 | 173 | 0 | 0 | 0 | 100.0 | 100.0 |
 | history | kpi | 3385 | 2454 | 0 | 344 | 344 | 0 | 171 | 416 | 80.7 | 100.0 |
 
 _6 row(s)_
+
+## History AMF_OVERLOAD INC-00016: localisation and the inputs it was qualified and timed from
+
+```sql
+SELECT incident_id, impact_start_ts, localisation_source, localised_element,
+               round(localisation_ttd_s) AS localisation_ttd_s, round(impact_ttd_s) AS impact_ttd_s
+        FROM telco_netmon_febar_catalog.netmon_eval.eval_incident_detection WHERE source_run = 'history' AND incident_id = 'INC-00016'
+```
+
+| incident_id | impact_start_ts | localisation_source | localised_element | localisation_ttd_s | impact_ttd_s |
+|---|---|---|---|---|---|
+| INC-00016 | 2026-10-03T10:09:01.000Z | rollup | AMF-VIC-01 | 1499 | 390 |
+
+_1 row(s)_
+
+## INC-00016: qualifying rollup windows of the root (real-time, on-time records only)
+
+The first qualifying window is what localises the incident. Its cells' windows contain only on-time records (next table), and `evidence_ts` is the latest arrival among those same records.
+
+```sql
+WITH inc AS (SELECT * FROM telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents WHERE source_run = 'history' AND incident_id = 'INC-00016')
+        SELECT f.window_start, f.window_end, f.element_id, f.n_desc_cells, f.n_degraded_cells, f.n_silent_cells,
+               round(f.impacted_fraction, 3) AS impacted_fraction, f.n_service_down_alarms, f.evidence_ts,
+               greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end)) AS available_ts,
+               round((unix_millis(greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end)))
+                      - unix_millis(i.impact_start_ts)) / 1000.0) AS seconds_after_impact_start
+        FROM inc i JOIN telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m f
+          ON f.source_run = i.source_run AND f.element_id = i.root_element_id
+         AND f.window_end > i.impact_start_ts AND f.window_start < i.impact_end_ts
+        WHERE f.impacted_fraction >= 0.8 OR f.n_service_down_alarms > 0
+        ORDER BY f.window_start
+```
+
+| window_start | window_end | element_id | n_desc_cells | n_degraded_cells | n_silent_cells | impacted_fraction | n_service_down_alarms | evidence_ts | available_ts | seconds_after_impact_start |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-03T10:15:00.000Z | 2026-10-03T10:20:00.000Z | AMF-VIC-01 | 528 | 518 | 10 | 1.0 | 0 | 2026-10-03T10:34:00.000Z | 2026-10-03T10:34:00.000Z | 1499 |
+
+_1 row(s)_
+
+## INC-00016: the root's descendant cell windows behind that rollup (late records used = 0)
+
+```sql
+WITH inc AS (SELECT * FROM telco_netmon_febar_catalog.netmon_eval.eval_gt_incidents WHERE source_run = 'history' AND incident_id = 'INC-00016')
+        SELECT h.window_start, count(*) AS cell_windows, count_if(h.is_degraded) AS degraded_cell_windows,
+               sum(h.n_reports) AS records_used, sum(h.n_late_reports) AS late_records_used,
+               max(CASE WHEN h.is_degraded THEN h.evidence_ts END) AS latest_qualifying_arrival
+        FROM inc i JOIN telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m h
+          ON h.source_run = i.source_run AND h.amf_id = i.root_element_id
+         AND h.window_end > i.impact_start_ts AND h.window_start < i.impact_end_ts
+        GROUP BY h.window_start ORDER BY h.window_start
+```
+
+| window_start | cell_windows | degraded_cell_windows | records_used | late_records_used | latest_qualifying_arrival |
+|---|---|---|---|---|---|
+| 2026-10-03T10:15:00.000Z | 518 | 518 | 518 | 0 | 2026-10-03T10:34:00.000Z |
+| 2026-10-03T10:30:00.000Z | 524 | 0 | 524 | 0 | NULL |
+
+_2 row(s)_
+
+## Real-time vs retrospective 5-minute windows: late records
+
+```sql
+SELECT 'gold_cell_health_5m (real-time, scored)' AS table_name, count(*) AS windows,
+               sum(n_reports) AS records, sum(n_late_reports) AS late_records FROM telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m
+        UNION ALL
+        SELECT 'gold_cell_health_5m_retrospective (never scored)', count(*), sum(n_reports), sum(n_late_reports)
+        FROM telco_netmon_febar_catalog.netmon_gold.gold_cell_health_5m_retrospective
+```
+
+| table_name | windows | records | late_records |
+|---|---|---|---|
+| gold_cell_health_5m (real-time, scored) | 1987413 | 2382505 | 0 |
+| gold_cell_health_5m_retrospective (never scored) | 2008061 | 2413825 | 24359 |
+
+_2 row(s)_
 
 ## RCA topology-heuristic baseline (hit@1 / hit@3 vs root_element_ids)
 
@@ -188,17 +261,17 @@ SELECT source_run, fault_type, count(*) AS n, round(100.0 * avg(CAST(hit_at_1 AS
 
 | source_run | fault_type | n | hit1_pct | hit3_pct |
 |---|---|---|---|---|
-| stream | NULL | 28 | 39.3 | 57.1 |
-| stream | BACKHAUL_DEGRADATION | 2 | 100.0 | 100.0 |
-| stream | CELL_OUTAGE | 22 | 31.8 | 45.5 |
-| stream | PLANNED_MAINTENANCE | 2 | 50.0 | 100.0 |
-| stream | SITE_POWER_OUTAGE | 2 | 50.0 | 100.0 |
-| history | NULL | 19 | 63.2 | 73.7 |
+| stream | NULL | 26 | 53.8 | 73.1 |
+| stream | AGG_ROUTER_FAILURE | 1 | 100.0 | 100.0 |
+| stream | BACKHAUL_DEGRADATION | 3 | 100.0 | 100.0 |
+| stream | CELL_OUTAGE | 20 | 40.0 | 65.0 |
+| stream | SITE_POWER_OUTAGE | 2 | 100.0 | 100.0 |
+| history | NULL | 19 | 57.9 | 68.4 |
 | history | AGG_ROUTER_FAILURE | 2 | 100.0 | 100.0 |
 | history | AMF_OVERLOAD | 1 | 100.0 | 100.0 |
 | history | BACKHAUL_DEGRADATION | 1 | 100.0 | 100.0 |
 | history | BUSHFIRE_GRID_OUTAGE | 1 | 100.0 | 100.0 |
-| history | CELL_OUTAGE | 6 | 33.3 | 66.7 |
+| history | CELL_OUTAGE | 6 | 16.7 | 50.0 |
 | history | CORE_CONGESTION | 2 | 0.0 | 0.0 |
 | history | CYCLONE_BACKHAUL_CUT | 1 | 100.0 | 100.0 |
 | history | LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 |

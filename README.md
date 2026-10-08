@@ -58,9 +58,9 @@ databricks bundle run -p febar netmon_bootstrap      # history -> functions -> p
 ```
 
 Captured live run (1-minute stream, faults only, 26 incidents): customer impact detected for 100 % of
-faults, **92.3 % within 5 minutes** (median 127 s, p90 245 s). The true root element was localised for
-100 % of faults (92.3 % within 5 minutes). Fault precision is **61.3 % at alert level** (detections
-grouped per element per episode) and 98.9 % at detection-row level, counting red herrings and unsuppressed
+faults, **88.5 % within 5 minutes** (median 141 s, p90 430 s). The true root element was localised for
+100 % of faults (88.5 % within 5 minutes). Fault precision is **60.1 % at alert level** (detections
+grouped per element per episode) and 98.2 % at detection-row level, counting red herrings and unsuppressed
 planned work as false positives.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the architecture, tables, expectations policy, latency

@@ -295,6 +295,39 @@ def evaluation(r: Runner) -> None:
                  "weigh heavily. Labels in priority order: uncensored fault = TP; overlapping a censored incident "
                  "= excluded; planned work = suppressed when `in_maintenance` (else a false page); red herring "
                  "(e.g. TRAFFIC_SURGE) = FP; nothing = FP. `row_fault_precision_pct` = TP / (TP + FP).")
+    d.query("History AMF_OVERLOAD INC-00016: localisation and the inputs it was qualified and timed from", f"""
+        SELECT incident_id, impact_start_ts, localisation_source, localised_element,
+               round(localisation_ttd_s) AS localisation_ttd_s, round(impact_ttd_s) AS impact_ttd_s
+        FROM {E}.eval_incident_detection WHERE source_run = 'history' AND incident_id = 'INC-00016'""")
+    d.query("INC-00016: qualifying rollup windows of the root (real-time, on-time records only)", f"""
+        WITH inc AS (SELECT * FROM {E}.eval_gt_incidents WHERE source_run = 'history' AND incident_id = 'INC-00016')
+        SELECT f.window_start, f.window_end, f.element_id, f.n_desc_cells, f.n_degraded_cells, f.n_silent_cells,
+               round(f.impacted_fraction, 3) AS impacted_fraction, f.n_service_down_alarms, f.evidence_ts,
+               greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end)) AS available_ts,
+               round((unix_millis(greatest(f.window_end + INTERVAL 2 MINUTES, coalesce(f.evidence_ts, f.window_end)))
+                      - unix_millis(i.impact_start_ts)) / 1000.0) AS seconds_after_impact_start
+        FROM inc i JOIN {G}.gold_element_impact_5m f
+          ON f.source_run = i.source_run AND f.element_id = i.root_element_id
+         AND f.window_end > i.impact_start_ts AND f.window_start < i.impact_end_ts
+        WHERE f.impacted_fraction >= 0.8 OR f.n_service_down_alarms > 0
+        ORDER BY f.window_start""",
+            note="The first qualifying window is what localises the incident. Its cells' windows contain only on-time "
+                 "records (next table), and `evidence_ts` is the latest arrival among those same records.")
+    d.query("INC-00016: the root's descendant cell windows behind that rollup (late records used = 0)", f"""
+        WITH inc AS (SELECT * FROM {E}.eval_gt_incidents WHERE source_run = 'history' AND incident_id = 'INC-00016')
+        SELECT h.window_start, count(*) AS cell_windows, count_if(h.is_degraded) AS degraded_cell_windows,
+               sum(h.n_reports) AS records_used, sum(h.n_late_reports) AS late_records_used,
+               max(CASE WHEN h.is_degraded THEN h.evidence_ts END) AS latest_qualifying_arrival
+        FROM inc i JOIN {G}.gold_cell_health_5m h
+          ON h.source_run = i.source_run AND h.amf_id = i.root_element_id
+         AND h.window_end > i.impact_start_ts AND h.window_start < i.impact_end_ts
+        GROUP BY h.window_start ORDER BY h.window_start""")
+    d.query("Real-time vs retrospective 5-minute windows: late records", f"""
+        SELECT 'gold_cell_health_5m (real-time, scored)' AS table_name, count(*) AS windows,
+               sum(n_reports) AS records, sum(n_late_reports) AS late_records FROM {G}.gold_cell_health_5m
+        UNION ALL
+        SELECT 'gold_cell_health_5m_retrospective (never scored)', count(*), sum(n_reports), sum(n_late_reports)
+        FROM {G}.gold_cell_health_5m_retrospective""")
     d.query("RCA topology-heuristic baseline (hit@1 / hit@3 vs root_element_ids)", f"""
         SELECT source_run, fault_type, count(*) AS n, round(100.0 * avg(CAST(hit_at_1 AS INT)), 1) AS hit1_pct,
                round(100.0 * avg(CAST(hit_at_3 AS INT)), 1) AS hit3_pct

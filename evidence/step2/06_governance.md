@@ -1,6 +1,6 @@
 # Unity Catalog governance: masks, row filters, roles, grants, tags
 
-Captured 2026-10-08 18:04 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 19:39 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 Masks and row filters are declared on the pipeline tables (`silver_sessions`, `gold_impact_detections`) and backed by `governance/sql/01_functions.sql`. Regional NOC roles read only the region-filtered views in `netmon_noc` (`02_noc_views.sql`); `noc_national` also reads gold and the operational silver tables; `pii_privileged` is granted nothing (`03_grants_*.sql`). Tags: `04_comments_tags.sql`.
 
@@ -121,12 +121,14 @@ WITH p AS (
 | netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_retrospective_1 | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_sessions_5m_1 | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_element_impact_5m_1 | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_impact_detections_1 | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.gold_cell_baseline | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.gold_cell_health_1m | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.gold_cell_health_5m | ["SELECT"] |
+| netmon-noc-national | TABLE | netmon_gold.gold_cell_health_5m_retrospective | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.gold_cell_sessions_5m | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.gold_element_impact_5m | ["SELECT"] |
 | netmon-noc-national | TABLE | netmon_gold.gold_impact_detections | ["SELECT"] |
@@ -189,12 +191,14 @@ WITH p AS (
 | netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_retrospective_1 | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_sessions_5m_1 | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_element_impact_5m_1 | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_impact_detections_1 | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.gold_cell_baseline | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.gold_cell_health_1m | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.gold_cell_health_5m | ["SELECT"] |
+| netmon-pii-officer | TABLE | netmon_gold.gold_cell_health_5m_retrospective | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.gold_cell_sessions_5m | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.gold_element_impact_5m | ["SELECT"] |
 | netmon-pii-officer | TABLE | netmon_gold.gold_impact_detections | ["SELECT"] |
@@ -218,7 +222,7 @@ WITH p AS (
 | netmon-pii-officer | TABLE | netmon_silver.silver_topology_nodes | ["SELECT"] |
 | netmon-pii-only | NULL | NULL | [] |
 
-_105 row(s)_
+_109 row(s)_
 
 ## Base-table privileges held by regional / pii-only principals (expected: no rows)
 
@@ -276,7 +280,7 @@ SHOW GRANTS `noc_region_nsw` ON SCHEMA telco_netmon_febar_catalog.netmon_silver
 Error returned by Unity Catalog:
 
 ```
-FAILED: [RequestId=20d31f40-8842-4764-840c-78cf462e8b80 ErrorClass=PRINCIPAL_DOES_NOT_EXIST.PRINCIPAL_DOES_NOT_EXIST] Could not find principal with name noc_region_nsw.
+FAILED: [RequestId=07e1f5ce-53af-4713-b49d-dc5f3469bf16 ErrorClass=PRINCIPAL_DOES_NOT_EXIST.PRINCIPAL_DOES_NOT_EXIST] Could not find principal with name noc_region_nsw.
 ```
 
 ## Tags: schemas and tables
@@ -327,6 +331,10 @@ SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM telco_
 | table | netmon_gold.gold_cell_health_5m | domain | operations |
 | table | netmon_gold.gold_cell_health_5m | grain | cell_5m |
 | table | netmon_gold.gold_cell_health_5m | netmon_domain | network_performance |
+| table | netmon_gold.gold_cell_health_5m_retrospective | domain | operations |
+| table | netmon_gold.gold_cell_health_5m_retrospective | grain | cell_5m |
+| table | netmon_gold.gold_cell_health_5m_retrospective | netmon_domain | network_performance |
+| table | netmon_gold.gold_cell_health_5m_retrospective | use | retrospective_only |
 | table | netmon_gold.gold_cell_sessions_5m | contains_pii | false |
 | table | netmon_gold.gold_cell_sessions_5m | domain | operations |
 | table | netmon_gold.gold_cell_sessions_5m | grain | cell_5m |
@@ -358,7 +366,7 @@ SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM telco_
 | table | netmon_silver.silver_topology_nodes | domain | operations |
 | table | netmon_silver.silver_topology_nodes | netmon_domain | network_inventory |
 
-_66 row(s)_
+_70 row(s)_
 
 ## Tags: PII columns
 
@@ -416,14 +424,16 @@ SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon
 | netmon_eval | eval_ttd_summary | Per source run (history = 15-min ROP backfill, stream = 1-min live feed), per event class (fault first) and fault type:… |
 | netmon_eval | netmon_pipeline_event_log | NULL |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1 | Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 local days strictly before valid_date. … |
-| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | Per-cell 1-minute KPI windows (event time, UTC) with baseline means, z-scores, fired rules and is_degraded. Append-only… |
-| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | Per-cell 5-minute KPI windows with baseline deviation. Feeds the topology rollup and ML features. |
+| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_1m_1 | Real-time per-cell 1-minute KPI windows (event time, UTC) built from ON-TIME records only, with baseline means, z-score… |
+| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_1 | Real-time per-cell 5-minute KPI windows with baseline deviation, ON-TIME records only (qualification and evidence_ts us… |
+| netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_health_5m_retrospective_1 | RETROSPECTIVE per-cell 5-minute windows over ALL silver KPI records, late arrivals included (n_late_reports). For after… |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_sessions_5m_1 | Per-cell 5-minute session outcomes by session end time: setup failures, drops, no-service and approximate distinct subs… |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_element_impact_5m_1 | Topology rollup per element per 5-min window: impacted (degraded or silent) descendant cells, impacted children, parent… |
 | netmon_gold | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_impact_detections_1 | Customer-impact detections per cell (KPI rules vs baseline) or element (element-down alarms), with detected_ts (wall cl… |
 | netmon_gold | gold_cell_baseline | Per cell x local hour x day type (weekday/weekend) KPI mean and std over the 14 local days strictly before valid_date. … |
-| netmon_gold | gold_cell_health_1m | Per-cell 1-minute KPI windows (event time, UTC) with baseline means, z-scores, fired rules and is_degraded. Append-only… |
-| netmon_gold | gold_cell_health_5m | Per-cell 5-minute KPI windows with baseline deviation. Feeds the topology rollup and ML features. |
+| netmon_gold | gold_cell_health_1m | Real-time per-cell 1-minute KPI windows (event time, UTC) built from ON-TIME records only, with baseline means, z-score… |
+| netmon_gold | gold_cell_health_5m | Real-time per-cell 5-minute KPI windows with baseline deviation, ON-TIME records only (qualification and evidence_ts us… |
+| netmon_gold | gold_cell_health_5m_retrospective | RETROSPECTIVE per-cell 5-minute windows over ALL silver KPI records, late arrivals included (n_late_reports). For after… |
 | netmon_gold | gold_cell_sessions_5m | Per-cell 5-minute session outcomes by session end time: setup failures, drops, no-service and approximate distinct subs… |
 | netmon_gold | gold_element_impact_5m | Topology rollup per element per 5-min window: impacted (degraded or silent) descendant cells, impacted children, parent… |
 | netmon_gold | gold_impact_detections | Customer-impact detections per cell (KPI rules vs baseline) or element (element-down alarms), with detected_ts (wall cl… |
@@ -454,7 +464,7 @@ SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon
 | netmon_silver | silver_topology_edges | Directed topology edges, upstream -> downstream. |
 | netmon_silver | silver_topology_nodes | Network inventory (one row per element, latest snapshot). Ancestor columns (amf_id .. site_id) include the element itse… |
 
-_59 row(s)_
+_61 row(s)_
 
 ## Column comments on silver_sessions
 
@@ -511,18 +521,18 @@ UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible
 
 | netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| silver_kpis | 2413549 | NQL,NSW,VIC,WA |
-| silver_alarms | 18549 | NQL,NSW,VIC,WA |
-| silver_sessions | 1314454 | NQL,NSW,VIC,WA |
+| silver_kpis | 2413825 | NQL,NSW,VIC,WA |
+| silver_alarms | 19600 | NQL,NSW,VIC,WA |
+| silver_sessions | 1320796 | NQL,NSW,VIC,WA |
 | silver_topology_nodes | 1887 | NQL,NSW,VIC,WA |
 | silver_topology_edges | 1883 | NQL,NSW,VIC,WA |
-| silver_maintenance_windows | 4 | NSW,VIC,WA |
+| silver_maintenance_windows | 2 | NSW,VIC |
 | gold_cell_baseline | 1016375 | NQL,NSW,VIC,WA |
-| gold_cell_health_1m | 2404350 | NQL,NSW,VIC,WA |
-| gold_cell_health_5m | 2008000 | NQL,NSW,VIC,WA |
-| gold_impact_detections | 10460 | NQL,NSW,VIC,WA |
-| gold_element_impact_5m | 83039 | NQL,NSW,VIC,WA |
-| gold_cell_sessions_5m | 1102240 | NQL,NSW,VIC,WA |
+| gold_cell_health_1m | 2385288 | NQL,NSW,VIC,WA |
+| gold_cell_health_5m | 1987413 | NQL,NSW,VIC,WA |
+| gold_impact_detections | 12074 | NQL,NSW,VIC,WA |
+| gold_element_impact_5m | 141461 | NQL,NSW,VIC,WA |
+| gold_cell_sessions_5m | 1107259 | NQL,NSW,VIC,WA |
 
 _12 row(s)_
 
@@ -539,7 +549,7 @@ SELECT count(*) AS n_rows,
 
 | n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
 |---|---|---|---|---|
-| 1314454 | 0 | 1314454 | 0 | 1314454 |
+| 1320796 | 0 | 1320796 | 0 | 1320796 |
 
 _1 row(s)_
 
@@ -594,18 +604,18 @@ UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible
 
 | netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| silver_kpis | 1047402 | NSW |
-| silver_alarms | 5899 | NSW |
-| silver_sessions | 524712 | NSW |
+| silver_kpis | 1048148 | NSW |
+| silver_alarms | 7335 | NSW |
+| silver_sessions | 527217 | NSW |
 | silver_topology_nodes | 814 | NSW |
 | silver_topology_edges | 813 | NSW |
 | silver_maintenance_windows | 1 | NSW |
 | gold_cell_baseline | 440910 | NSW |
-| gold_cell_health_1m | 1043434 | NSW |
-| gold_cell_health_5m | 871594 | NSW |
-| gold_impact_detections | 4417 | NSW |
-| gold_element_impact_5m | 32800 | NSW |
-| gold_cell_sessions_5m | 445938 | NSW |
+| gold_cell_health_1m | 1035581 | NSW |
+| gold_cell_health_5m | 862608 | NSW |
+| gold_impact_detections | 4287 | NSW |
+| gold_element_impact_5m | 56879 | NSW |
+| gold_cell_sessions_5m | 447935 | NSW |
 
 _12 row(s)_
 
@@ -761,18 +771,18 @@ UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible
 
 | netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| silver_kpis | 2413549 | NQL,NSW,VIC,WA |
-| silver_alarms | 18549 | NQL,NSW,VIC,WA |
-| silver_sessions | 1314454 | NQL,NSW,VIC,WA |
+| silver_kpis | 2413825 | NQL,NSW,VIC,WA |
+| silver_alarms | 19600 | NQL,NSW,VIC,WA |
+| silver_sessions | 1320796 | NQL,NSW,VIC,WA |
 | silver_topology_nodes | 1887 | NQL,NSW,VIC,WA |
 | silver_topology_edges | 1883 | NQL,NSW,VIC,WA |
-| silver_maintenance_windows | 4 | NSW,VIC,WA |
+| silver_maintenance_windows | 2 | NSW,VIC |
 | gold_cell_baseline | 1016375 | NQL,NSW,VIC,WA |
-| gold_cell_health_1m | 2404350 | NQL,NSW,VIC,WA |
-| gold_cell_health_5m | 2008000 | NQL,NSW,VIC,WA |
-| gold_impact_detections | 10460 | NQL,NSW,VIC,WA |
-| gold_element_impact_5m | 83039 | NQL,NSW,VIC,WA |
-| gold_cell_sessions_5m | 1102240 | NQL,NSW,VIC,WA |
+| gold_cell_health_1m | 2385288 | NQL,NSW,VIC,WA |
+| gold_cell_health_5m | 1987413 | NQL,NSW,VIC,WA |
+| gold_impact_detections | 12074 | NQL,NSW,VIC,WA |
+| gold_element_impact_5m | 141461 | NQL,NSW,VIC,WA |
+| gold_cell_sessions_5m | 1107259 | NQL,NSW,VIC,WA |
 
 _12 row(s)_
 
@@ -789,7 +799,7 @@ SELECT count(*) AS n_rows,
 
 | n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
 |---|---|---|---|---|
-| 1314454 | 1314454 | 0 | 1314454 | 0 |
+| 1320796 | 1320796 | 0 | 1320796 | 0 |
 
 _1 row(s)_
 
