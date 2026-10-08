@@ -101,11 +101,14 @@ def health(width: str):
     )
     for m in BASE:
         out = out.withColumn(f"{m}_z", F.expr(detection.zscore_sql(m)))
-    return (
+    out = (
         out.withColumn("flags", F.expr(detection.flags_sql()))
         .withColumn("is_degraded", F.size("flags") > 0)
         .withColumn("max_abs_z", F.greatest(*[F.abs(F.col(f"{m}_z")) for m in BASE]))
     )
+    # Keys first: Delta collects stats on the leading 32 columns, which liquid clustering needs.
+    keys = ["window_start", "window_end", "cell_id", "region_code", "is_degraded", "flags"]
+    return out.select(*keys, *[c for c in out.columns if c not in keys])
 
 
 @dp.table(

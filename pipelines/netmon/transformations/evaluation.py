@@ -67,7 +67,7 @@ def _incident_detection_sql() -> str:
       FROM {S.eval}.eval_detection_log
     ),
     m AS (
-      SELECT e.incident_id, e.source_run, d.*
+      SELECT e.incident_id, e.source_run, d.* EXCEPT (source_run)
       FROM elems e
       JOIN inc i ON i.incident_id = e.incident_id AND i.source_run = e.source_run
       JOIN det d ON d.element_id = e.element_id AND d.source_run = e.source_run

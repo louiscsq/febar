@@ -1,0 +1,426 @@
+"""Capture text evidence of the step-2 run into evidence/step2/ (markdown tables of SQL results).
+
+Runs every query on a SQL warehouse through the Databricks CLI (`databricks api`), so it only needs a
+configured CLI profile. Results are small samples and aggregates; IMSI / MSISDN only ever appear masked.
+
+    python scripts/capture_evidence.py --profile febar --warehouse <id> [--only governance] [--governance-demo]
+
+`--governance-demo` temporarily changes the current user's membership of the NOC groups to show the row
+filter and the column masks taking effect, then restores it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+OUT = Path(__file__).resolve().parents[1] / "evidence" / "step2"
+CAT = "telco_netmon_febar_catalog"
+B, S, G, E, GOV = (f"{CAT}.netmon_bronze", f"{CAT}.netmon_silver", f"{CAT}.netmon_gold", f"{CAT}.netmon_eval",
+                   f"{CAT}.netmon_gov")
+EVENT_LOG = f"{E}.netmon_pipeline_event_log"
+
+
+class Runner:
+    def __init__(self, profile: str, warehouse: str):
+        self.profile, self.warehouse = profile, warehouse
+
+    def cli(self, *args: str, body: dict | None = None) -> dict:
+        cmd = ["databricks", *args, "-p", self.profile, "-o", "json"]
+        if body is not None:
+            cmd += ["--json", json.dumps(body)]
+        out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+        return json.loads(out) if out.strip() else {}
+
+    def sql(self, statement: str) -> tuple[list[str], list[list]]:
+        d = self.cli("api", "post", "/api/2.0/sql/statements", body={
+            "warehouse_id": self.warehouse, "statement": statement, "wait_timeout": "50s",
+            "on_wait_timeout": "CONTINUE", "disposition": "INLINE", "format": "JSON_ARRAY"})
+        while d.get("status", {}).get("state") in ("PENDING", "RUNNING"):
+            time.sleep(3)
+            d = self.cli("api", "get", f"/api/2.0/sql/statements/{d['statement_id']}")
+        st = d.get("status", {})
+        if st.get("state") != "SUCCEEDED":
+            raise RuntimeError(f"{st.get('state')}: {st.get('error', {}).get('message', '')[:800]}\n{statement}")
+        cols = [c["name"] for c in d.get("manifest", {}).get("schema", {}).get("columns", [])]
+        return cols, d.get("result", {}).get("data_array") or []
+
+
+def md_table(cols: list[str], rows: list[list], max_cell: int = 120) -> str:
+    def cell(v):
+        s = "NULL" if v is None else str(v)
+        s = s.replace("|", "\\|").replace("\n", " ")
+        return s if len(s) <= max_cell else s[: max_cell - 1] + "…"
+
+    if not cols:
+        return "_(no result set)_\n"
+    lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    lines += ["| " + " | ".join(cell(v) for v in r) + " |" for r in rows]
+    return "\n".join(lines) + f"\n\n_{len(rows)} row(s)_\n"
+
+
+class Doc:
+    def __init__(self, runner: Runner, name: str, title: str, intro: str = ""):
+        self.r, self.path = runner, OUT / name
+        self.parts = [f"# {title}\n", f"Captured {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC from workspace "
+                      f"profile `{runner.profile}` (warehouse `{runner.warehouse}`) by "
+                      f"`scripts/capture_evidence.py`.\n"]
+        if intro:
+            self.parts.append(intro.strip() + "\n")
+
+    def query(self, heading: str, sql: str, note: str = "") -> list[list]:
+        cols, rows = self.r.sql(sql)
+        self.parts += [f"## {heading}\n", note.strip() + "\n" if note else "",
+                       "```sql\n" + sql.strip() + "\n```\n", md_table(cols, rows)]
+        return rows
+
+    def text(self, heading: str, body: str) -> None:
+        self.parts += [f"## {heading}\n", body.strip() + "\n"]
+
+    def write(self) -> None:
+        OUT.mkdir(parents=True, exist_ok=True)
+        self.path.write_text("\n".join(p for p in self.parts if p))
+        print("wrote", self.path)
+
+
+# ---------------------------------------------------------------------------------------------------
+
+def pipeline_status(r: Runner, pipeline_id: str) -> None:
+    d = Doc(r, "01_pipeline_status.md", "Pipeline runs and update status")
+    p = r.cli("pipelines", "get", pipeline_id)
+    spec = p.get("spec", {})
+    d.text("Pipeline", "\n".join([
+        f"- name: `{p.get('name')}`", f"- pipeline_id: `{pipeline_id}`", f"- state: `{p.get('state')}`",
+        f"- serverless: `{spec.get('serverless')}`, continuous: `{spec.get('continuous')}`, "
+        f"channel: `{spec.get('channel')}`",
+        f"- catalog / default schema: `{spec.get('catalog')}` / `{spec.get('schema')}`",
+        f"- event log: `{EVENT_LOG}`"]))
+    d.query("Updates (from the event log)", f"""
+        SELECT origin.update_id, min(timestamp) AS started, max(timestamp) AS last_event,
+               max_by(details:update_progress:state::string, timestamp)
+                 FILTER (WHERE event_type = 'update_progress') AS final_state,
+               max(CASE WHEN event_type = 'create_update' THEN details:create_update:cause::string END) AS cause,
+               max(CASE WHEN event_type = 'create_update' THEN details:create_update:full_refresh::string END)
+                 AS full_refresh
+        FROM {EVENT_LOG} GROUP BY origin.update_id ORDER BY started""")
+    d.query("Flows of the latest completed update", f"""
+        WITH u AS (SELECT origin.update_id AS id FROM {EVENT_LOG}
+                   WHERE event_type = 'update_progress' AND details:update_progress:state::string = 'COMPLETED'
+                   ORDER BY timestamp DESC LIMIT 1)
+        SELECT origin.flow_name, max_by(details:flow_progress:status::string, timestamp) AS final_status,
+               sum(details:flow_progress:metrics:num_output_rows::bigint) AS output_rows
+        FROM {EVENT_LOG} WHERE event_type = 'flow_progress' AND origin.update_id = (SELECT id FROM u)
+        GROUP BY origin.flow_name ORDER BY origin.flow_name""")
+    d.query("Pipeline errors, if any (last 10)", f"""
+        SELECT timestamp, origin.update_id, origin.flow_name, left(message, 200) AS message
+        FROM {EVENT_LOG} WHERE level = 'ERROR' ORDER BY timestamp DESC LIMIT 10""",
+            note="Errors from the first deploy-and-fix iterations are kept here deliberately.")
+    d.write()
+
+
+def expectations(r: Runner) -> None:
+    d = Doc(r, "02_expectations.md", "Expectation pass/fail metrics (pipeline event log)",
+            "Summed over every update. `drop` rules move rows to `silver_quarantine`; `on_time` is warn-only "
+            "(late rows are kept, flagged `is_late`); topology rules are `expect_or_fail`.")
+    d.query("Per dataset and rule", f"""
+        WITH x AS (
+          SELECT explode(from_json(details:flow_progress:data_quality:expectations,
+                 'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>')) AS e
+          FROM {EVENT_LOG} WHERE event_type = 'flow_progress'
+            AND details:flow_progress:data_quality:expectations IS NOT NULL)
+        SELECT e.dataset, e.name AS rule, sum(e.passed_records) AS passed, sum(e.failed_records) AS failed,
+               round(100.0 * sum(e.failed_records) / nullif(sum(e.passed_records) + sum(e.failed_records), 0), 3)
+                 AS failed_pct
+        FROM x GROUP BY e.dataset, e.name ORDER BY e.dataset, failed DESC""")
+    d.query("Dropped rows per silver flow", f"""
+        SELECT origin.flow_name, sum(details:flow_progress:data_quality:dropped_records::bigint) AS dropped_records
+        FROM {EVENT_LOG} WHERE event_type = 'flow_progress'
+          AND details:flow_progress:data_quality:dropped_records IS NOT NULL
+        GROUP BY origin.flow_name ORDER BY 1""")
+    d.query("Quarantine by feed and failed rule", f"""
+        SELECT feed, _source_run AS run, rule, count(*) AS n_rows
+        FROM {S}.silver_quarantine LATERAL VIEW explode(failed_rules) t AS rule
+        GROUP BY ALL ORDER BY feed, run, n_rows DESC""")
+    d.query("Quarantine sample (PII redacted)", f"""
+        SELECT feed, record_id, failed_rules, event_ts_raw, left(payload, 110) AS payload,
+               left(_rescued_data, 60) AS rescued, left(_corrupt_record, 70) AS corrupt
+        FROM {S}.silver_quarantine
+        QUALIFY row_number() OVER (PARTITION BY feed, failed_rules[0] ORDER BY record_id) = 1
+        ORDER BY feed LIMIT 25""")
+    d.query("Injected defects (ground truth) vs pipeline handling — eval_dq_capture", f"""
+        SELECT * FROM {E}.eval_dq_capture ORDER BY source_run, feed, defect_type, defect_subtype""",
+            note="`handled_pct` = quarantined (malformed / null / out_of_range), flagged late (late_arrival) or "
+                 "single copy in silver (duplicate). Session dedupe is the same code path and not re-scored.")
+    d.write()
+
+
+def row_counts(r: Runner) -> None:
+    d = Doc(r, "03_row_counts.md", "Row counts per table")
+    tables = [f"{B}.bronze_{t}" for t in ("kpis", "alarms", "sessions", "topology_nodes", "topology_edges",
+                                           "maintenance_windows")]
+    tables += [f"{S}.silver_{t}" for t in ("kpis", "alarms", "sessions", "quarantine", "topology_nodes",
+                                            "topology_edges", "maintenance_windows")]
+    tables += [f"{G}.gold_{t}" for t in ("cell_baseline", "cell_health_1m", "cell_health_5m", "impact_detections",
+                                          "element_impact_5m", "cell_sessions_5m")]
+    tables += [f"{E}.{t}" for t in ("bronze_gt_incidents", "bronze_gt_dq_injections", "eval_gt_incidents",
+                                     "eval_detection_log", "eval_incident_detection", "eval_rca_baseline")]
+    union = "\nUNION ALL ".join(f"SELECT '{t.split('.', 1)[1]}' AS table_name, count(*) AS n_rows FROM {t}"
+                                for t in tables)
+    d.query("All pipeline tables", union,
+            note="Counts as seen by the capturing user (member of `noc_national`, so row filters pass every "
+                 "region). silver_sessions / gold_impact_detections are row-filtered tables.")
+    d.query("Bronze and silver by generator run", f"""
+        SELECT 'kpis' AS feed, _source_run AS run, count(*) AS bronze FROM {B}.bronze_kpis GROUP BY 2
+        UNION ALL SELECT 'alarms', _source_run, count(*) FROM {B}.bronze_alarms GROUP BY 2
+        UNION ALL SELECT 'sessions', _source_run, count(*) FROM {B}.bronze_sessions GROUP BY 2
+        ORDER BY 1, 2""")
+    d.query("Silver by generator run", f"""
+        SELECT 'kpis' AS feed, source_run AS run, count(*) AS silver, count_if(is_late) AS late_kept,
+               min(event_ts) AS min_event_ts, max(event_ts) AS max_event_ts FROM {S}.silver_kpis GROUP BY 2
+        UNION ALL SELECT 'alarms', source_run, count(*), count_if(is_late), min(event_ts), max(event_ts)
+          FROM {S}.silver_alarms GROUP BY 2
+        UNION ALL SELECT 'sessions', source_run, count(*), count_if(is_late), min(start_ts), max(start_ts)
+          FROM {S}.silver_sessions GROUP BY 2
+        ORDER BY 1, 2""")
+    d.write()
+
+
+def gold_samples(r: Runner) -> None:
+    d = Doc(r, "04_gold_samples.md", "Sample gold rows")
+    d.query("gold_cell_health_5m: degraded windows in the live stream", f"""
+        SELECT window_start, cell_id, region_code, n_reports, round(availability_pct, 1) AS avail,
+               round(latency_ms, 1) AS latency, round(b_latency_ms_mean, 1) AS base_latency,
+               round(latency_ms_z, 1) AS latency_z, round(dl_throughput_mbps_z, 1) AS dl_z, flags
+        FROM {G}.gold_cell_health_5m WHERE is_degraded
+        ORDER BY window_start DESC, cell_id LIMIT 12""")
+    d.query("gold_cell_health_1m: one healthy cell, latest windows", f"""
+        WITH c AS (SELECT cell_id FROM {G}.gold_cell_health_1m WHERE granularity_s = 60 AND NOT is_degraded
+                   ORDER BY window_start DESC, cell_id LIMIT 1)
+        SELECT window_start, window_start_local, cell_id, round(latency_ms, 1) AS latency,
+               round(b_latency_ms_mean, 1) AS base_mean, round(b_latency_ms_std, 2) AS base_std,
+               round(latency_ms_z, 2) AS z, is_degraded
+        FROM {G}.gold_cell_health_1m WHERE cell_id = (SELECT cell_id FROM c) ORDER BY window_start DESC LIMIT 8""")
+    d.query("gold_cell_baseline: sample", f"""
+        SELECT valid_date, cell_id, local_hour, day_type, n_days, n_samples, round(b_latency_ms_mean, 1) AS lat_mean,
+               round(b_latency_ms_std, 2) AS lat_std, round(b_dl_throughput_mbps_mean, 1) AS dl_mean
+        FROM {G}.gold_cell_baseline ORDER BY valid_date DESC, cell_id, local_hour LIMIT 6""")
+    d.query("gold_impact_detections: latest live detections", f"""
+        SELECT detected_ts, signal_source, element_type, element_id, region_code, signal_start_ts, evidence_ts,
+               round(pipeline_latency_s, 1) AS pipeline_latency_s, flags, severity_score, in_maintenance
+        FROM {G}.gold_impact_detections WHERE landed_ts IS NOT NULL ORDER BY detected_ts DESC LIMIT 12""")
+    d.query("gold_impact_detections: pipeline latency (live files)", f"""
+        SELECT signal_source, count(*) AS n, round(percentile(pipeline_latency_s, 0.5), 1) AS p50_s,
+               round(percentile(pipeline_latency_s, 0.9), 1) AS p90_s, round(max(pipeline_latency_s), 1) AS max_s
+        FROM {G}.gold_impact_detections WHERE landed_ts IS NOT NULL GROUP BY signal_source""")
+    d.query("gold_element_impact_5m: top root-cause candidates in the live stream", f"""
+        SELECT window_start, element_id, element_type, n_desc_cells, n_impacted_cells, n_silent_cells,
+               round(impacted_fraction, 2) AS frac, n_impacted_children, n_children,
+               round(parent_impacted_fraction, 2) AS parent_frac, n_alarms, n_service_down_alarms, alarm_codes
+        FROM {G}.gold_element_impact_5m
+        WHERE window_start >= (SELECT max(window_start) - INTERVAL 3 HOURS FROM {G}.gold_element_impact_5m)
+          AND element_type <> 'CELL' AND n_impacted_cells >= 2
+        ORDER BY n_impacted_cells DESC, level LIMIT 12""")
+    d.query("gold_cell_sessions_5m: highest failure windows", f"""
+        SELECT window_start, cell_id, region_code, n_sessions, n_setup_failed, n_dropped, n_no_service,
+               n_subscribers_approx, round(failure_rate, 2) AS failure_rate
+        FROM {G}.gold_cell_sessions_5m WHERE n_sessions >= 3 ORDER BY failure_rate DESC, window_start DESC LIMIT 8""")
+    d.write()
+
+
+def evaluation(r: Runner) -> None:
+    d = Doc(r, "05_time_to_detect.md", "Time-to-detect against ground truth",
+            "Scored incidents: customer-impacting and not censored. `ttd_s` = (evidence time + measured pipeline "
+            "latency for live files) − `impact_start_ts`. `history` is the 15-minute-ROP backfill (cannot meet "
+            "a 5-minute SLA by construction); `stream` is the 1-minute live feed. See docs/pipeline.md.")
+    d.query("Summary per run (median / p90 TTD, % within 5 minutes)", f"""
+        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type = 'ALL' ORDER BY source_run""")
+    d.query("Per fault type", f"""
+        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type <> 'ALL' ORDER BY source_run, fault_type""")
+    d.query("Live-stream incidents", f"""
+        SELECT incident_id, fault_type, severity, region_code, root_element_id, impact_start_ts, is_detected,
+               first_signal_source, first_element_id, first_flags, round(evidence_lag_s, 0) AS evidence_lag_s,
+               round(first_pipeline_latency_s, 1) AS pipeline_latency_s, round(ttd_s, 1) AS ttd_s,
+               detected_within_sla, root_detected
+        FROM {E}.eval_incident_detection WHERE source_run = 'stream' ORDER BY impact_start_ts""")
+    d.query("Ground-truth incidents in the live stream (incl. censored and non-impacting)", f"""
+        SELECT event_class, fault_type, is_customer_impacting, is_censored, count(*) AS n
+        FROM {E}.eval_gt_incidents WHERE source_run = 'stream' GROUP BY ALL ORDER BY ALL""")
+    d.query("Detection precision (detections explained by any ground-truth event)", f"""
+        SELECT * FROM {E}.eval_detection_precision ORDER BY source_run, signal_source""")
+    d.query("RCA topology-heuristic baseline (hit@1 / hit@3 vs root_element_ids)", f"""
+        SELECT source_run, fault_type, count(*) AS n, round(100.0 * avg(CAST(hit_at_1 AS INT)), 1) AS hit1_pct,
+               round(100.0 * avg(CAST(hit_at_3 AS INT)), 1) AS hit3_pct
+        FROM {E}.eval_rca_baseline GROUP BY GROUPING SETS ((source_run), (source_run, fault_type))
+        ORDER BY source_run, fault_type NULLS FIRST""")
+    d.write()
+
+
+def governance(r: Runner, demo: bool) -> None:
+    d = Doc(r, "06_governance.md", "Unity Catalog governance: masks, row filters, grants, tags",
+            "Policies are declared on the pipeline tables and backed by the functions in "
+            "`governance/sql/01_functions.sql`; grants and tags by `02_grants.sql` / `03_comments_tags.sql`.")
+    d.query("Column masks", f"""
+        SELECT table_schema, table_name, column_name, mask_name FROM {CAT}.information_schema.column_masks
+        ORDER BY ALL""")
+    d.query("Row filters", f"""
+        SELECT table_schema, table_name, filter_name, target_columns FROM {CAT}.information_schema.row_filters
+        ORDER BY ALL""")
+    d.query("Policy function definitions", f"""
+        SELECT routine_name, routine_definition FROM {CAT}.information_schema.routines
+        WHERE routine_schema = 'netmon_gov' ORDER BY 1""")
+    d.query("Grants (catalog, gold schema, silver_sessions)", f"""
+        SELECT grantee, privilege_type, 'CATALOG' AS object, catalog_name AS name
+        FROM {CAT}.information_schema.catalog_privileges WHERE grantee NOT LIKE '%@%'
+        UNION ALL
+        SELECT grantee, privilege_type, 'SCHEMA', schema_name FROM {CAT}.information_schema.schema_privileges
+        WHERE schema_name LIKE 'netmon%' AND grantee NOT LIKE '%@%'
+        UNION ALL
+        SELECT grantee, privilege_type, 'TABLE', table_name FROM {CAT}.information_schema.table_privileges
+        WHERE table_schema = 'netmon_silver' AND grantee NOT LIKE '%@%'
+        ORDER BY 3, 4, 1, 2""",
+            note="Grantees are the persona service principals' application ids (UC rejects the workspace-local "
+                 "groups; see docs/pipeline.md). Mapping: see the persona table below.")
+    d.query("Tags: schemas and tables", f"""
+        SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM {CAT}.information_schema.schema_tags
+        UNION ALL
+        SELECT 'table', concat(schema_name, '.', table_name), tag_name, tag_value
+        FROM {CAT}.information_schema.table_tags WHERE schema_name LIKE 'netmon%'
+        ORDER BY 1, 2, 3""")
+    d.query("Tags: PII columns", f"""
+        SELECT schema_name, table_name, column_name, tag_name, tag_value FROM {CAT}.information_schema.column_tags
+        WHERE schema_name LIKE 'netmon%' ORDER BY ALL""")
+    d.query("Table and column comments (key tables)", f"""
+        SELECT table_schema, table_name, left(comment, 150) AS comment FROM {CAT}.information_schema.tables
+        WHERE table_schema IN ('netmon_silver', 'netmon_gold', 'netmon_eval') ORDER BY 1, 2""")
+    d.query("Column comments on silver_sessions", f"""
+        SELECT column_name, data_type, comment FROM {CAT}.information_schema.columns
+        WHERE table_schema = 'netmon_silver' AND table_name = 'silver_sessions' AND comment IS NOT NULL
+        ORDER BY ordinal_position""")
+
+    me = r.cli("current-user", "me")
+    groups = {g["displayName"]: g["id"] for g in r.cli("groups", "list")}
+    sps = {s["applicationId"]: s["displayName"] for s in r.cli("service-principals", "list")}
+    lines = ["| group | members |", "|---|---|"]
+    for g in sorted(x for x in groups if x.startswith(("noc_", "pii_"))):
+        mem = r.cli("groups", "get", groups[g]).get("members") or []
+        lines.append(f"| `{g}` | {', '.join(m.get('display', '?') for m in mem) or '—'} |")
+    d.text("Workspace-local groups and members", "\n".join(lines))
+    d.text("Persona service principals (grantees)", "\n".join(
+        ["| application id | display name |", "|---|---|"]
+        + [f"| `{a}` | {n} |" for a, n in sorted(sps.items(), key=lambda x: x[1]) if n.startswith("netmon-")]))
+
+    mask_sql = f"""
+        SELECT current_user() AS user, is_member('noc_national') AS in_noc_national,
+               is_member('noc_region_nsw') AS in_noc_region_nsw, is_member('pii_privileged') AS in_pii_privileged,
+               {GOV}.is_pii_privileged() AS pii_privileged_fn"""
+    rows_sql = f"""
+        SELECT 'silver_sessions' AS table_name, region_code, count(*) AS visible_rows FROM {S}.silver_sessions GROUP BY 2
+        UNION ALL
+        SELECT 'gold_impact_detections', region_code, count(*) FROM {G}.gold_impact_detections GROUP BY 2
+        ORDER BY 1, 2"""
+    sample_sql = f"""
+        SELECT record_id, imsi, msisdn, region_code, outcome FROM {S}.silver_sessions
+        ORDER BY record_id LIMIT 5"""
+    shape_sql = f"""
+        SELECT count(*) AS n_rows,
+               count_if(imsi RLIKE '^00101[0-9]{{10}}$') AS imsi_full_value,
+               count_if(imsi RLIKE '^00101[*]{{8}}[0-9]{{2}}$') AS imsi_masked,
+               count_if(msisdn RLIKE '^[+]999[0-9]{{9}}$') AS msisdn_full_value,
+               count_if(msisdn RLIKE '^[+]999[*]{{6}}[0-9]{{3}}$') AS msisdn_masked
+        FROM {S}.silver_sessions"""
+    d.query("Current principal (capturing user)", mask_sql)
+    d.query("Masked output for a non-privileged reader (capturing user is not in pii_privileged)", sample_sql)
+    d.query("Mask shape check, non-privileged", shape_sql)
+    d.query("Rows visible per region as noc_national", rows_sql)
+
+    if demo:
+        uid = me["id"]
+
+        def member(group: str, add: bool) -> None:
+            op = {"op": "add" if add else "remove", "path": "members" if add else f'members[value eq "{uid}"]'}
+            if add:
+                op["value"] = [{"value": uid}]
+            subprocess.run(["databricks", "groups", "patch", groups[group], "-p", r.profile, "--json", json.dumps(
+                {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [op]})], check=True)
+
+        def settle(cond_sql: str) -> None:
+            for _ in range(40):  # group membership reaches the SQL warehouse within a minute or so
+                if r.sql(cond_sql)[1][0][0] in (True, "true"):
+                    return
+                time.sleep(10)
+            raise RuntimeError(f"membership change not visible: {cond_sql}")
+
+        try:
+            member("noc_national", False)
+            member("noc_region_nsw", True)
+            settle("SELECT NOT is_member('noc_national') AND is_member('noc_region_nsw')")
+            d.query("Row filter demo: same user, now only in noc_region_nsw", mask_sql)
+            d.query("Rows visible per region as noc_region_nsw (only NSW rows remain)", rows_sql)
+            member("noc_region_nsw", False)
+            settle("SELECT NOT is_member('noc_region_nsw')")
+            d.query("Row filter demo: in no NOC group at all", rows_sql + "",
+                    note="No rows at all: the filter returns false for every region.")
+            member("noc_national", True)
+            member("pii_privileged", True)
+            settle("SELECT is_member('pii_privileged') AND is_member('noc_national')")
+            d.query("Mask demo: same user added to pii_privileged", mask_sql)
+            d.query("Mask shape check, privileged (full values visible; values themselves not printed)", shape_sql)
+        finally:
+            member("pii_privileged", False)
+            member("noc_region_nsw", False)
+            member("noc_national", True)
+        settle("SELECT NOT is_member('pii_privileged') AND is_member('noc_national')")
+        d.query("Restored membership", mask_sql)
+    d.write()
+
+
+def lineage(r: Runner) -> None:
+    d = Doc(r, "07_lineage.md", "Lineage: Volume → bronze → silver → gold",
+            "Captured automatically by Unity Catalog; queried from `system.access.table_lineage`.")
+    d.query("Table-level lineage edges for the netmon schemas", f"""
+        SELECT coalesce(source_table_full_name, source_path) AS source, source_type,
+               target_table_full_name AS target, target_type, entity_type, max(event_time) AS last_seen,
+               count(*) AS n_events
+        FROM system.access.table_lineage
+        WHERE (target_table_full_name LIKE '{CAT}.netmon_%' OR source_table_full_name LIKE '{CAT}.netmon_%')
+          AND event_date >= current_date() - INTERVAL 2 DAYS
+          AND target_table_full_name IS NOT NULL
+        GROUP BY ALL ORDER BY target, source""")
+    d.query("Volume → bronze (path-based sources)", f"""
+        SELECT DISTINCT regexp_replace(source_path, '/date=.*', '/date=*') AS source_path, target_table_full_name
+        FROM system.access.table_lineage
+        WHERE target_table_full_name LIKE '{CAT}.netmon_%' AND source_path IS NOT NULL
+          AND event_date >= current_date() - INTERVAL 2 DAYS
+        ORDER BY 2 LIMIT 40""")
+    d.write()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--profile", default="febar")
+    ap.add_argument("--warehouse", required=True)
+    ap.add_argument("--pipeline-id", required=True)
+    ap.add_argument("--only", nargs="*")
+    ap.add_argument("--governance-demo", action="store_true")
+    a = ap.parse_args()
+    r = Runner(a.profile, a.warehouse)
+    steps = {
+        "status": lambda: pipeline_status(r, a.pipeline_id), "expectations": lambda: expectations(r),
+        "counts": lambda: row_counts(r), "gold": lambda: gold_samples(r), "eval": lambda: evaluation(r),
+        "governance": lambda: governance(r, a.governance_demo), "lineage": lambda: lineage(r),
+    }
+    for name, fn in steps.items():
+        if not a.only or name in a.only:
+            try:
+                fn()
+            except Exception as e:  # noqa: BLE001
+                print(f"[{name}] FAILED: {e}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
