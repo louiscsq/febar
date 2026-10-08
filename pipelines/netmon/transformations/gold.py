@@ -13,7 +13,7 @@ sys.path.insert(0, spark.conf.get("netmon.src_path"))
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
-from netmon_pipeline import detection, hierarchy, rules
+from netmon_pipeline import detection, hierarchy, rules, windows
 from netmon_pipeline.settings import Settings
 
 S = Settings.from_conf(spark.conf.get)
@@ -80,13 +80,12 @@ def kpis_scored():
     return df.withColumn("flags", F.expr(detection.flags_sql()))
 
 
-def health(width: str):
+def _window_health(df, width: str):
+    """Per-cell window aggregate, baseline z-scores and fired rules over `df` (stream or batch)."""
     agg = (
-        spark.readStream.table("kpis_scored")
-        .withWatermark("event_ts", HEALTH_WATERMARK)
         # source_run keeps generator runs apart even if their windows ever overlap in time.
-        .groupBy(F.window("event_ts", width).alias("w"), "source_run", "cell_id", *ANCESTOR_COLS, "region_code",
-                 "timezone")
+        df.groupBy(F.window("event_ts", width).alias("w"), "source_run", "cell_id", *ANCESTOR_COLS, "region_code",
+                   "timezone")
         .agg(
             F.count("*").alias("n_reports"),
             F.max("granularity_s").alias("granularity_s"),
@@ -95,9 +94,8 @@ def health(width: str):
             *[F.avg(c).alias(c) for c in BASE_COLS],
             F.sum(F.when(F.size("flags") > 0, 1).otherwise(0)).alias("n_flagged_reports"),
             F.sum(F.col("is_late").cast("int")).alias("n_late_reports"),
-            # When the window's on-time evidence was available. Late arrivals (delivered up to 36 h later)
-            # are counted but must not make the window look like it became known a day later.
-            F.max(F.when(~F.col("is_late"), F.col("evidence_ts"))).alias("evidence_ts"),
+            # Latest arrival among exactly the records this window is built from.
+            F.max("evidence_ts").alias("evidence_ts"),
         )
     )
     out = (
@@ -116,10 +114,19 @@ def health(width: str):
     return out.select(*keys, *[c for c in out.columns if c not in keys])
 
 
+def health(width: str):
+    """Real-time windows: on-time records only, so qualification and timing use the same record set
+    (netmon_pipeline.windows). These feed the topology rollup and rollup localisation."""
+    return _window_health(
+        spark.readStream.table("kpis_scored").where(windows.REALTIME_FILTER_SQL)
+        .withWatermark("event_ts", HEALTH_WATERMARK), width)
+
+
 @dp.table(
     name=f"{S.gold}.gold_cell_health_1m",
-    comment="Per-cell 1-minute KPI windows (event time, UTC) with baseline means, z-scores, fired rules and "
-            "is_degraded. Append-only behind a 2-minute watermark. 15-min history rows fill one window each.",
+    comment="Real-time per-cell 1-minute KPI windows (event time, UTC) built from ON-TIME records only, with "
+            "baseline means, z-scores, fired rules, is_degraded and evidence_ts (latest arrival of those records). "
+            "Append-only behind a 2-minute watermark. 15-min history rows fill one window each.",
     cluster_by=["window_start", "cell_id"],
     table_properties={"quality": "gold"},
 )
@@ -129,12 +136,30 @@ def gold_cell_health_1m():
 
 @dp.table(
     name=f"{S.gold}.gold_cell_health_5m",
-    comment="Per-cell 5-minute KPI windows with baseline deviation. Feeds the topology rollup and ML features.",
+    comment="Real-time per-cell 5-minute KPI windows with baseline deviation, ON-TIME records only (qualification "
+            "and evidence_ts use the same records). Feeds the topology rollup, rollup localisation and ML features.",
     cluster_by=["window_start", "cell_id"],
     table_properties={"quality": "gold"},
 )
 def gold_cell_health_5m():
     return health("5 minutes")
+
+
+@dp.materialized_view(
+    name=f"{S.gold}.gold_cell_health_5m_retrospective",
+    comment="RETROSPECTIVE per-cell 5-minute windows over ALL silver KPI records, late arrivals included "
+            "(n_late_reports). For after-the-fact analysis only: no time-to-detect, localisation or rollup reads "
+            "it, because its windows include records that were not available in real time.",
+    cluster_by=["window_start", "cell_id"],
+)
+def gold_cell_health_5m_retrospective():
+    base = spark.read.table(f"{S.gold}.gold_cell_baseline").withColumnRenamed("valid_date", "local_date") \
+        .select("cell_id", "local_hour", "day_type", "local_date", "n_days", *BASE_COLS)
+    df = spark.read.table(f"{S.silver}.silver_kpis").join(
+        F.broadcast(base), ["cell_id", "local_hour", "day_type", "local_date"], "left")
+    for m in BASE:
+        df = df.withColumn(f"{m}_z", F.expr(detection.zscore_sql(m)))
+    return _window_health(df.withColumn("flags", F.expr(detection.flags_sql())), "5 minutes")
 
 
 # ---------------------------------------------------------------------------------------------------

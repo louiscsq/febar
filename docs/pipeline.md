@@ -71,7 +71,8 @@ grants, tags) is applied by code in `governance/`. Proof that all of this ran on
 | `silver_sessions` | streaming | `record_id` | IMSI / MSISDN column masks, `region_filter` row filter, pseudonymous `subscriber_key` |
 | `silver_quarantine` | streaming | one row per rejected line | `feed`, `record_id`, `failed_rules`, raw timestamp, payload (no PII), redacted rescued / corrupt text |
 | `gold_cell_baseline` | MV | `valid_date (local), cell_id, local_hour, day_type` | mean / std of latency, loss, DL throughput, RRC success, drop rate over the 14 local days **before** `valid_date` |
-| `gold_cell_health_1m`, `_5m` | streaming | `window_start, cell_id` | window means, baseline means and std, z-scores, fired rules (`flags`), `is_degraded` |
+| `gold_cell_health_1m`, `_5m` | streaming | `window_start, source_run, cell_id` | real-time windows from on-time records only: window means, baseline means and std, z-scores, fired rules (`flags`), `is_degraded`, `evidence_ts` |
+| `gold_cell_health_5m_retrospective` | MV | `window_start, source_run, cell_id` | the same over all records incl. late arrivals (`n_late_reports`); analysis only, never scored |
 | `gold_impact_detections` | streaming | `detection_id` | one row per degraded KPI record or element-down alarm: `detected_ts`, `evidence_ts`, `pipeline_latency_s`, `flags`, `severity_score`, `in_maintenance`; **row-filtered** |
 | `gold_element_impact_5m` | MV | `window_start, element_id` | topology rollup (see below), with `evidence_ts` |
 | `gold_cell_sessions_5m` | streaming | `window_start, cell_id` | session outcomes, `n_subscribers_approx`, `failure_rate`; no PII |
@@ -124,9 +125,35 @@ against `ground_truth/dq_injections`.
 | `gold_cell_health_1m` / `_5m` | `event_ts` | 2 min | 1-minute KPIs arrive 6–30 s after their period ends; 2 minutes absorbs that plus pipeline jitter |
 | `gold_cell_sessions_5m` | `end_ts` | 10 min | xDRs are emitted 5–90 s after the session closes. A stream can only define one watermark, so this table reads an un-watermarked sessions view and deduplicates on `record_id` itself (copies share `end_ts`) |
 
-Late arrivals (30 min – 36 h) are kept in silver, flagged `is_late`, and included in the batch MVs
-(baseline, rollup, eval), but they arrive behind the event-time watermark, so the streaming health windows
-drop them. A late record is no use for real-time detection anyway.
+**One record set for qualification and timing.** The real-time health windows (`gold_cell_health_1m` /
+`_5m`) are built **only from on-time records** (`NOT is_late`, `src/netmon_pipeline/windows.py`). Each
+window's `evidence_ts` is the latest arrival among exactly those records. Everything downstream inherits
+this: the topology rollup, rollup localisation, and the RCA baseline. A window can therefore only qualify
+(degraded, or a cell silent) on evidence that had arrived by the time it is stamped with, and it is never
+timed by records other than the ones that made it qualify.
+
+- *Choice: option (a), exclude late rows, rather than (b), keep them and time the window by their arrival.*
+  With (b) a single late record would re-open a window up to 36 h after it closed. The window's
+  qualification would then change after the fact, and so would every rollup and localisation built on it,
+  which is a moving target for the step-3 model. With (a) the real-time tables mean exactly what the NOC
+  could see at the time. The cost: a cell whose only rows in a window arrived late counts as silent in
+  that window (which is what the NOC saw), and late data never improves the real-time picture.
+- **Late records are not lost.** They stay in silver (flagged `is_late`), count in the batch baseline and
+  eval, and appear in **`gold_cell_health_5m_retrospective`**: the same 5-minute aggregate over all records,
+  with `n_late_reports`. That table is for after-the-fact analysis only; no time-to-detect, localisation or
+  rollup reads it.
+- **Per-record detections** (`gold_impact_detections`) are still emitted for late records, because a late
+  degraded record is still a real impact signal. Each one is timed at that record's own arrival (its
+  landing or delivery time), so it can make a time-to-detect later but never earlier.
+- In a live stream the 2-minute event-time watermark already drops most late rows from the streaming
+  windows. The explicit filter makes the rule hold in a one-shot backfill too, where the first micro-batch
+  carries no watermark yet. In the first review capture, history late arrivals sat in those windows and
+  produced the 127,373 s `AMF_OVERLOAD` localisation.
+
+Tests (`tests/test_pipeline_windows.py`) cover the case where a late row is the one that would make a
+window qualify (it is excluded, so nothing is localised from it). They also check that a qualifying window
+is never stamped earlier than the arrival of its qualifying row, and that a late record's own detection is
+timed at its arrival.
 
 **Latency budget** (impact start → detection row available to the NOC), live 1-minute feed:
 
@@ -199,9 +226,8 @@ it via the change calendar.
   files only (a backfill's processing delay is not detection latency). In a real-time stream this equals
   `detected_ts − impact_start_ts`. The decomposition also scores accelerated streams correctly.
   Localisation through the rollup has no measured emission time, so its time is a lower bound:
-  `max(window_end + 2-min watermark, evidence_ts)`, with the MV refresh not included. The window's
-  `evidence_ts` counts **on-time records only**. With late arrivals included, a history window "became
-  known" up to 36 h late; that produced a 127,373 s localisation in the first review capture. Time and
+  `max(window_end + 2-min watermark, evidence_ts)`, with the MV refresh not included. Windows are
+  qualified **and** timed from the same on-time records ([windowing](#windowing-watermarks-and-the-5-minute-latency-budget)). Time and
   element come from one `min(struct(ts, element))`, so the reported element is the earliest localisation.
 - **Runs never mix.** `source_run` (the generator run directory) is carried through `silver_*`,
   `gold_cell_health_1m` / `_5m` (grouped by it), `gold_element_impact_5m` (every CTE keyed by it),
