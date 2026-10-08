@@ -35,9 +35,9 @@ resources:
         - {name: schema, default: "${resources.schemas.netmon_raw.name}"}
         - {name: volume, default: "${resources.volumes.landing.name}"}
         - {name: subdir, default: stream}
-        - {name: max_batches, default: "240"}
-        - {name: interval_seconds, default: "10"}
-        - {name: fault_rate_multiplier, default: "100"}
+        - {name: max_batches, default: "360"}
+        - {name: interval_seconds, default: "5"}
+        - {name: fault_rate_multiplier, default: "200"}
       environments: *envs
       tasks:
         - task_key: stream

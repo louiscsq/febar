@@ -35,12 +35,14 @@ grants, tags) is applied by code in `governance/`. Proof that all of this ran on
                                     │
  netmon_eval     bronze_gt_* (ground truth) · eval_detection_log ─► eval_incident_detection · eval_ttd_summary
                  eval_detection_precision · eval_dq_capture · eval_rca_baseline · netmon_pipeline_event_log
+ netmon_noc      region-filtered views over the silver / gold tables (the only data regional NOC roles read)
  netmon_gov      mask_imsi · mask_msisdn · region_filter · is_pii_privileged
 ```
 
 - **One pipeline, one schema per layer.** The pipeline's default schema is `netmon_bronze` and every other
-  table is published with a fully qualified name, so grants follow the layers: NOC personas get gold
-  and selected silver tables, never bronze, the quarantine or the eval schema.
+  table is published with a fully qualified name, so grants follow the layers. The national NOC role gets
+  gold and selected silver tables, and regional roles get only the region-filtered `netmon_noc` views.
+  No role gets bronze, the quarantine or the eval schema.
 - **One Auto Loader stream per feed over every generator run.** Each run writes its own sub-directory
   (`history/`, `stream/`), and bronze globs `landing/*/<feed>/`, so a backfill and a live stream share the
   same tables. `_source_run` (from the path) keeps them apart where it matters, such as scoring.
@@ -64,19 +66,20 @@ grants, tags) is applied by code in `governance/`. Proof that all of this ran on
 | `bronze_topology_nodes`, `_edges`, `bronze_maintenance_windows` | streaming | one row per snapshot line | |
 | `silver_topology_nodes`, `_edges` | MV | `element_id` (latest snapshot) | `expect_all_or_fail` on ids, element type, level, region / time zone |
 | `silver_maintenance_windows` | MV | `change_id` | UTC timestamps |
-| `silver_kpis` | streaming | `record_id` | typed, UTC + local time (`event_ts_local`, `local_hour`, `day_type`) from the cell's IANA zone, ancestors (`site_id` … `amf_id`), `lag_s`, `is_late`, `landed_ts`, `evidence_ts` |
+| `silver_kpis` | streaming | `record_id` | typed, UTC + local time (`event_ts_local`, `local_date`, `local_hour`, `day_type`) from the cell's IANA zone, ancestors (`site_id` … `amf_id`), `lag_s`, `is_late`, `landed_ts`, `evidence_ts` |
 | `silver_alarms` | streaming | `record_id` | plus element region and ancestors, `is_service_down` |
 | `silver_sessions` | streaming | `record_id` | IMSI / MSISDN column masks, `region_filter` row filter, pseudonymous `subscriber_key` |
 | `silver_quarantine` | streaming | one row per rejected line | `feed`, `record_id`, `failed_rules`, raw timestamp, payload (no PII), redacted rescued / corrupt text |
-| `gold_cell_baseline` | MV | `valid_date, cell_id, local_hour, day_type` | mean / std of latency, loss, DL throughput, RRC success, drop rate over the 14 days **before** `valid_date` |
+| `gold_cell_baseline` | MV | `valid_date (local), cell_id, local_hour, day_type` | mean / std of latency, loss, DL throughput, RRC success, drop rate over the 14 local days **before** `valid_date` |
 | `gold_cell_health_1m`, `_5m` | streaming | `window_start, cell_id` | window means, baseline means and std, z-scores, fired rules (`flags`), `is_degraded` |
 | `gold_impact_detections` | streaming | `detection_id` | one row per degraded KPI record or element-down alarm: `detected_ts`, `evidence_ts`, `pipeline_latency_s`, `flags`, `severity_score`, `in_maintenance`; **row-filtered** |
-| `gold_element_impact_5m` | MV | `window_start, element_id` | topology rollup (see below) |
+| `gold_element_impact_5m` | MV | `window_start, element_id` | topology rollup (see below), with `evidence_ts` |
 | `gold_cell_sessions_5m` | streaming | `window_start, cell_id` | session outcomes, `n_subscribers_approx`, `failure_rate`; no PII |
 | `eval_*` | MV / streaming | | see [evaluation](#detection-and-evaluation) |
+| `netmon_noc.*` | views | | region-filtered views over the tables above, for regional NOC roles (see [governance](#governance)) |
 
 Every pipeline table has a table comment in code, and `silver_sessions` has column comments in its
-declared schema. Tags are applied by `governance/sql/03_comments_tags.sql`.
+declared schema. Tags are applied by `governance/sql/04_comments_tags.sql`.
 
 **Topology rollup (`gold_element_impact_5m`).** For every 5-minute window in which cells reported, every
 cell is classed as degraded (from `gold_cell_health_5m`), silent (no KPI row while others reported, so
@@ -117,7 +120,7 @@ against `ground_truth/dq_injections`.
 
 | operator | watermark column | delay | why |
 |---|---|---|---|
-| silver dedupe (`dropDuplicatesWithinWatermark`) | `least(emitted_ts, _file_modification_time)` (delivery time, capped at file landing) | 15 min | redeliveries arrive 1–600 s after the original. Using delivery time rather than event time means a 36-hour-late record is kept (flagged late), not discarded. The cap matters because the batch history "delivers" late records up to 36 h after its window, which is in the future relative to a stream started afterwards; uncapped, that pushed the watermark a day ahead and silently dropped the whole live stream (found on the first live run) |
+| silver dedupe (`dropDuplicatesWithinWatermark` on `record_id`) | `_ingested_at` (set by bronze when Auto Loader picks the file up) | 1 h | Ingestion time only moves forward, so no row is ever late for the deduper: not a 36-hour-late record, and not a file that is discovered after newer files. Event and delivery times are used only for the lateness flag. Redeliveries arrive 1–600 s after the original, so the 1-hour horizon gives 6× headroom. Earlier versions watermarked delivery time, then `least(delivery, file mtime)`; both could drop valid rows (the first dropped a whole live run). The semantics are pinned by a reference model in `src/netmon_pipeline/dedupe.py` and its tests |
 | `gold_cell_health_1m` / `_5m` | `event_ts` | 2 min | 1-minute KPIs arrive 6–30 s after their period ends; 2 minutes absorbs that plus pipeline jitter |
 | `gold_cell_sessions_5m` | `end_ts` | 10 min | xDRs are emitted 5–90 s after the session closes. A stream can only define one watermark, so this table reads an un-watermarked sessions view and deduplicates on `record_id` itself (copies share `end_ts`) |
 
@@ -140,12 +143,16 @@ never waits for a window to close or for the watermark. The 1- and 5-minute wind
 the rollup and ML features; they are append-only, so a window is emitted once the watermark passes its
 end (window + 2 min).
 
-**Baseline without leakage.** `gold_cell_baseline` is keyed by `valid_date`. The row used on date *D*
-aggregates only days *D−14 … D−1* (daily count / sum / sum-of-squares combined over the window). Each
-record is scored against its own cell, local hour and day type (weekday / weekend, from the cell's IANA
-zone, DST included). That is true even when the whole history is backfilled in one update, so no record
-is ever scored against its own day or later days. Outage periods are excluded from the baseline. The
-first day of history has no baseline, so only the hard rules apply there.
+**Baseline without leakage, on the local calendar.** Each KPI record gets `event_ts_local`, `local_date`,
+`local_hour` and `day_type` from its cell's IANA zone (`from_utc_timestamp`, so DST is included).
+`gold_cell_baseline` is keyed by `valid_date`, a **local** date. The row used on local date *D* aggregates
+only local days *D−14 … D−1* (daily count / sum / sum-of-squares combined over the window), and records
+join on `local_date = valid_date`. The daily aggregation, the lookback and the join therefore use the same
+local day as the hour and day-type keys. A Sydney record at 00:30 local (13:30 UTC the previous day)
+belongs to the new local day. Tests cover local midnight, the Sydney DST transitions in October and April,
+Brisbane (no DST), Adelaide (+9:30 / +10:30) and Perth. No record is ever scored against its own local
+day or later days, even in a one-shot backfill. Outage periods are excluded from the baseline. The first
+local day of history has no baseline, so only the hard rules apply there.
 
 ## Detection and evaluation
 
@@ -164,26 +171,45 @@ first day of history has no baseline, so only the hard rules apply there.
 
 Detections in a change window are kept but flagged `in_maintenance` for suppression downstream.
 
-**Scoring** (`netmon_eval`, definitions in `src/netmon_pipeline/scoring.py`):
+**Scoring** (`netmon_eval`, definitions in `src/netmon_pipeline/scoring.py`). Scored incidents are
+`is_customer_impacting AND NOT is_censored`; censored rows were not fully observed. Each incident gets
+**two separate metrics**:
 
-- Scored incidents: `is_customer_impacting AND NOT is_censored`. Censored rows were not fully observed.
-- A detection matches an incident if its element is the root, any of `root_element_ids` (every site or
-  link of a bushfire or cyclone cluster), `affected_element_ids` or `affected_cell_ids`, from the same run,
-  and its signal overlaps the impact window (+10 min slack for alarm lag). `root_detected` says whether a
-  detection hit a true root, so a cluster fault counts as long as any of its roots was flagged.
-- `ttd_s = available_ts − impact_start_ts`, where `available_ts = evidence_ts + pipeline_latency_s`.
-  `evidence_ts` is when the evidence reached the NOC on the generator's clock. For live files that is the
-  micro-batch landing time (from the file name); for batch history it is `emitted_ts`.
-  `pipeline_latency_s` is wall-clock time from the file landing in the Volume to the detection row being
-  written, counted for live files only (a backfill's processing delay is not detection latency). In a
-  real-time stream (`interval_seconds = step_seconds`) this equals `detected_ts − impact_start_ts`. The
-  decomposition also makes accelerated streams (several simulated minutes per wall minute) score
-  correctly.
-- `eval_ttd_summary`: per run (history = 15-min ROP backfill, stream = 1-min live), overall and per fault
-  type: detected %, median and p90 TTD, % within 5 minutes (undetected counts as missed).
-- `eval_detection_precision`: share of detections explained by any ground-truth event, including red
-  herrings and planned work.
-- `eval_rca_baseline`: a topology heuristic that ranks the rollup's elements and scores hit@1 / hit@3
+| metric | succeeds when | columns |
+|---|---|---|
+| **(a) customer-impact detection**, the 5-minute SLA | any detection lands on the incident's **impact footprint** (`root_element_ids`, `affected_element_ids`, `affected_cell_ids`), from the same run, with its signal overlapping the impact window (+10 min slack for alarm lag) | `impact_detected`, `impact_ttd_s`, `impact_within_sla` |
+| **(b) root-element localisation** | a detection, **or** the topology rollup (`gold_element_impact_5m`: ≥ 80 % of the element's descendant cells degraded or silent, or a service-down alarm on it), lands on an element of **`root_element_ids`** (falling back to `root_element_id`). For bushfire / cyclone clusters **any** root counts | `root_localised`, `localisation_source`, `localisation_ttd_s`, `localised_within_sla` |
+
+*Why two metrics rather than requiring a root match for "detected".* Step-2 detection is per cell by design,
+because customer impact is visible on cells. A dark site or a failed router is the root, while every
+symptom is a cell. Requiring the detection itself to land on the root would make the step-2 SLA metric
+mostly measure which faults happen to raise an element-level alarm (`NODE_DOWN`, `NE_UNREACHABLE`,
+`CELL_OUT_OF_SERVICE`). Quiet faults, such as a backhaul link that only degrades, would never count
+however fast customers were flagged. So (a) answers *"did we see the customer impact within 5 minutes?"*
+(the NOC's SLA), and (b) answers *"did anything in step 2 point at the true root?"*, which is the contract's
+"cluster faults count if any element of `root_element_ids` matches". Ranking the right root above its
+ancestors and neighbours is step 3's job (`eval_rca_baseline` is the heuristic bar it has to beat). The
+headline tables lead with fault-only rows; planned work is reported separately because the NOC suppresses
+it via the change calendar.
+
+- **Timing.** `ttd = available_ts − impact_start_ts`, where `available_ts = evidence_ts + pipeline_latency_s`.
+  `evidence_ts` is when the evidence reached the NOC on the generator's clock: the micro-batch landing
+  time (from the file name) for live files, `emitted_ts` for batch history. `pipeline_latency_s` is
+  wall-clock time from the file landing in the Volume to the detection row being written, counted for live
+  files only (a backfill's processing delay is not detection latency). In a real-time stream this equals
+  `detected_ts − impact_start_ts`. The decomposition also scores accelerated streams correctly.
+  Localisation through the rollup has no measured emission time, so its time is a lower bound:
+  `max(window_end + 2-min watermark, evidence_ts)`, with the MV refresh not included.
+- **`eval_ttd_summary`**: per run (history = 15-min ROP backfill, stream = 1-min live), per event class and
+  fault type: impact-detected %, median / p90 TTD, % within 5 min (undetected counts as missed), root
+  localised %, median localisation time and % localised within 5 min.
+- **`eval_detection_precision`** (fault-detection precision): each detection is labelled by the ground truth
+  it overlaps, in priority order. Uncensored fault = **TP**. Overlapping a censored incident = **excluded**
+  (incomplete label). Planned work = **suppressed** when `in_maintenance`, else a **FP** (a page for
+  announced work). Red herring (e.g. `TRAFFIC_SURGE`) = **FP**. Nothing = **FP**.
+  `fault_precision_pct = TP / (TP + FP)`, and `maintenance_suppression_pct` = suppressed / planned is
+  reported separately. Grouping is on `(source_run, detection_id)`.
+- **`eval_rca_baseline`**: a topology heuristic that ranks the rollup's elements and scores hit@1 / hit@3
   against `root_element_ids`. It is the bar the ML model has to beat.
 
 The 15-minute history cannot meet a 5-minute SLA by construction: evidence only exists once the 15-minute
@@ -198,8 +224,11 @@ Applied by `governance/apply_governance.py` (job `banksia-netmon-governance`, or
 | file | content |
 |---|---|
 | `01_functions.sql` | `is_pii_privileged()`, `mask_imsi`, `mask_msisdn` (full value for `pii_privileged`, otherwise PLMN / country code plus the last 2–3 digits), `region_filter(region_code)` (`noc_national` sees everything, `noc_region_<code>` only its region) |
-| `02_grants.sql` | per persona: `USE CATALOG`; `USE SCHEMA` + `SELECT` on gold; `SELECT` on `silver_sessions`, `silver_kpis`, `silver_alarms`, topology and maintenance; `USE SCHEMA` on gov. No bronze, quarantine or eval, and no `MODIFY` |
-| `03_comments_tags.sql` | schema comments and tags (`domain`, `layer`, `contains_pii`), PII tags on IMSI / MSISDN in bronze and silver, domain / grain / consumer tags on the gold tables, `ground_truth` tags on eval |
+| `02_noc_views.sql` | `netmon_noc`: one view per silver / gold table a regional NOC user needs (KPIs, alarms, sessions, topology nodes / edges, maintenance, baseline, 1- and 5-min health, detections, rollup, session outcomes), each `WHERE region_filter(region_code)`. Tables without `region_code` take it from the topology |
+| `03_grants_national.sql` | `noc_national`: `USE CATALOG`; `USE SCHEMA` + `SELECT` on gold; `SELECT` on `silver_sessions`, `silver_kpis`, `silver_alarms`, topology and maintenance; `SELECT` on `netmon_noc` |
+| `03_grants_regional.sql` | `noc_region_<code>`: `USE CATALOG`, `USE SCHEMA` + `SELECT` on `netmon_noc` only, plus `EXECUTE` on `region_filter`. No silver or gold table directly |
+| (none) | `pii_privileged`: **no grants**. It is only tested inside the mask functions, so it unmasks IMSI / MSISDN for someone who already holds a NOC role and gives access to nothing on its own |
+| `04_comments_tags.sql` | schema comments and tags (`domain`, `layer`, `contains_pii`), PII tags on IMSI / MSISDN in bronze and silver, domain / grain / consumer tags on the gold tables, `ground_truth` tags on eval |
 
 **Where masks and filters attach.** The pipeline declares them on its own tables, since Lakeflow-managed
 tables take policies in their definition: `silver_sessions` has
@@ -212,6 +241,13 @@ filter. Two design points follow:
   policy-protected table. A filter evaluates against the identity of whoever reads, which inside a
   pipeline is the owner, so a non-leaf filtered table would silently drop rows depending on the
   owner's group memberships.
+- **Regional access goes through views.** Regional roles must not see other regions in any table they
+  can read. Putting a row filter on every region-bearing pipeline table would break the leaf rule above,
+  since the pipeline streams from silver KPIs, alarms, topology and the health tables. So regional roles
+  are granted only `netmon_noc`, whose views apply `region_filter`. The filter and the masks are evaluated
+  for the querying user, including through a view. `noc_national` reads the tables directly.
+- Persona grants are reset (`REVOKE ALL PRIVILEGES` on every managed securable) before the role grants
+  are applied, so a rerun converges to the declared roles.
 - Bronze holds raw IMSI / MSISDN and is not granted to anyone. The quarantine payload leaves them out, and
   its rescued / corrupt text is regex-redacted.
 
@@ -224,8 +260,9 @@ groups but not account groups, and Unity Catalog rejects workspace-local groups 
   work unchanged with account groups in production.
 - Grants are attempted on the group first. When UC rejects the group, the grants go to the group's
   **persona service principals**, which are account-level identities: `netmon-noc-national`
-  (`noc_national`), `netmon-noc-nsw-analyst` (`noc_region_nsw`), `netmon-noc-wa-analyst` (`noc_region_wa`)
-  and `netmon-pii-officer` (`noc_national` + `pii_privileged`).
+  (`noc_national`), `netmon-noc-nsw-analyst` (`noc_region_nsw`), `netmon-noc-wa-analyst` (`noc_region_wa`),
+  `netmon-pii-officer` (`noc_national` + `pii_privileged`: unmasked) and `netmon-pii-only`
+  (`pii_privileged` only: holds no privileges at all).
 - The pipeline owner is added to `noc_national` (sees all regions) but not to `pii_privileged`, so the
   owner reads masked identifiers too.
 
@@ -247,15 +284,15 @@ databricks bundle run -p febar netmon_generate_history
 databricks bundle run -p febar netmon_governance --params stage=functions
 # 3. pipeline, triggered: processes the history to completion
 databricks bundle run -p febar netmon_pipeline
-# 4. groups, personas, grants, comments, tags
+# 4. groups, personas, region-filtered views, role grants, comments, tags
 databricks bundle run -p febar netmon_governance --params stage=policies
 #    (steps 1-4 in one go: databricks bundle run -p febar netmon_bootstrap)
 
-# 5. live: switch the pipeline to continuous and stream for ~40 min (240 simulated minutes, 6x speed)
+# 5. live: switch the pipeline to continuous and stream for ~30 min (360 simulated minutes, 12x speed)
 databricks bundle deploy -p febar --var pipeline_continuous=true
 databricks bundle run -p febar netmon_pipeline --no-wait
 databricks bundle run -p febar netmon_stream_generator \
-    --params max_batches=240,interval_seconds=10,fault_rate_multiplier=100
+    --params max_batches=360,interval_seconds=5,fault_rate_multiplier=200
 # stop the continuous pipeline afterwards
 databricks pipelines stop <pipeline-id> -p febar
 databricks bundle deploy -p febar          # back to triggered
@@ -266,16 +303,23 @@ python scripts/capture_evidence.py --profile febar --warehouse <id> --pipeline-i
 
 Live stream parameters. At the `small` preset, a real-time stream would see too few incidents finish
 within a reasonable demo window: most fault types last 20 minutes to several hours, and scoring needs
-uncensored incidents. So the demo runs the generator 6× faster (one simulated minute every 10 s) with a
-fault-rate multiplier of 100. TTD stays honest because it adds the measured wall-clock pipeline latency
-to the simulated evidence time ([above](#detection-and-evaluation)).
+uncensored incidents. So the demo runs the generator 12× faster (one simulated minute every 5 s, 6 simulated
+hours) with a fault-rate multiplier of 200, which gives a few dozen uncensored fault incidents. TTD stays
+honest because it adds the measured wall-clock pipeline latency to the simulated evidence time
+([above](#detection-and-evaluation)).
 
 ## Known limitations
 
 - **Workspace-local groups and SP personas** instead of account groups (see [Governance](#governance)).
-  Masks and filters are demonstrated by changing the owner's group membership and calling the policy
-  functions. Querying as a persona service principal was not possible because creating OAuth secrets
-  for service principals is not available to this session.
+  Masks and filters are demonstrated by changing the capturing user's group membership and querying every
+  object a regional role is granted. Querying as a persona service principal was not possible because
+  creating OAuth secrets for service principals is not available to this session. Grant-level denial
+  (for example the pii-only persona) is shown from `information_schema` privileges. The capturing user
+  is the catalog owner and can always read the base tables, so it cannot itself show a grant denial.
+- **Dedupe horizon.** Streaming dedupe holds state for 1 hour of ingestion time. A redelivery ingested
+  later than that is admitted to silver (bounded state) and counted by `eval_dq_capture`
+  (`n_single_copy_in_silver`). Exactly-once over unbounded time would need unbounded state or a MERGE-based
+  silver.
 - **Backfill ordering.** The event-time watermarks assume the history arrives roughly in emission order.
   Bronze allows 20,000 files per micro-batch, so a `small` history is ingested in one batch; a much
   larger backfill split over several batches could see some 15-minute history rows fall behind the
