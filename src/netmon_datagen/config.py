@@ -21,19 +21,28 @@ class ScalePreset:
     sites_per_backhaul: float  # mean sites chained behind one backhaul link
     subscribers: int  # synthetic subscriber population
     session_sample_rate: float  # fraction of real session volume emitted as xDRs
+    # Explicit region codes (in catalogue order otherwise): small presets pick regions that cover every
+    # time zone class and fault type (metro + tropical/long-haul north) rather than just the biggest cities.
+    region_codes: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.region_codes is not None and len(self.region_codes) != self.regions:
+            raise ValueError(f"preset {self.name!r}: regions={self.regions} but {len(self.region_codes)} codes")
 
 
 PRESETS: dict[str, ScalePreset] = {
-    # Unit tests: ~25 sites / ~110 cells; a 2-day history generates in about a second.
+    # Unit tests: ~25 sites / ~100 cells over Sydney (DST) and North Queensland (no DST, tropical, long-haul).
     "tiny": ScalePreset("tiny", regions=2, sites=24, upf_per_region=1, routers_per_region=2,
-                        sites_per_backhaul=2.0, subscribers=3_000, session_sample_rate=0.02),
-    # Dev / quick demo: ~300 sites / ~1.4k cells.
+                        sites_per_backhaul=2.0, subscribers=3_000, session_sample_rate=0.02,
+                        region_codes=("NSW", "NQL")),
+    # Dev / quick demo: ~300 sites / ~1.3k cells over four time zones (UTC+8 .. +11).
     "small": ScalePreset("small", regions=4, sites=300, upf_per_region=1, routers_per_region=4,
-                         sites_per_backhaul=2.5, subscribers=100_000, session_sample_rate=0.01),
-    # Default: a ~5k-site national slice (~23k cells) of a large operator.
+                         sites_per_backhaul=2.5, subscribers=100_000, session_sample_rate=0.01,
+                         region_codes=("NSW", "VIC", "WA", "NQL")),
+    # Default: a ~5k-site national footprint (~22k cells) across all ten regions.
     "large": ScalePreset("large", regions=10, sites=5_000, upf_per_region=2, routers_per_region=10,
                          sites_per_backhaul=2.5, subscribers=2_000_000, session_sample_rate=0.0025),
-    # Full national footprint of a tier-1 operator (~20k sites / ~90k cells). Use with fewer days.
+    # Full national footprint of a tier-1 operator (~20k sites / ~85k cells). Use with fewer days.
     "xl": ScalePreset("xl", regions=10, sites=20_000, upf_per_region=3, routers_per_region=30,
                       sites_per_backhaul=2.5, subscribers=8_000_000, session_sample_rate=0.001),
 }

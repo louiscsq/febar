@@ -1,4 +1,4 @@
-"""Traffic load model (diurnal + weekly seasonality) and per-cell KPI generation.
+"""Traffic load model (diurnal + weekly seasonality in each cell's local time) and per-cell KPI generation.
 
 Load drives everything else: PRB utilisation follows load, and once PRB utilisation passes ~70 %
 a congestion term pushes latency, packet loss and drop rate up and success rates / throughput down.
@@ -16,6 +16,8 @@ from netmon_datagen.topology import Topology
 
 # Normalised hourly traffic profiles (peak = 1.0) by urbanity, weekday vs weekend.
 # Urban: commuter/business double peak; suburban/rural: residential evening peak, busier weekends.
+# Remote (mining towns, FIFO camps, communities): shift-change peaks around 05-06h and 18-19h, and the
+# same pattern on weekends because rosters ignore the calendar.
 _PROFILES = {
     ("urban", False): [.20, .13, .09, .07, .07, .10, .22, .48, .78, .85, .82, .84,
                        .88, .85, .82, .83, .88, .95, 1.0, .98, .92, .80, .58, .35],
@@ -29,9 +31,13 @@ _PROFILES = {
                        .60, .58, .57, .60, .68, .80, .90, .92, .88, .75, .52, .32],
     ("rural", True): [.22, .14, .10, .07, .06, .08, .16, .32, .52, .62, .66, .68,
                       .68, .66, .65, .67, .72, .82, .92, .95, .90, .78, .56, .36],
+    ("remote", False): [.25, .18, .14, .14, .30, .62, .70, .52, .42, .40, .40, .45,
+                        .50, .45, .42, .45, .55, .78, .96, 1.0, .90, .72, .52, .36],
+    ("remote", True): [.27, .19, .15, .14, .28, .58, .66, .52, .44, .42, .42, .47,
+                       .52, .47, .44, .47, .56, .78, .95, 1.0, .91, .74, .54, .38],
 }
-_URB = ["urban", "suburban", "rural"]
-_PROFILE_ARR = np.array([[_PROFILES[(u, we)] for we in (False, True)] for u in _URB])  # (3, 2, 24)
+_URB = ["urban", "suburban", "rural", "remote"]
+_PROFILE_ARR = np.array([[_PROFILES[(u, we)] for we in (False, True)] for u in _URB])  # (4, 2, 24)
 GROWTH_PER_DAY = 0.0005  # ~1.5 % traffic growth per month, relative to the reference date below
 _GROWTH_REF = np.datetime64("2026-06-01", "D")
 
@@ -48,26 +54,44 @@ def urbanity_codes(topo: Topology) -> np.ndarray:
     return topo.cells["urbanity"].map({u: i for i, u in enumerate(_URB)}).to_numpy()
 
 
-def seasonal_profile(ts: np.ndarray, urb_codes: np.ndarray) -> np.ndarray:
-    """(nT, nC) normalised seasonal factor, linearly interpolated between hourly anchors."""
+def local_clock(ts: np.ndarray, timezones: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Local wall-clock hour (float) and weekend flag, each shape (n_zones, nT), for UTC instants `ts`.
+
+    Vectorised per zone through pandas' tz database (DST transitions included), so the cost is one
+    conversion per distinct zone regardless of cell count."""
+    idx = pd.DatetimeIndex(ts.astype("datetime64[s]")).tz_localize("UTC")
+    hours, weekend = [], []
+    for z in timezones:
+        loc = idx.tz_convert(z)
+        hours.append(loc.hour.to_numpy() + loc.minute.to_numpy() / 60.0 + loc.second.to_numpy() / 3600.0)
+        weekend.append(loc.dayofweek.to_numpy() >= 5)
+    return np.array(hours).reshape(len(timezones), len(ts)), np.array(weekend).reshape(len(timezones), len(ts))
+
+
+def seasonal_profile(ts: np.ndarray, urb_codes: np.ndarray, tz_idx: np.ndarray, timezones: list[str]) -> np.ndarray:
+    """(nT, nC) normalised seasonal factor at each cell's local time, interpolated between hourly anchors.
+
+    `tz_idx` gives each cell's position in `timezones`. Timestamps stay UTC; only the profile lookup
+    uses local hour and local day of week."""
     ts = ts.astype("datetime64[s]")
     days = ts.astype("datetime64[D]")
-    hour = (ts - days).astype(np.int64) / 3600.0
-    weekend = ((days.astype(np.int64) + 3) % 7) >= 5  # 1970-01-01 was a Thursday
+    hours_z, weekend_z = local_clock(ts, timezones)
+    hour = hours_z[tz_idx].T  # (nT, nC)
+    we = weekend_z[tz_idx].T.astype(int)
     h0 = np.floor(hour).astype(int) % 24
     h1 = (h0 + 1) % 24
-    w = (hour - np.floor(hour))[:, None]
-    we = weekend.astype(int)[:, None]
-    u = urb_codes[None, :]
-    p0 = _PROFILE_ARR[u, we, h0[:, None]]
-    p1 = _PROFILE_ARR[u, we, h1[:, None]]
+    w = hour - np.floor(hour)
+    u = np.broadcast_to(urb_codes[None, :], hour.shape)
+    p0 = _PROFILE_ARR[u, we, h0]
+    p1 = _PROFILE_ARR[u, we, h1]
     growth = 1.0 + GROWTH_PER_DAY * np.clip((days - _GROWTH_REF).astype(np.int64), -365, 365)
     return (p0 * (1 - w) + p1 * w) * growth[:, None]
 
 
 def baseline_load(topo: Topology, ts: np.ndarray) -> np.ndarray:
     """Noise-free expected load (fraction of cell capacity) per (time, cell)."""
-    return seasonal_profile(ts, urbanity_codes(topo)) * topo.cells["base_load"].to_numpy()[None, :]
+    prof = seasonal_profile(ts, urbanity_codes(topo), topo.cell_tz_idx, topo.timezones)
+    return prof * topo.cells["base_load"].to_numpy()[None, :]
 
 
 def expected_users(topo: Topology, ts: np.ndarray) -> np.ndarray:
@@ -153,6 +177,7 @@ def generate_kpis(topo: Topology, ts: np.ndarray, step_minutes: float, effects, 
         "packet_loss_pct": np.round(loss[sel], 3),
     })
     frame["_event_time"] = ts[t_idx].astype("datetime64[s]")
+    frame["_cell"] = c_idx  # private: cell position, survives DQ nulling of cell_id
     # Delivered after the period closes; collection lag scales with the period (1-min: 6-30 s, 15-min: 30-240 s).
     step_s = step_minutes * 60
     frame["_emit_delay_s"] = step_s + rng.uniform(min(30, 0.1 * step_s), min(240, 0.5 * step_s), len(frame))
