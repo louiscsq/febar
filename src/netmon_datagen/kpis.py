@@ -153,7 +153,9 @@ def generate_kpis(topo: Topology, ts: np.ndarray, step_minutes: float, effects, 
         "packet_loss_pct": np.round(loss[sel], 3),
     })
     frame["_event_time"] = ts[t_idx].astype("datetime64[s]")
-    frame["_emit_delay_s"] = step_minutes * 60 + rng.uniform(30, 240, len(frame))
+    # Delivered after the period closes; collection lag scales with the period (1-min: 6-30 s, 15-min: 30-240 s).
+    step_s = step_minutes * 60
+    frame["_emit_delay_s"] = step_s + rng.uniform(min(30, 0.1 * step_s), min(240, 0.5 * step_s), len(frame))
     return KpiResult(frame, rrc, attach, drop, avail, dl, exp_users, effects.silent)
 
 

@@ -101,7 +101,7 @@ reporting-period default. Streaming mode uses `step_seconds`, 1 minute by defaul
 |---|---|---|
 | `record_id` | string | `K-<cell_id>-<yyyymmddHHMM>`, the natural key and dedupe key |
 | `event_ts` | string | period start (UTC) |
-| `emitted_ts` | string | when the collector delivered the record (period end + 30–240 s; late records much later) |
+| `emitted_ts` | string | when the collector delivered the record: period end + 30–240 s for 15-min periods, + 6–30 s for 1-min streaming periods (late records much later) |
 | `cell_id` | string | FK → `topology_nodes` |
 | `granularity_s` | int | 900 in batch, 60 in streaming |
 | `availability_pct` | double | share of the period the cell was in service |
