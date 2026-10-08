@@ -229,8 +229,11 @@ groups but not account groups, and Unity Catalog rejects workspace-local groups 
 - The pipeline owner is added to `noc_national` (sees all regions) but not to `pii_privileged`, so the
   owner reads masked identifiers too.
 
-**Lineage** (Volume → bronze → silver → gold) is captured by Unity Catalog automatically. The evidence
-includes a query against `system.access.table_lineage`.
+**Lineage** is captured by Unity Catalog automatically. `system.access.table_lineage` has every
+bronze → silver → gold → eval edge (`evidence/step2/07_lineage.md`). On this workspace the Auto Loader hop
+from the Volume is recorded as a pipeline edge into each bronze table with a NULL source (no Volume path),
+both in the system table and in the lineage REST API. That hop is shown instead by `_source_file`
+(`_metadata.file_path`) on every bronze row.
 
 ## Deploy and run
 
@@ -258,7 +261,7 @@ databricks pipelines stop <pipeline-id> -p febar
 databricks bundle deploy -p febar          # back to triggered
 
 # evidence (local, uses the SQL warehouse)
-python scripts/capture_evidence.py --profile febar --warehouse <id>
+python scripts/capture_evidence.py --profile febar --warehouse <id> --pipeline-id <id> --governance-demo
 ```
 
 Live stream parameters. At the `small` preset, a real-time stream would see too few incidents finish
@@ -287,3 +290,5 @@ to the simulated evidence time ([above](#detection-and-evaluation)).
 - **Ramped faults.** Backhaul degradation and core congestion ramp in over 10–30 minutes. At low intensity
   they are inside normal variation, so their TTD is naturally longer than for outages.
 - **Sessions are sparse** at `small` (1 % sample), so they feed features rather than detection.
+- **Volume lineage.** `system.access.table_lineage` does not record the Volume path as the source of the
+  Auto Loader tables on this workspace (see [Governance](#governance)); `_source_file` carries it.

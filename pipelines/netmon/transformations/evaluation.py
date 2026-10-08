@@ -116,11 +116,13 @@ def eval_incident_detection():
 @dp.materialized_view(
     name=f"{S.eval}.eval_ttd_summary",
     comment="Time-to-detect summary per source run (history = 15-min ROP backfill, stream = 1-min live feed), "
-            "overall and per fault type: detected share, median / p90 TTD and share detected within 5 minutes.",
+            "overall, per event class (fault / planned / red_herring) and per fault type: detected share, "
+            "median / p90 TTD and share detected within 5 minutes.",
 )
 def eval_ttd_summary():
     return spark.sql(f"""
-        SELECT source_run, coalesce(fault_type, 'ALL') AS fault_type, count(*) AS n_incidents,
+        SELECT source_run, coalesce(event_class, 'ALL') AS event_class, coalesce(fault_type, 'ALL') AS fault_type,
+               count(*) AS n_incidents,
                count_if(is_detected) AS n_detected,
                round(100.0 * count_if(is_detected) / count(*), 1) AS detected_pct,
                round(percentile(ttd_s, 0.5), 1) AS median_ttd_s, round(percentile(ttd_s, 0.9), 1) AS p90_ttd_s,
@@ -128,7 +130,7 @@ def eval_ttd_summary():
                round(percentile(evidence_lag_s, 0.5), 1) AS median_evidence_lag_s,
                round(percentile(first_pipeline_latency_s, 0.5), 1) AS median_pipeline_latency_s
         FROM {S.eval}.eval_incident_detection
-        GROUP BY GROUPING SETS ((source_run), (source_run, fault_type))""")
+        GROUP BY GROUPING SETS ((source_run), (source_run, event_class), (source_run, event_class, fault_type))""")
 
 
 @dp.materialized_view(

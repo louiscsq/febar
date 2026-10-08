@@ -24,6 +24,9 @@ CAT = "telco_netmon_febar_catalog"
 B, S, G, E, GOV = (f"{CAT}.netmon_bronze", f"{CAT}.netmon_silver", f"{CAT}.netmon_gold", f"{CAT}.netmon_eval",
                    f"{CAT}.netmon_gov")
 EVENT_LOG = f"{E}.netmon_pipeline_event_log"
+# Updates from the latest full refresh onwards (earlier full refreshes re-processed the same files).
+SINCE_REFRESH = f"""timestamp >= (SELECT max(timestamp) FROM {EVENT_LOG} WHERE event_type = 'create_update'
+                                   AND details:create_update:full_refresh::boolean)"""
 
 
 class Runner:
@@ -125,13 +128,14 @@ def pipeline_status(r: Runner, pipeline_id: str) -> None:
 
 def expectations(r: Runner) -> None:
     d = Doc(r, "02_expectations.md", "Expectation pass/fail metrics (pipeline event log)",
-            "Summed over every update. `drop` rules move rows to `silver_quarantine`; `on_time` is warn-only "
+            "Summed over the latest full refresh and every update after it (history backfill + live stream), so "
+            "each record is counted once. `drop` rules move rows to `silver_quarantine`; `on_time` is warn-only "
             "(late rows are kept, flagged `is_late`); topology rules are `expect_or_fail`.")
     d.query("Per dataset and rule", f"""
         WITH x AS (
           SELECT explode(from_json(details:flow_progress:data_quality:expectations,
                  'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>')) AS e
-          FROM {EVENT_LOG} WHERE event_type = 'flow_progress'
+          FROM {EVENT_LOG} WHERE event_type = 'flow_progress' AND {SINCE_REFRESH}
             AND details:flow_progress:data_quality:expectations IS NOT NULL)
         SELECT e.dataset, e.name AS rule, sum(e.passed_records) AS passed, sum(e.failed_records) AS failed,
                round(100.0 * sum(e.failed_records) / nullif(sum(e.passed_records) + sum(e.failed_records), 0), 3)
@@ -139,7 +143,7 @@ def expectations(r: Runner) -> None:
         FROM x GROUP BY e.dataset, e.name ORDER BY e.dataset, failed DESC""")
     d.query("Dropped rows per silver flow", f"""
         SELECT origin.flow_name, sum(details:flow_progress:data_quality:dropped_records::bigint) AS dropped_records
-        FROM {EVENT_LOG} WHERE event_type = 'flow_progress'
+        FROM {EVENT_LOG} WHERE event_type = 'flow_progress' AND {SINCE_REFRESH}
           AND details:flow_progress:data_quality:dropped_records IS NOT NULL
         GROUP BY origin.flow_name ORDER BY 1""")
     d.query("Quarantine by feed and failed rule", f"""
@@ -238,9 +242,11 @@ def evaluation(r: Runner) -> None:
             "latency for live files) − `impact_start_ts`. `history` is the 15-minute-ROP backfill (cannot meet "
             "a 5-minute SLA by construction); `stream` is the 1-minute live feed. See docs/pipeline.md.")
     d.query("Summary per run (median / p90 TTD, % within 5 minutes)", f"""
-        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type = 'ALL' ORDER BY source_run""")
+        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type = 'ALL' ORDER BY source_run, event_class""",
+            note="`event_class = ALL` covers every scored incident; `fault` excludes planned maintenance (which "
+                 "the NOC suppresses via the change calendar) and red herrings.")
     d.query("Per fault type", f"""
-        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type <> 'ALL' ORDER BY source_run, fault_type""")
+        SELECT * FROM {E}.eval_ttd_summary WHERE fault_type <> 'ALL' ORDER BY source_run, event_class, fault_type""")
     d.query("Live-stream incidents", f"""
         SELECT incident_id, fault_type, severity, region_code, root_element_id, impact_start_ts, is_detected,
                first_signal_source, first_element_id, first_flags, round(evidence_lag_s, 0) AS evidence_lag_s,
@@ -391,12 +397,22 @@ def lineage(r: Runner) -> None:
           AND event_date >= current_date() - INTERVAL 2 DAYS
           AND target_table_full_name IS NOT NULL
         GROUP BY ALL ORDER BY target, source""")
-    d.query("Volume → bronze (path-based sources)", f"""
-        SELECT DISTINCT regexp_replace(source_path, '/date=.*', '/date=*') AS source_path, target_table_full_name
-        FROM system.access.table_lineage
-        WHERE target_table_full_name LIKE '{CAT}.netmon_%' AND source_path IS NOT NULL
-          AND event_date >= current_date() - INTERVAL 2 DAYS
-        ORDER BY 2 LIMIT 40""")
+    d.text("Volume → bronze", "On this workspace `system.access.table_lineage` (and the lineage-tracking REST API) "
+           "record the Auto Loader hop as a PIPELINE-entity edge into each bronze table with a NULL source "
+           "(see the rows with `source = NULL` above): the Volume path is not populated as a lineage source. "
+           "The hop is proven instead by `_source_file` (Auto Loader `_metadata.file_path`) on every bronze row:")
+    d.query("Bronze rows by landing Volume directory (_metadata.file_path)", f"""
+        SELECT 'bronze_kpis' AS table_name, regexp_replace(_source_file, '/date=.*', '/') AS volume_dir, count(*) AS n
+        FROM {B}.bronze_kpis GROUP BY 2
+        UNION ALL SELECT 'bronze_alarms', regexp_replace(_source_file, '/date=.*', '/'), count(*)
+          FROM {B}.bronze_alarms GROUP BY 2
+        UNION ALL SELECT 'bronze_sessions', regexp_replace(_source_file, '/date=.*', '/'), count(*)
+          FROM {B}.bronze_sessions GROUP BY 2
+        UNION ALL SELECT 'bronze_topology_nodes', regexp_replace(_source_file, '/[^/]*$', '/'), count(*)
+          FROM {B}.bronze_topology_nodes GROUP BY 2
+        UNION ALL SELECT 'bronze_gt_incidents', regexp_replace(_source_file, '/(date=.*|part-.*)$', '/'), count(*)
+          FROM {E}.bronze_gt_incidents GROUP BY 2
+        ORDER BY 1, 2""")
     d.write()
 
 
