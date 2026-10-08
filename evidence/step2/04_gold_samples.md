@@ -1,6 +1,6 @@
 # Sample gold rows
 
-Captured 2026-10-08 15:31 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 18:04 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 ## gold_cell_health_5m: degraded windows in the live stream
 
@@ -14,18 +14,18 @@ SELECT window_start, cell_id, region_code, n_reports, round(availability_pct, 1)
 
 | window_start | cell_id | region_code | n_reports | avail | latency | base_latency | latency_z | dl_z | flags |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-10-08T20:40:00.000Z | CELL-NQL-00009-4G2 | NQL | 5 | 0.0 | 115.7 | 138.5 | -1.8 | -10.9 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-NSW-00031-5G2 | NSW | 5 | 0.0 | 14.2 | 16.5 | -1.1 | -9.0 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-NSW-00057-4G2 | NSW | 5 | 0.0 | 32.8 | 40.9 | -2.0 | -8.0 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-NSW-00090-4G2 | NSW | 5 | 0.0 | 85.2 | 106.0 | -2.4 | -8.9 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-NSW-00113-4G2 | NSW | 5 | 0.0 | 27.0 | 36.7 | -2.3 | -7.3 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-VIC-00004-5G1 | VIC | 5 | 0.0 | 12.2 | 14.8 | -1.3 | -10.0 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-VIC-00059-5G2 | VIC | 5 | 0.0 | 13.9 | 17.2 | -1.6 | -10.5 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-VIC-00065-4G1 | VIC | 5 | 100.0 | 157.7 | 45.2 | 29.3 | -5.3 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] |
-| 2026-10-08T20:40:00.000Z | CELL-VIC-00065-4G2 | VIC | 5 | 100.0 | 176.0 | 44.6 | 32.5 | -5.5 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] |
-| 2026-10-08T20:40:00.000Z | CELL-VIC-00065-4G3 | VIC | 5 | 100.0 | 172.4 | 42.3 | 35.0 | -7.4 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] |
-| 2026-10-08T20:40:00.000Z | CELL-WA-00012-5G2 | WA | 5 | 0.0 | 15.7 | 17.4 | -0.8 | -8.4 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
-| 2026-10-08T20:40:00.000Z | CELL-WA-00015-4G1 | WA | 5 | 0.0 | 29.8 | 31.9 | -0.8 | -10.9 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00008-4G1 | NQL | 5 | 86.1 | 116.4 | 118.4 | -0.2 | -1.4 | ["cell_unavailable","attach_failure","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00008-4G3 | NQL | 5 | 92.9 | 120.8 | 119.3 | 0.2 | -0.3 | ["cell_unavailable","attach_failure","rrc_degradation"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00009-4G1 | NQL | 4 | 93.5 | 138.4 | 134.5 | 0.4 | 0.1 | ["cell_unavailable","attach_failure","rrc_degradation"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00009-4G2 | NQL | 5 | 94.2 | 128.7 | 131.5 | -0.3 | -0.7 | ["cell_unavailable","attach_failure","rrc_degradation"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00009-4G3 | NQL | 5 | 73.5 | 127.8 | 135.2 | -0.7 | -2.7 | ["cell_unavailable","attach_failure","rrc_collapse","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00010-4G1 | NQL | 5 | 90.3 | 60.4 | 61.8 | -0.3 | -1.3 | ["cell_unavailable","attach_failure","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00010-5G1 | NQL | 5 | 93.2 | 42.9 | 42.8 | 0.0 | -0.6 | ["cell_unavailable","attach_failure","rrc_degradation"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00011-4G1 | NQL | 5 | 76.7 | 71.7 | 74.6 | -0.5 | -2.7 | ["cell_unavailable","attach_failure","rrc_collapse","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00011-4G3 | NQL | 5 | 74.1 | 66.8 | 74.9 | -1.2 | -1.6 | ["cell_unavailable","attach_failure","rrc_collapse","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00011-5G1 | NQL | 5 | 72.2 | 43.9 | 49.3 | -1.3 | -1.4 | ["cell_unavailable","attach_failure","rrc_collapse","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00011-5G2 | NQL | 5 | 80.9 | 48.0 | 49.8 | -0.4 | -1.4 | ["cell_unavailable","attach_failure","rrc_degradation","drop_rate_spike"] |
+| 2026-10-08T23:15:00.000Z | CELL-NQL-00011-5G3 | NQL | 5 | 76.1 | 45.8 | 49.0 | -0.8 | -2.6 | ["cell_unavailable","attach_failure","rrc_collapse","rrc_degradation","drop_rate_spike"] |
 
 _12 row(s)_
 
@@ -42,14 +42,14 @@ WITH c AS (SELECT cell_id FROM telco_netmon_febar_catalog.netmon_gold.gold_cell_
 
 | window_start | window_start_local | cell_id | latency | base_mean | base_std | z | is_degraded |
 |---|---|---|---|---|---|---|---|
-| 2026-10-08T20:47:00.000Z | 2026-10-09T06:47:00.000Z | CELL-NQL-00001-4G1 | 94.1 | 88.1 | 7.5 | 0.8 | false |
-| 2026-10-08T20:46:00.000Z | 2026-10-09T06:46:00.000Z | CELL-NQL-00001-4G1 | 75.8 | 88.1 | 7.5 | -1.64 | false |
-| 2026-10-08T20:45:00.000Z | 2026-10-09T06:45:00.000Z | CELL-NQL-00001-4G1 | 86.4 | 88.1 | 7.5 | -0.23 | false |
-| 2026-10-08T20:44:00.000Z | 2026-10-09T06:44:00.000Z | CELL-NQL-00001-4G1 | 93.9 | 88.1 | 7.5 | 0.77 | false |
-| 2026-10-08T20:43:00.000Z | 2026-10-09T06:43:00.000Z | CELL-NQL-00001-4G1 | 86.2 | 88.1 | 7.5 | -0.26 | false |
-| 2026-10-08T20:42:00.000Z | 2026-10-09T06:42:00.000Z | CELL-NQL-00001-4G1 | 85.1 | 88.1 | 7.5 | -0.4 | false |
-| 2026-10-08T20:41:00.000Z | 2026-10-09T06:41:00.000Z | CELL-NQL-00001-4G1 | 88.0 | 88.1 | 7.5 | -0.02 | false |
-| 2026-10-08T20:40:00.000Z | 2026-10-09T06:40:00.000Z | CELL-NQL-00001-4G1 | 102.9 | 88.1 | 7.5 | 1.97 | false |
+| 2026-10-08T23:19:00.000Z | 2026-10-09T09:19:00.000Z | CELL-NQL-00001-4G1 | 85.7 | 84.9 | 6.66 | 0.13 | false |
+| 2026-10-08T23:18:00.000Z | 2026-10-09T09:18:00.000Z | CELL-NQL-00001-4G1 | 89.2 | 84.9 | 6.66 | 0.65 | false |
+| 2026-10-08T23:17:00.000Z | 2026-10-09T09:17:00.000Z | CELL-NQL-00001-4G1 | 93.5 | 84.9 | 6.66 | 1.3 | false |
+| 2026-10-08T23:16:00.000Z | 2026-10-09T09:16:00.000Z | CELL-NQL-00001-4G1 | 85.0 | 84.9 | 6.66 | 0.02 | false |
+| 2026-10-08T23:15:00.000Z | 2026-10-09T09:15:00.000Z | CELL-NQL-00001-4G1 | 80.6 | 84.9 | 6.66 | -0.64 | false |
+| 2026-10-08T23:14:00.000Z | 2026-10-09T09:14:00.000Z | CELL-NQL-00001-4G1 | 95.4 | 84.9 | 6.66 | 1.58 | false |
+| 2026-10-08T23:13:00.000Z | 2026-10-09T09:13:00.000Z | CELL-NQL-00001-4G1 | 99.0 | 84.9 | 6.66 | 2.12 | false |
+| 2026-10-08T23:12:00.000Z | 2026-10-09T09:12:00.000Z | CELL-NQL-00001-4G1 | 78.3 | 84.9 | 6.66 | -0.98 | false |
 
 _8 row(s)_
 
@@ -63,12 +63,12 @@ SELECT valid_date, cell_id, local_hour, day_type, n_days, n_samples, round(b_lat
 
 | valid_date | cell_id | local_hour | day_type | n_days | n_samples | lat_mean | lat_std | dl_mean |
 |---|---|---|---|---|---|---|---|---|
-| 2026-10-10 | CELL-NQL-00001-4G1 | 0 | weekday | 10 | 45 | 81.4 | 7.09 | 90.6 |
+| 2026-10-10 | CELL-NQL-00001-4G1 | 0 | weekday | 9 | 36 | 81.0 | 7.0 | 90.2 |
 | 2026-10-10 | CELL-NQL-00001-4G1 | 0 | weekend | 4 | 16 | 81.1 | 6.06 | 92.9 |
-| 2026-10-10 | CELL-NQL-00001-4G1 | 1 | weekday | 10 | 62 | 83.1 | 6.38 | 89.7 |
 | 2026-10-10 | CELL-NQL-00001-4G1 | 1 | weekend | 4 | 16 | 82.3 | 4.93 | 90.6 |
-| 2026-10-10 | CELL-NQL-00001-4G1 | 2 | weekday | 10 | 79 | 82.4 | 7.16 | 90.9 |
+| 2026-10-10 | CELL-NQL-00001-4G1 | 1 | weekday | 9 | 36 | 82.9 | 6.56 | 91.8 |
 | 2026-10-10 | CELL-NQL-00001-4G1 | 2 | weekend | 4 | 16 | 79.5 | 7.88 | 91.3 |
+| 2026-10-10 | CELL-NQL-00001-4G1 | 2 | weekday | 9 | 35 | 82.2 | 7.75 | 91.5 |
 
 _6 row(s)_
 
@@ -82,18 +82,18 @@ SELECT detected_ts, signal_source, element_type, element_id, region_code, signal
 
 | detected_ts | signal_source | element_type | element_id | region_code | signal_start_ts | evidence_ts | pipeline_latency_s | flags | severity_score | in_maintenance |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-WA-00035-4G1 | WA | 2026-10-08T18:16:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] | 1 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-NQL-00019-4G2 | NQL | 2026-10-08T16:30:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | true |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-WA-00011-5G2 | WA | 2026-10-08T16:41:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | true |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-NQL-00015-4G3 | NQL | 2026-10-08T16:43:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | true |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-NSW-00082-4G1 | NSW | 2026-10-08T16:41:00.000Z | 2026-10-08T20:52:00.000Z | 50.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation","drop_rate_spike"] | 3 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-WA-00036-5G1 | WA | 2026-10-08T19:52:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["latency_degradation","packet_loss","drop_rate_spike"] | 1 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-NSW-00083-5G2 | NSW | 2026-10-08T17:15:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation","drop_rate_spike"] | 3 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-WA-00035-5G2 | WA | 2026-10-08T19:06:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["latency_degradation","packet_loss"] | 1 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-VIC-00104-5G1 | VIC | 2026-10-08T20:50:00.000Z | 2026-10-08T20:52:00.000Z | 50.1 | ["latency_degradation","packet_loss"] | 1 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-NQL-00022-4G1 | NQL | 2026-10-08T16:30:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | true |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-WA-00012-5G2 | WA | 2026-10-08T18:57:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
-| 2026-10-08T15:22:45.079Z | kpi | CELL | CELL-NQL-00011-4G1 | NQL | 2026-10-08T16:00:00.000Z | 2026-10-08T20:52:00.000Z | 49.1 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation","drop_rate_spike"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00115-4G2 | NSW | 2026-10-08T18:58:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] | 1 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00070-5G2 | NSW | 2026-10-08T18:24:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-VIC-00028-4G3 | VIC | 2026-10-08T20:47:00.000Z | 2026-10-08T23:24:00.000Z | 43.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00021-4G3 | NSW | 2026-10-08T23:14:00.000Z | 2026-10-08T23:24:00.000Z | 43.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00117-4G2 | NSW | 2026-10-08T20:17:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["latency_degradation","packet_loss","rrc_degradation","drop_rate_spike"] | 1 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00021-4G2 | NSW | 2026-10-08T18:57:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00117-4G3 | NSW | 2026-10-08T19:01:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] | 1 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-WA-00015-4G1 | WA | 2026-10-08T20:47:00.000Z | 2026-10-08T23:24:00.000Z | 43.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00021-4G3 | NSW | 2026-10-08T21:26:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-VIC-00060-5G1 | VIC | 2026-10-08T18:35:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["cell_unavailable","attach_failure","rrc_collapse","throughput_collapse","rrc_degradation"] | 3 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-VIC-00105-4G2 | VIC | 2026-10-08T21:18:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["latency_degradation","packet_loss"] | 1 | false |
+| 2026-10-08T17:53:50.568Z | kpi | CELL | CELL-NSW-00117-4G2 | NSW | 2026-10-08T19:53:00.000Z | 2026-10-08T23:24:00.000Z | 44.6 | ["latency_degradation","packet_loss","throughput_collapse","rrc_degradation","drop_rate_spike"] | 1 | false |
 
 _12 row(s)_
 
@@ -107,8 +107,8 @@ SELECT signal_source, count(*) AS n, round(percentile(pipeline_latency_s, 0.5), 
 
 | signal_source | n | p50_s | p90_s | max_s |
 |---|---|---|---|---|
-| kpi | 19700 | 44.9 | 59.4 | 190.0 |
-| alarm | 313 | 40.6 | 63.1 | 113.9 |
+| alarm | 79 | 40.6 | 63.2 | 133.2 |
+| kpi | 6642 | 47.6 | 66.6 | 210.3 |
 
 _2 row(s)_
 
@@ -126,18 +126,18 @@ SELECT window_start, element_id, element_type, n_desc_cells, n_impacted_cells, n
 
 | window_start | element_id | element_type | n_desc_cells | n_impacted_cells | n_silent_cells | frac | n_impacted_children | n_children | parent_frac | n_alarms | n_service_down_alarms | alarm_codes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2026-10-08T18:10:00.000Z | AMF-WA-01 | AMF_MME | 183 | 30 | 12 | 0.16 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T18:10:00.000Z | UPF-WA-01 | UPF_SGW | 183 | 30 | 12 | 0.16 | 3 | 4 | 0.16 | 0 | 0 | NULL |
-| 2026-10-08T18:15:00.000Z | AMF-WA-01 | AMF_MME | 183 | 28 | 9 | 0.15 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T18:15:00.000Z | UPF-WA-01 | UPF_SGW | 183 | 28 | 9 | 0.15 | 3 | 4 | 0.15 | 0 | 0 | NULL |
-| 2026-10-08T18:20:00.000Z | AMF-WA-01 | AMF_MME | 183 | 24 | 6 | 0.13 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T18:00:00.000Z | AMF-WA-01 | AMF_MME | 183 | 24 | 12 | 0.13 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T17:55:00.000Z | AMF-WA-01 | AMF_MME | 183 | 24 | 12 | 0.13 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T18:25:00.000Z | AMF-WA-01 | AMF_MME | 183 | 24 | 6 | 0.13 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T18:05:00.000Z | AMF-WA-01 | AMF_MME | 183 | 24 | 12 | 0.13 | 1 | 1 | NULL | 0 | 0 | NULL |
-| 2026-10-08T17:55:00.000Z | UPF-WA-01 | UPF_SGW | 183 | 24 | 12 | 0.13 | 2 | 4 | 0.13 | 0 | 0 | NULL |
-| 2026-10-08T18:25:00.000Z | UPF-WA-01 | UPF_SGW | 183 | 24 | 6 | 0.13 | 2 | 4 | 0.13 | 0 | 0 | NULL |
-| 2026-10-08T18:05:00.000Z | UPF-WA-01 | UPF_SGW | 183 | 24 | 12 | 0.13 | 2 | 4 | 0.13 | 0 | 0 | NULL |
+| 2026-10-08T20:25:00.000Z | AMF-NSW-01 | AMF_MME | 621 | 28 | 6 | 0.05 | 1 | 1 | NULL | 0 | 0 | NULL |
+| 2026-10-08T20:30:00.000Z | AMF-NSW-01 | AMF_MME | 621 | 28 | 6 | 0.05 | 1 | 1 | NULL | 0 | 0 | NULL |
+| 2026-10-08T20:25:00.000Z | UPF-NSW-01 | UPF_SGW | 621 | 28 | 6 | 0.05 | 4 | 4 | 0.05 | 0 | 0 | NULL |
+| 2026-10-08T20:30:00.000Z | UPF-NSW-01 | UPF_SGW | 621 | 28 | 6 | 0.05 | 4 | 4 | 0.05 | 0 | 0 | NULL |
+| 2026-10-08T20:35:00.000Z | AMF-NSW-01 | AMF_MME | 621 | 27 | 6 | 0.04 | 1 | 1 | NULL | 0 | 0 | NULL |
+| 2026-10-08T20:15:00.000Z | AMF-NSW-01 | AMF_MME | 621 | 27 | 6 | 0.04 | 1 | 1 | NULL | 0 | 0 | NULL |
+| 2026-10-08T20:20:00.000Z | AMF-NSW-01 | AMF_MME | 621 | 27 | 6 | 0.04 | 1 | 1 | NULL | 0 | 0 | NULL |
+| 2026-10-08T20:20:00.000Z | UPF-NSW-01 | UPF_SGW | 621 | 27 | 6 | 0.04 | 4 | 4 | 0.04 | 0 | 0 | NULL |
+| 2026-10-08T20:35:00.000Z | UPF-NSW-01 | UPF_SGW | 621 | 27 | 6 | 0.04 | 4 | 4 | 0.04 | 0 | 0 | NULL |
+| 2026-10-08T20:15:00.000Z | UPF-NSW-01 | UPF_SGW | 621 | 27 | 6 | 0.04 | 4 | 4 | 0.04 | 0 | 0 | NULL |
+| 2026-10-08T21:15:00.000Z | AMF-VIC-01 | AMF_MME | 528 | 25 | 0 | 0.05 | 1 | 1 | NULL | 0 | 0 | NULL |
+| 2026-10-08T21:05:00.000Z | AMF-VIC-01 | AMF_MME | 528 | 25 | 0 | 0.05 | 1 | 1 | NULL | 0 | 0 | NULL |
 
 _12 row(s)_
 
@@ -151,13 +151,13 @@ SELECT window_start, cell_id, region_code, n_sessions, n_setup_failed, n_dropped
 
 | window_start | cell_id | region_code | n_sessions | n_setup_failed | n_dropped | n_no_service | n_subscribers_approx | failure_rate |
 |---|---|---|---|---|---|---|---|---|
-| 2026-10-08T20:20:00.000Z | CELL-VIC-00064-5G3 | VIC | 4 | 4 | 0 | 4 | 4 | 1.0 |
+| 2026-10-08T23:20:00.000Z | CELL-NQL-00012-4G1 | NQL | 3 | 3 | 0 | 3 | 3 | 1.0 |
+| 2026-10-08T22:40:00.000Z | CELL-VIC-00088-4G2 | VIC | 3 | 3 | 0 | 3 | 2 | 1.0 |
+| 2026-10-08T22:05:00.000Z | CELL-VIC-00088-4G2 | VIC | 3 | 3 | 0 | 3 | 3 | 1.0 |
+| 2026-10-08T21:55:00.000Z | CELL-NSW-00048-4G3 | NSW | 3 | 3 | 0 | 3 | 3 | 1.0 |
+| 2026-10-08T21:35:00.000Z | CELL-VIC-00019-4G1 | VIC | 3 | 3 | 0 | 3 | 3 | 1.0 |
+| 2026-10-08T20:15:00.000Z | CELL-NSW-00048-4G3 | NSW | 3 | 3 | 0 | 3 | 3 | 1.0 |
 | 2026-10-08T19:40:00.000Z | CELL-VIC-00004-5G3 | VIC | 3 | 3 | 0 | 3 | 3 | 1.0 |
 | 2026-10-07T00:10:00.000Z | CELL-NQL-00012-4G1 | NQL | 3 | 0 | 3 | 0 | 3 | 1.0 |
-| 2026-10-01T12:05:00.000Z | CELL-WA-00016-4G1 | WA | 3 | 2 | 1 | 0 | 3 | 1.0 |
-| 2026-10-01T12:00:00.000Z | CELL-NQL-00012-5G3 | NQL | 3 | 3 | 0 | 3 | 3 | 1.0 |
-| 2026-10-01T11:30:00.000Z | CELL-NQL-00012-5G3 | NQL | 3 | 3 | 0 | 3 | 3 | 1.0 |
-| 2026-10-01T11:20:00.000Z | CELL-NQL-00012-5G2 | NQL | 3 | 3 | 0 | 3 | 3 | 1.0 |
-| 2026-10-01T10:55:00.000Z | CELL-NQL-00012-5G2 | NQL | 3 | 3 | 0 | 3 | 3 | 1.0 |
 
 _8 row(s)_

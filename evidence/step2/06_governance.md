@@ -1,8 +1,10 @@
 # Unity Catalog governance: masks, row filters, roles, grants, tags
 
-Captured 2026-10-08 15:32 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
+Captured 2026-10-08 18:04 UTC from workspace profile `febar` (warehouse `d7fa853ab15b20a3`) by `scripts/capture_evidence.py`.
 
 Masks and row filters are declared on the pipeline tables (`silver_sessions`, `gold_impact_detections`) and backed by `governance/sql/01_functions.sql`. Regional NOC roles read only the region-filtered views in `netmon_noc` (`02_noc_views.sql`); `noc_national` also reads gold and the operational silver tables; `pii_privileged` is granted nothing (`03_grants_*.sql`). Tags: `04_comments_tags.sql`.
+
+**Limitation, stated plainly:** every query below runs as one principal, the capturing user. Querying as a second principal (a persona service principal via OAuth M2M or a token) was not possible: creating credentials for a service principal was blocked in this environment. So (1) row-level behaviour is proven by changing the capturing user's group membership and querying every object a regional role can read, and (2) grant-level least privilege is proven from `information_schema` for each persona and from Unity Catalog rejecting the workspace-local groups as principals. The capturing user owns the catalog, so it can always read the base tables itself; that is why grant denial is shown from the privilege tables, not by a refused query.
 
 ## Column masks
 
@@ -218,6 +220,65 @@ WITH p AS (
 
 _105 row(s)_
 
+## Base-table privileges held by regional / pii-only principals (expected: no rows)
+
+Covers the regional analyst personas, the pii-only persona, and every `noc_region_*` group and `pii_privileged` by name. Zero rows: nobody but the national role can read a silver / gold table directly; regional access is only through `netmon_noc`.
+
+```sql
+SELECT grantee, 'SCHEMA' AS kind, schema_name AS object, privilege_type
+        FROM telco_netmon_febar_catalog.information_schema.schema_privileges
+        WHERE schema_name IN ('netmon_bronze', 'netmon_silver', 'netmon_gold', 'netmon_eval') AND grantee IN ('fd43c8c6-65f4-433d-962f-6abb3e5bd88b', 'bb41b303-d6b4-4dd0-b524-b25e2f3a3433', '2ee944da-a522-49e2-8600-6c72e454ce2c', 'noc_region_act', 'noc_region_nql', 'noc_region_pil', 'pii_privileged', 'noc_region_nt', 'noc_region_qld', 'noc_region_vic', 'noc_region_nsw', 'noc_region_tas', 'noc_region_wa', 'noc_region_sa')
+        UNION ALL
+        SELECT grantee, 'TABLE', concat(table_schema, '.', table_name), privilege_type
+        FROM telco_netmon_febar_catalog.information_schema.table_privileges
+        WHERE table_schema IN ('netmon_bronze', 'netmon_silver', 'netmon_gold', 'netmon_eval') AND grantee IN ('fd43c8c6-65f4-433d-962f-6abb3e5bd88b', 'bb41b303-d6b4-4dd0-b524-b25e2f3a3433', '2ee944da-a522-49e2-8600-6c72e454ce2c', 'noc_region_act', 'noc_region_nql', 'noc_region_pil', 'pii_privileged', 'noc_region_nt', 'noc_region_qld', 'noc_region_vic', 'noc_region_nsw', 'noc_region_tas', 'noc_region_wa', 'noc_region_sa')
+```
+
+| grantee | kind | object | privilege_type |
+|---|---|---|---|
+
+_0 row(s)_
+
+## All grantees on the base schemas and their tables (who can read silver / gold directly)
+
+Besides the catalog owner (excluded: a user) and the FEVM platform service principal, only the national personas appear.
+
+```sql
+SELECT kind, grantee_name, array_sort(collect_set(object)) AS objects, array_sort(collect_set(privilege_type))
+               AS privileges FROM (
+          SELECT 'SCHEMA' AS kind, coalesce(CASE grantee WHEN '8855855c-202f-4260-bf4f-85f2ac215524' THEN 'netmon-pii-officer' WHEN 'fd43c8c6-65f4-433d-962f-6abb3e5bd88b' THEN 'netmon-pii-only' WHEN 'bb41b303-d6b4-4dd0-b524-b25e2f3a3433' THEN 'netmon-noc-nsw-analyst' WHEN '227a0d30-fe32-47f9-867f-9c91c13db70a' THEN 'netmon-noc-national' WHEN '2ee944da-a522-49e2-8600-6c72e454ce2c' THEN 'netmon-noc-wa-analyst' END, grantee) AS grantee_name, schema_name AS object,
+                 privilege_type FROM telco_netmon_febar_catalog.information_schema.schema_privileges WHERE schema_name IN ('netmon_bronze', 'netmon_silver', 'netmon_gold', 'netmon_eval')
+          UNION ALL
+          SELECT 'TABLE', coalesce(CASE grantee WHEN '8855855c-202f-4260-bf4f-85f2ac215524' THEN 'netmon-pii-officer' WHEN 'fd43c8c6-65f4-433d-962f-6abb3e5bd88b' THEN 'netmon-pii-only' WHEN 'bb41b303-d6b4-4dd0-b524-b25e2f3a3433' THEN 'netmon-noc-nsw-analyst' WHEN '227a0d30-fe32-47f9-867f-9c91c13db70a' THEN 'netmon-noc-national' WHEN '2ee944da-a522-49e2-8600-6c72e454ce2c' THEN 'netmon-noc-wa-analyst' END, grantee), concat(table_schema, '.', table_name),
+                 privilege_type FROM telco_netmon_febar_catalog.information_schema.table_privileges WHERE table_schema IN ('netmon_bronze', 'netmon_silver', 'netmon_gold', 'netmon_eval'))
+        WHERE grantee_name NOT LIKE '%@%' GROUP BY kind, grantee_name ORDER BY kind, grantee_name
+```
+
+| kind | grantee_name | objects | privileges |
+|---|---|---|---|
+| SCHEMA | aec5be3d-de3c-404c-8e60-feed0f265fd3 | ["netmon_bronze","netmon_eval","netmon_gold","netmon_silver"] | ["ALL_PRIVILEGES","MANAGE"] |
+| SCHEMA | netmon-noc-national | ["netmon_gold","netmon_silver"] | ["SELECT","USE_SCHEMA"] |
+| SCHEMA | netmon-pii-officer | ["netmon_gold","netmon_silver"] | ["SELECT","USE_SCHEMA"] |
+| TABLE | aec5be3d-de3c-404c-8e60-feed0f265fd3 | ["netmon_bronze.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_bronze_alarms_1","netmon_bronze.__materializ… | ["ALL_PRIVILEGES","MANAGE"] |
+| TABLE | netmon-noc-national | ["netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1","netmon_gold.__materiali… | ["SELECT"] |
+| TABLE | netmon-pii-officer | ["netmon_gold.__materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_gold_cell_baseline_1","netmon_gold.__materiali… | ["SELECT"] |
+
+_6 row(s)_
+
+## SHOW GRANTS for a regional group (Unity Catalog view of the group)
+
+Workspace-local groups are not UC principals, so they cannot hold, or keep, any grant; the governance job also issues REVOKE ALL for every group and records this.
+
+```sql
+SHOW GRANTS `noc_region_nsw` ON SCHEMA telco_netmon_febar_catalog.netmon_silver
+```
+
+Error returned by Unity Catalog:
+
+```
+FAILED: [RequestId=20d31f40-8842-4764-840c-78cf462e8b80 ErrorClass=PRINCIPAL_DOES_NOT_EXIST.PRINCIPAL_DOES_NOT_EXIST] Could not find principal with name noc_region_nsw.
+```
+
 ## Tags: schemas and tables
 
 ```sql
@@ -335,8 +396,9 @@ SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon
 |---|---|---|
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_bronze_gt_dq_injections_1 | GROUND TRUTH audit log of every injected data-quality defect. Evaluation only. |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_bronze_gt_incidents_1 | GROUND TRUTH incident labels as written by the generator. Evaluation only: never a feature source. |
+| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_alert_precision_1 | Alert-level fault precision: detections grouped per (source_run, element_id) into episodes (starting more than 10 min a… |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_detection_log_1 | Unfiltered copy of the impact detections for offline scoring (gold_impact_detections is row-filtered for NOC users). Sa… |
-| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_detection_precision_1 | Fault-detection precision per source run and signal source. Each detection is labelled by the ground truth it overlaps,… |
+| netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_detection_precision_1 | Detection-ROW fault precision per source run and signal source (one row per detection, i.e. per degraded cell-minute or… |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_dq_capture_1 | Data-quality defects injected by the generator (ground truth) vs how the pipeline handled them: quarantined (malformed/… |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_gt_incidents_1 | GROUND TRUTH incidents, typed (UTC), one row per (source_run, incident_id). Labels only. |
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_incident_detection_1 | Per scored incident (customer-impacting, not censored), two separate metrics. (a) impact detection: first detection on … |
@@ -344,8 +406,9 @@ SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon
 | netmon_eval | __materialization_mat_80449004_f45a_4b32_8215_f68fdf6acfd9_eval_ttd_summary_1 | Per source run (history = 15-min ROP backfill, stream = 1-min live feed), per event class (fault first) and fault type:… |
 | netmon_eval | bronze_gt_dq_injections | GROUND TRUTH audit log of every injected data-quality defect. Evaluation only. |
 | netmon_eval | bronze_gt_incidents | GROUND TRUTH incident labels as written by the generator. Evaluation only: never a feature source. |
+| netmon_eval | eval_alert_precision | Alert-level fault precision: detections grouped per (source_run, element_id) into episodes (starting more than 10 min a… |
 | netmon_eval | eval_detection_log | Unfiltered copy of the impact detections for offline scoring (gold_impact_detections is row-filtered for NOC users). Sa… |
-| netmon_eval | eval_detection_precision | Fault-detection precision per source run and signal source. Each detection is labelled by the ground truth it overlaps,… |
+| netmon_eval | eval_detection_precision | Detection-ROW fault precision per source run and signal source (one row per detection, i.e. per degraded cell-minute or… |
 | netmon_eval | eval_dq_capture | Data-quality defects injected by the generator (ground truth) vs how the pipeline handled them: quarantined (malformed/… |
 | netmon_eval | eval_gt_incidents | GROUND TRUTH incidents, typed (UTC), one row per (source_run, incident_id). Labels only. |
 | netmon_eval | eval_incident_detection | Per scored incident (customer-impacting, not censored), two separate metrics. (a) impact detection: first detection on … |
@@ -391,7 +454,7 @@ SELECT table_schema, table_name, left(comment, 150) AS comment FROM telco_netmon
 | netmon_silver | silver_topology_edges | Directed topology edges, upstream -> downstream. |
 | netmon_silver | silver_topology_nodes | Network inventory (one row per element, latest snapshot). Ancestor columns (amf_id .. site_id) include the element itse… |
 
-_57 row(s)_
+_59 row(s)_
 
 ## Column comments on silver_sessions
 
@@ -448,18 +511,18 @@ UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible
 
 | netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| silver_kpis | 2410993 | NQL,NSW,VIC,WA |
-| silver_alarms | 20155 | NQL,NSW,VIC,WA |
-| silver_sessions | 1304712 | NQL,NSW,VIC,WA |
+| silver_kpis | 2413549 | NQL,NSW,VIC,WA |
+| silver_alarms | 18549 | NQL,NSW,VIC,WA |
+| silver_sessions | 1314454 | NQL,NSW,VIC,WA |
 | silver_topology_nodes | 1887 | NQL,NSW,VIC,WA |
 | silver_topology_edges | 1883 | NQL,NSW,VIC,WA |
-| silver_maintenance_windows | 6 | NQL,NSW,VIC,WA |
+| silver_maintenance_windows | 4 | NSW,VIC,WA |
 | gold_cell_baseline | 1016375 | NQL,NSW,VIC,WA |
-| gold_cell_health_1m | 2401794 | NQL,NSW,VIC,WA |
-| gold_cell_health_5m | 2006088 | NQL,NSW,VIC,WA |
-| gold_impact_detections | 23752 | NQL,NSW,VIC,WA |
-| gold_element_impact_5m | 87480 | NQL,NSW,VIC,WA |
-| gold_cell_sessions_5m | 1094380 | NQL,NSW,VIC,WA |
+| gold_cell_health_1m | 2404350 | NQL,NSW,VIC,WA |
+| gold_cell_health_5m | 2008000 | NQL,NSW,VIC,WA |
+| gold_impact_detections | 10460 | NQL,NSW,VIC,WA |
+| gold_element_impact_5m | 83039 | NQL,NSW,VIC,WA |
+| gold_cell_sessions_5m | 1102240 | NQL,NSW,VIC,WA |
 
 _12 row(s)_
 
@@ -476,7 +539,7 @@ SELECT count(*) AS n_rows,
 
 | n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
 |---|---|---|---|---|
-| 1304712 | 0 | 1304712 | 0 | 1304712 |
+| 1314454 | 0 | 1314454 | 0 | 1314454 |
 
 _1 row(s)_
 
@@ -531,18 +594,18 @@ UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible
 
 | netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| silver_kpis | 1048635 | NSW |
-| silver_alarms | 6549 | NSW |
-| silver_sessions | 520220 | NSW |
+| silver_kpis | 1047402 | NSW |
+| silver_alarms | 5899 | NSW |
+| silver_sessions | 524712 | NSW |
 | silver_topology_nodes | 814 | NSW |
 | silver_topology_edges | 813 | NSW |
 | silver_maintenance_windows | 1 | NSW |
 | gold_cell_baseline | 440910 | NSW |
-| gold_cell_health_1m | 1044625 | NSW |
-| gold_cell_health_5m | 871207 | NSW |
-| gold_impact_detections | 10661 | NSW |
-| gold_element_impact_5m | 34104 | NSW |
-| gold_cell_sessions_5m | 442267 | NSW |
+| gold_cell_health_1m | 1043434 | NSW |
+| gold_cell_health_5m | 871594 | NSW |
+| gold_impact_detections | 4417 | NSW |
+| gold_element_impact_5m | 32800 | NSW |
+| gold_cell_sessions_5m | 445938 | NSW |
 
 _12 row(s)_
 
@@ -698,18 +761,18 @@ UNION ALL SELECT 'gold_cell_sessions_5m' AS netmon_noc_view, count(*) AS visible
 
 | netmon_noc_view | visible_rows | regions |
 |---|---|---|
-| silver_kpis | 2410993 | NQL,NSW,VIC,WA |
-| silver_alarms | 20155 | NQL,NSW,VIC,WA |
-| silver_sessions | 1304712 | NQL,NSW,VIC,WA |
+| silver_kpis | 2413549 | NQL,NSW,VIC,WA |
+| silver_alarms | 18549 | NQL,NSW,VIC,WA |
+| silver_sessions | 1314454 | NQL,NSW,VIC,WA |
 | silver_topology_nodes | 1887 | NQL,NSW,VIC,WA |
 | silver_topology_edges | 1883 | NQL,NSW,VIC,WA |
-| silver_maintenance_windows | 6 | NQL,NSW,VIC,WA |
+| silver_maintenance_windows | 4 | NSW,VIC,WA |
 | gold_cell_baseline | 1016375 | NQL,NSW,VIC,WA |
-| gold_cell_health_1m | 2401794 | NQL,NSW,VIC,WA |
-| gold_cell_health_5m | 2006088 | NQL,NSW,VIC,WA |
-| gold_impact_detections | 23752 | NQL,NSW,VIC,WA |
-| gold_element_impact_5m | 87480 | NQL,NSW,VIC,WA |
-| gold_cell_sessions_5m | 1094380 | NQL,NSW,VIC,WA |
+| gold_cell_health_1m | 2404350 | NQL,NSW,VIC,WA |
+| gold_cell_health_5m | 2008000 | NQL,NSW,VIC,WA |
+| gold_impact_detections | 10460 | NQL,NSW,VIC,WA |
+| gold_element_impact_5m | 83039 | NQL,NSW,VIC,WA |
+| gold_cell_sessions_5m | 1102240 | NQL,NSW,VIC,WA |
 
 _12 row(s)_
 
@@ -726,7 +789,7 @@ SELECT count(*) AS n_rows,
 
 | n_rows | imsi_full_value | imsi_masked | msisdn_full_value | msisdn_masked |
 |---|---|---|---|---|
-| 1304712 | 1304712 | 0 | 1304712 | 0 |
+| 1314454 | 1314454 | 0 | 1314454 | 0 |
 
 _1 row(s)_
 
