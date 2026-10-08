@@ -43,8 +43,10 @@ class Engine:
         self.flappers = select_flapping(self.topo, cfg.faults, cfg.seed)
         self.spool = Spool()
         self.generated = dict.fromkeys(FEEDS, 0)
-        # Called with (feed, post-DQ frame) for every generated batch of records (streaming bookkeeping).
+        # Streaming bookkeeping: an observer called with (feed, post-DQ frame) for every generated batch of
+        # records, and private emission/event times on DQ-log rows so they can be spooled with their records.
         self.observer: Callable[[str, pd.DataFrame], None] | None = None
+        self.dq_log_times = False
 
     # -- reference data ---------------------------------------------------------------------------
     def write_topology(self, out: Path, fmt: str) -> None:
@@ -62,7 +64,7 @@ class Engine:
         df["_emitted"] = df["_event_time"].to_numpy() + np.round(df["_emit_delay_s"].to_numpy()).astype(
             "timedelta64[s]")
         df, log = inject_defects(df, feed, self.cfg.dq, rng_for(self.cfg.seed, "dq", feed, key), self.cfg.fmt)
-        if len(log):
+        if len(log) and self.dq_log_times:
             # Private emission/event time of the logged record (first delivery for duplicates), so the log
             # can be spooled and released together with the record it describes.
             first = df.groupby("record_id", sort=False).agg(_emitted=("_emitted", "min"),

@@ -73,6 +73,7 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
     active: list[Incident] = []
     tracker = _EmissionTracker(step)
     eng.observer = tracker.observe
+    eng.dq_log_times = True
     hour = None
     totals = dict.fromkeys(FEEDS, 0)
     i = 0
@@ -173,8 +174,9 @@ class _EmissionTracker:
                     self._bump(inc, last[id(inc)])
         elif feed == "kpis":
             ev, cell = df["_event_time"].to_numpy(), df["_cell"].to_numpy()
+            ev_lo, ev_hi = ev.min(), ev.max()
             for inc in self.pending:
-                if not inc.customer_impacting:
+                if not inc.customer_impacting or ev_lo >= inc.impact_end or ev_hi + self.step <= inc.impact_start:
                     continue
                 m = (ev < inc.impact_end) & (ev + self.step > inc.impact_start) & np.isin(cell, inc.cell_idx)
                 if m.any():
