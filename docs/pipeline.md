@@ -199,16 +199,30 @@ it via the change calendar.
   files only (a backfill's processing delay is not detection latency). In a real-time stream this equals
   `detected_ts − impact_start_ts`. The decomposition also scores accelerated streams correctly.
   Localisation through the rollup has no measured emission time, so its time is a lower bound:
-  `max(window_end + 2-min watermark, evidence_ts)`, with the MV refresh not included.
+  `max(window_end + 2-min watermark, evidence_ts)`, with the MV refresh not included. The window's
+  `evidence_ts` counts **on-time records only**. With late arrivals included, a history window "became
+  known" up to 36 h late; that produced a 127,373 s localisation in the first review capture. Time and
+  element come from one `min(struct(ts, element))`, so the reported element is the earliest localisation.
+- **Runs never mix.** `source_run` (the generator run directory) is carried through `silver_*`,
+  `gold_cell_health_1m` / `_5m` (grouped by it), `gold_element_impact_5m` (every CTE keyed by it),
+  maintenance windows and the detections. Every evaluation join (footprint, rollup localisation, RCA
+  baseline, precision) is on `source_run` plus the element, so evidence from one run can never credit an
+  incident of another, even if their times overlapped (tested).
 - **`eval_ttd_summary`**: per run (history = 15-min ROP backfill, stream = 1-min live), per event class and
   fault type: impact-detected %, median / p90 TTD, % within 5 min (undetected counts as missed), root
   localised %, median localisation time and % localised within 5 min.
-- **`eval_detection_precision`** (fault-detection precision): each detection is labelled by the ground truth
-  it overlaps, in priority order. Uncensored fault = **TP**. Overlapping a censored incident = **excluded**
-  (incomplete label). Planned work = **suppressed** when `in_maintenance`, else a **FP** (a page for
-  announced work). Red herring (e.g. `TRAFFIC_SURGE`) = **FP**. Nothing = **FP**.
-  `fault_precision_pct = TP / (TP + FP)`, and `maintenance_suppression_pct` = suppressed / planned is
-  reported separately. Grouping is on `(source_run, detection_id)`.
+- **Precision, at two levels.** Each detection row is labelled by the ground truth it overlaps, in
+  priority order. Uncensored fault = **TP**. Overlapping a censored incident = **excluded** (incomplete
+  label). Planned work = **suppressed** when `in_maintenance`, else a **FP** (a page for announced work).
+  Red herring (e.g. `TRAFFIC_SURGE`) = **FP**. Nothing = **FP**.
+  - `eval_detection_precision` gives **detection-row precision** (`row_fault_precision_pct`), one row per
+    degraded cell-minute or alarm. A long outage over many cells contributes thousands of TP rows, so this
+    figure is flattering on its own.
+  - `eval_alert_precision` gives **alert-level precision** (`alert_fault_precision_pct`). Detections of one
+    element in one run form one alert while consecutive detections are at most 10 minutes apart (one page
+    to the NOC). An alert takes the highest-priority label of its rows and is suppressed when its first row
+    is in a change window.
+  - Both report `maintenance_suppression_pct`, and both join and group on `(source_run, detection_id)`.
 - **`eval_rca_baseline`**: a topology heuristic that ranks the rollup's elements and scores hit@1 / hit@3
   against `root_element_ids`. It is the bar the ML model has to beat.
 
@@ -246,8 +260,13 @@ filter. Two design points follow:
   since the pipeline streams from silver KPIs, alarms, topology and the health tables. So regional roles
   are granted only `netmon_noc`, whose views apply `region_filter`. The filter and the masks are evaluated
   for the querying user, including through a view. `noc_national` reads the tables directly.
-- Persona grants are reset (`REVOKE ALL PRIVILEGES` on every managed securable) before the role grants
-  are applied, so a rerun converges to the declared roles.
+- **Grant convergence.** Before the role grants are applied, `REVOKE ALL PRIVILEGES` is issued on every
+  netmon securable (catalog, every `netmon_*` schema, table, view and function, enumerated from
+  `information_schema`) from **every managed principal**: all `noc_*` / `pii_privileged` groups and every
+  persona. A rerun therefore converges to the declared roles, and nothing left from an older grant model
+  (such as direct silver / gold access for a regional group) survives. Groups that UC rejects as
+  principals (workspace-local) are recorded; they cannot hold grants at all. The job then asserts that no
+  regional or pii-only principal holds any privilege on bronze, silver, gold or eval.
 - Bronze holds raw IMSI / MSISDN and is not granted to anyone. The quarantine payload leaves them out, and
   its rescued / corrupt text is regex-redacted.
 

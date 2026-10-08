@@ -82,6 +82,16 @@ class Doc:
                        "```sql\n" + sql.strip() + "\n```\n", md_table(cols, rows)]
         return rows
 
+    def query_or_error(self, heading: str, sql: str, note: str = "") -> None:
+        """Run a statement whose failure is itself the evidence (e.g. UC rejecting a principal)."""
+        try:
+            cols, rows = self.r.sql(sql)
+            result = md_table(cols, rows)
+        except RuntimeError as e:
+            result = "Error returned by Unity Catalog:\n\n```\n" + str(e).split("\n")[0][:400] + "\n```\n"
+        self.parts += [f"## {heading}\n", note.strip() + "\n" if note else "", "```sql\n" + sql.strip() + "\n```\n",
+                       result]
+
     def text(self, heading: str, body: str) -> None:
         self.parts += [f"## {heading}\n", body.strip() + "\n"]
 
@@ -271,12 +281,19 @@ def evaluation(r: Runner) -> None:
     d.query("Ground-truth incidents in the live stream (incl. censored and non-impacting)", f"""
         SELECT event_class, fault_type, is_customer_impacting, is_censored, count(*) AS n
         FROM {E}.eval_gt_incidents WHERE source_run = 'stream' GROUP BY ALL ORDER BY ALL""")
-    d.query("Fault-detection precision and maintenance suppression", f"""
+    d.query("Alert-level fault precision (detections grouped per element per episode)", f"""
+        SELECT * FROM {E}.eval_alert_precision
+        ORDER BY source_run DESC, CASE signal_source WHEN 'ALL' THEN 0 ELSE 1 END, signal_source""",
+            note="An alert = the detections on one element of one run with no gap above 10 min (one page). It takes "
+                 "the highest-priority label of its rows; suppressed when its first row is in a change window. "
+                 "`alert_fault_precision_pct` = TP alerts / (TP + FP alerts).")
+    d.query("Detection-row fault precision and maintenance suppression", f"""
         SELECT * FROM {E}.eval_detection_precision
         ORDER BY source_run DESC, CASE signal_source WHEN 'ALL' THEN 0 ELSE 1 END, signal_source""",
-            note="Each detection labelled in priority order: uncensored fault = TP; overlapping a censored incident "
+            note="One row per detection (a degraded cell-minute or an alarm), so long incidents with many cells "
+                 "weigh heavily. Labels in priority order: uncensored fault = TP; overlapping a censored incident "
                  "= excluded; planned work = suppressed when `in_maintenance` (else a false page); red herring "
-                 "(e.g. TRAFFIC_SURGE) = FP; nothing = FP. `fault_precision_pct` = TP / (TP + FP).")
+                 "(e.g. TRAFFIC_SURGE) = FP; nothing = FP. `row_fault_precision_pct` = TP / (TP + FP).")
     d.query("RCA topology-heuristic baseline (hit@1 / hit@3 vs root_element_ids)", f"""
         SELECT source_run, fault_type, count(*) AS n, round(100.0 * avg(CAST(hit_at_1 AS INT)), 1) AS hit1_pct,
                round(100.0 * avg(CAST(hit_at_3 AS INT)), 1) AS hit3_pct
@@ -296,7 +313,15 @@ def governance(r: Runner, demo: bool) -> None:
             "Masks and row filters are declared on the pipeline tables (`silver_sessions`, `gold_impact_detections`) "
             "and backed by `governance/sql/01_functions.sql`. Regional NOC roles read only the region-filtered views "
             "in `netmon_noc` (`02_noc_views.sql`); `noc_national` also reads gold and the operational silver tables; "
-            "`pii_privileged` is granted nothing (`03_grants_*.sql`). Tags: `04_comments_tags.sql`.")
+            "`pii_privileged` is granted nothing (`03_grants_*.sql`). Tags: `04_comments_tags.sql`.\n\n"
+            "**Limitation, stated plainly:** every query below runs as one principal, the capturing user. "
+            "Querying as a second principal (a persona service principal via OAuth M2M or a token) was not "
+            "possible: creating credentials for a service principal was blocked in this environment. So "
+            "(1) row-level behaviour is proven by changing the capturing user's group membership and querying "
+            "every object a regional role can read, and (2) grant-level least privilege is proven from "
+            "`information_schema` for each persona and from Unity Catalog rejecting the workspace-local groups "
+            "as principals. The capturing user owns the catalog, so it can always read the base tables itself; "
+            "that is why grant denial is shown from the privilege tables, not by a refused query.")
     d.query("Column masks", f"""
         SELECT table_schema, table_name, column_name, mask_name FROM {CAT}.information_schema.column_masks
         ORDER BY ALL""")
@@ -337,6 +362,36 @@ def governance(r: Runner, demo: bool) -> None:
         GROUP BY ALL ORDER BY persona, kind, object""",
             note="`netmon-pii-only` (member of `pii_privileged` only) has no privileges at all; the regional "
                  "analysts hold only the `netmon_noc` schema (plus USE CATALOG and the filter function).")
+    base = "('netmon_bronze', 'netmon_silver', 'netmon_gold', 'netmon_eval')"
+    regional_ids = ", ".join(f"'{a}'" for a, n in sps.items() if n in ("netmon-noc-nsw-analyst",
+                                                                     "netmon-noc-wa-analyst", "netmon-pii-only"))
+    region_groups = ", ".join(f"'{g}'" for g in groups if g.startswith("noc_region_") or g == "pii_privileged")
+    d.query("Base-table privileges held by regional / pii-only principals (expected: no rows)", f"""
+        SELECT grantee, 'SCHEMA' AS kind, schema_name AS object, privilege_type
+        FROM {CAT}.information_schema.schema_privileges
+        WHERE schema_name IN {base} AND grantee IN ({regional_ids}, {region_groups})
+        UNION ALL
+        SELECT grantee, 'TABLE', concat(table_schema, '.', table_name), privilege_type
+        FROM {CAT}.information_schema.table_privileges
+        WHERE table_schema IN {base} AND grantee IN ({regional_ids}, {region_groups})""",
+            note="Covers the regional analyst personas, the pii-only persona, and every `noc_region_*` group and "
+                 "`pii_privileged` by name. Zero rows: nobody but the national role can read a silver / gold "
+                 "table directly; regional access is only through `netmon_noc`.")
+    d.query("All grantees on the base schemas and their tables (who can read silver / gold directly)", f"""
+        SELECT kind, grantee_name, array_sort(collect_set(object)) AS objects, array_sort(collect_set(privilege_type))
+               AS privileges FROM (
+          SELECT 'SCHEMA' AS kind, coalesce(CASE grantee {case} END, grantee) AS grantee_name, schema_name AS object,
+                 privilege_type FROM {CAT}.information_schema.schema_privileges WHERE schema_name IN {base}
+          UNION ALL
+          SELECT 'TABLE', coalesce(CASE grantee {case} END, grantee), concat(table_schema, '.', table_name),
+                 privilege_type FROM {CAT}.information_schema.table_privileges WHERE table_schema IN {base})
+        WHERE grantee_name NOT LIKE '%@%' GROUP BY kind, grantee_name ORDER BY kind, grantee_name""",
+            note="Besides the catalog owner (excluded: a user) and the FEVM platform service principal, only the "
+                 "national personas appear.")
+    d.query_or_error("SHOW GRANTS for a regional group (Unity Catalog view of the group)",
+                     f"SHOW GRANTS `noc_region_nsw` ON SCHEMA {CAT}.netmon_silver",
+                     note="Workspace-local groups are not UC principals, so they cannot hold, or keep, any grant; "
+                          "the governance job also issues REVOKE ALL for every group and records this.")
     d.query("Tags: schemas and tables", f"""
         SELECT 'schema' AS level, schema_name AS object, tag_name, tag_value FROM {CAT}.information_schema.schema_tags
         UNION ALL

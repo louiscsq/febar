@@ -151,17 +151,35 @@ if stage in ("policies", "all"):
 
     run("02_noc_views.sql")
 
-    # Converge every persona to its declared role: revoke whatever an earlier run granted, then grant.
-    managed = ([("CATALOG", SUBS["catalog"])]
-               + [("SCHEMA", SUBS[k]) for k in ("raw_schema", "bronze_schema", "silver_schema", "gold_schema",
-                                                 "eval_schema", "gov_schema", "noc_schema")]
-               + [("TABLE", f"{SUBS['silver_schema']}.{t}") for t in (
-                   "silver_sessions", "silver_kpis", "silver_alarms", "silver_topology_nodes",
-                   "silver_topology_edges", "silver_maintenance_windows")]
-               + [("FUNCTION", f"{SUBS['gov']}.region_filter")])
-    for sp in personas.values():
+    # Converge every managed principal (all NOC / PII groups AND every persona) to its declared role:
+    # revoke whatever any earlier run granted on any netmon securable, then apply the role grants. A
+    # group UC does not accept as a principal (workspace-local) cannot hold grants; that is recorded.
+    cat = p["catalog"]
+    managed = [("CATALOG", SUBS["catalog"])] + [
+        ("SCHEMA", q(cat, r.schema_name)) for r in spark.sql(
+            f"SELECT schema_name FROM `{cat}`.information_schema.schemata WHERE schema_name LIKE 'netmon%'").collect()
+    ] + [
+        ("TABLE", q(cat, r.table_schema, r.table_name)) for r in spark.sql(
+            f"SELECT table_schema, table_name FROM `{cat}`.information_schema.tables "
+            f"WHERE table_schema LIKE 'netmon%'").collect()
+    ] + [
+        ("FUNCTION", q(cat, r.routine_schema, r.routine_name)) for r in spark.sql(
+            f"SELECT routine_schema, routine_name FROM `{cat}`.information_schema.routines "
+            f"WHERE routine_schema LIKE 'netmon%'").collect()
+    ]
+    principals = [*GROUPS, *(sp.application_id for sp in personas.values())]
+    not_uc_principal = []
+    for pr in principals:
         for kind, obj in managed:
-            spark.sql(f"REVOKE ALL PRIVILEGES ON {kind} {obj} FROM `{sp.application_id}`")
+            try:
+                spark.sql(f"REVOKE ALL PRIVILEGES ON {kind} {obj} FROM `{pr}`")
+            except Exception as e:  # noqa: BLE001
+                if "PRINCIPAL_DOES_NOT_EXIST" in str(e):
+                    not_uc_principal.append(pr)
+                    break  # cannot hold grants on anything
+                raise
+    print(f"revoked managed privileges on {len(managed)} securables from {len(principals)} principals; "
+          f"not UC principals (hold no grants): {not_uc_principal}")
 
     grantees = {}  # group -> principals actually granted
     for g, sql_file in ROLE_GRANTS.items():
@@ -197,6 +215,20 @@ if stage in ("policies", "all"):
         SELECT table_schema, table_name, filter_name, target_columns FROM `{cat}`.information_schema.row_filters
         WHERE table_schema IN ('{p["silver_schema"]}', '{p["gold_schema"]}')"""))
     display(spark.sql(f"SHOW GRANTS ON SCHEMA {SUBS['gold_schema']}"))
+    regional = [g for g in GROUPS if g.startswith("noc_region_")] + [
+        sp.application_id for n, sp in personas.items() if not ({"noc_national"} & set(PERSONAS[n]))]
+    held = spark.sql(f"""
+        SELECT grantee, table_schema, table_name, privilege_type FROM `{cat}`.information_schema.table_privileges
+        WHERE table_schema IN ('{p["bronze_schema"]}', '{p["silver_schema"]}', '{p["gold_schema"]}',
+                               '{p["eval_schema"]}')
+          AND grantee IN ({", ".join(f"'{x}'" for x in regional)})
+        UNION ALL
+        SELECT grantee, schema_name, NULL, privilege_type FROM `{cat}`.information_schema.schema_privileges
+        WHERE schema_name IN ('{p["bronze_schema"]}', '{p["silver_schema"]}', '{p["gold_schema"]}',
+                              '{p["eval_schema"]}')
+          AND grantee IN ({", ".join(f"'{x}'" for x in regional)})""")
+    assert held.count() == 0, f"regional / pii-only principals hold base-table privileges: {held.collect()}"
+    print("verified: no regional or pii-only principal holds any privilege on bronze / silver / gold / eval")
     display(spark.sql(f"""
         SELECT schema_name, table_name, column_name, tag_name, tag_value FROM `{cat}`.information_schema.column_tags
         WHERE schema_name IN ('{p["bronze_schema"]}', '{p["silver_schema"]}') ORDER BY ALL"""))
