@@ -119,7 +119,7 @@ against `ground_truth/dq_injections`.
 |---|---|---|---|
 | silver dedupe (`dropDuplicatesWithinWatermark`) | `emitted_ts` (delivery time) | 15 min | redeliveries arrive 1–600 s after the original. Using delivery time rather than event time means a 36-hour-late record is still deduplicated, not discarded as late |
 | `gold_cell_health_1m` / `_5m` | `event_ts` | 2 min | 1-minute KPIs arrive 6–30 s after their period ends; 2 minutes absorbs that plus pipeline jitter |
-| `gold_cell_sessions_5m` | `end_ts` | 5 min | xDRs are emitted 5–90 s after the session closes |
+| `gold_cell_sessions_5m` | `emitted_ts` (inherited from the silver dedupe) | 15 min | a stream can define one watermark, and the sessions view already has the dedupe watermark, so windows are on xDR delivery time (5–90 s after the session closes) |
 
 Late arrivals (30 min – 36 h) are kept in silver, flagged `is_late`, and included in the batch MVs
 (baseline, rollup, eval), but they arrive behind the event-time watermark, so the streaming health windows

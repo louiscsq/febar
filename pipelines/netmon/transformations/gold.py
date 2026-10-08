@@ -198,17 +198,18 @@ def gold_impact_detections():
 
 @dp.table(
     name=f"{S.gold}.gold_cell_sessions_5m",
-    comment="Per-cell 5-minute session outcomes by session end time: setup failures, drops, no-service and "
-            "approximate distinct subscribers (pseudonymous key). No IMSI/MSISDN.",
+    comment="Per-cell 5-minute session outcomes by xDR delivery time (emitted_ts, ~5-90 s after session end): "
+            "setup failures, drops, no-service and approximate distinct subscribers (pseudonymous key). No PII.",
     cluster_by=["window_start", "cell_id"],
     table_properties={"quality": "gold"},
 )
 def gold_cell_sessions_5m():
     ok = rules.all_pass_sql(rules.drop_expectations("sessions"))
     return (
+        # sessions_typed already carries the dedupe watermark on emitted_ts (a stream may only define one),
+        # so the windows are on delivery time too.
         spark.readStream.table("sessions_typed").where(ok)
-        .withWatermark("end_ts", "5 minutes")
-        .groupBy(F.window("end_ts", "5 minutes").alias("w"), "cell_id", "site_id", "region_code")
+        .groupBy(F.window("emitted_ts", "5 minutes").alias("w"), "cell_id", "site_id", "region_code")
         .agg(
             F.count("*").alias("n_sessions"),
             F.sum(F.expr("CAST(outcome = 'SETUP_FAILED' AS INT)")).alias("n_setup_failed"),

@@ -154,8 +154,8 @@ if stage in ("policies", "all"):
             print(f"-- grants for {g} -> {principal}")
             run("02_grants.sql", {"principal": principal})
 
-    skipped = run("03_comments_tags.sql", tolerate=("TABLE_OR_VIEW_NOT_FOUND", "SCHEMA_NOT_FOUND",
-                                                    "INVALID_PARAMETER_VALUE", "PERMISSION_DENIED"))
+    # Only tolerate tables the pipeline has not created yet; tag-policy violations must fail the job.
+    skipped = run("03_comments_tags.sql", tolerate=("TABLE_OR_VIEW_NOT_FOUND",))
     print(f"{len(skipped)} tag/comment statements skipped")
     print({g: v for g, v in grantees.items() if v})
 
