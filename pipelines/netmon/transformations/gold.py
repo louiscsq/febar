@@ -198,18 +198,21 @@ def gold_impact_detections():
 
 @dp.table(
     name=f"{S.gold}.gold_cell_sessions_5m",
-    comment="Per-cell 5-minute session outcomes by xDR delivery time (emitted_ts, ~5-90 s after session end): "
-            "setup failures, drops, no-service and approximate distinct subscribers (pseudonymous key). No PII.",
+    comment="Per-cell 5-minute session outcomes by session end time: setup failures, drops, no-service and "
+            "approximate distinct subscribers (pseudonymous key). No IMSI/MSISDN.",
     cluster_by=["window_start", "cell_id"],
     table_properties={"quality": "gold"},
 )
 def gold_cell_sessions_5m():
     ok = rules.all_pass_sql(rules.drop_expectations("sessions"))
     return (
-        # sessions_typed already carries the dedupe watermark on emitted_ts (a stream may only define one),
-        # so the windows are on delivery time too.
-        spark.readStream.table("sessions_typed").where(ok)
-        .groupBy(F.window("emitted_ts", "5 minutes").alias("w"), "cell_id", "site_id", "region_code")
+        # Own event-time watermark (a stream may only define one, so this reads the un-watermarked view).
+        # Copies of a redelivered record share end_ts, so deduplicating here on event time is exact; late
+        # arrivals fall behind the watermark, which is fine for a real-time feature table.
+        spark.readStream.table("sessions_events").where(ok)
+        .withWatermark("end_ts", "10 minutes")
+        .dropDuplicatesWithinWatermark(["record_id"])
+        .groupBy(F.window("end_ts", "5 minutes").alias("w"), "cell_id", "site_id", "region_code")
         .agg(
             F.count("*").alias("n_sessions"),
             F.sum(F.expr("CAST(outcome = 'SETUP_FAILED' AS INT)")).alias("n_setup_failed"),

@@ -28,18 +28,25 @@ def ts(col: str):
     return F.expr(f'try_to_timestamp({col}, "{rules.TS_FORMAT}")')
 
 
-def typed(feed: str, ts_cols: list[str]):
+def typed(feed: str, ts_cols: list[str], dedupe: bool = True):
     """Bronze stream minus corrupt lines, timestamps parsed, duplicates dropped on record_id."""
     df = spark.readStream.table(f"{S.bronze}.bronze_{feed}").where("_corrupt_record IS NULL")
     for c in ts_cols:
         df = df.withColumnRenamed(c, f"{c}_raw").withColumn(c, ts(f"{c}_raw"))
+    if dedupe:
+        df = (
+            df.withColumn("_dedupe_key", F.expr("coalesce(record_id, sha2(to_json(struct(*)), 256))"))
+            # Redeliveries arrive 1-600 s after the original; the watermark is on delivery time, so late
+            # arrivals (old event time, fresh delivery) are kept rather than dropped as late. Delivery time
+            # is capped at the file's landing time: a record cannot be delivered after the file holding it
+            # was written (batch history "delivers" late records up to 36 h past the window, i.e. in the
+            # future, which would otherwise push the watermark ahead of the live stream).
+            .withColumn("_wm_ts", F.least("emitted_ts", "_file_modification_time"))
+            .withWatermark("_wm_ts", rules.DEDUPE_WATERMARK)
+            .dropDuplicatesWithinWatermark(["_dedupe_key"])
+        )
     return (
-        df.withColumn("_dedupe_key", F.expr("coalesce(record_id, sha2(to_json(struct(*)), 256))"))
-        # Redeliveries arrive 1-600 s after the original; the watermark is on delivery time, so late
-        # arrivals (old event time, fresh delivery) are kept rather than dropped as late.
-        .withWatermark("emitted_ts", rules.DEDUPE_WATERMARK)
-        .dropDuplicatesWithinWatermark(["_dedupe_key"])
-        .withColumn("source_run", F.col("_source_run"))
+        df.withColumn("source_run", F.col("_source_run"))
         # When the record's micro-batch file landed (simulated clock; NULL for batch history files), and
         # when its evidence became available to the NOC: the landing time, else the delivery time.
         .withColumn("landed_ts", F.expr(paths.landed_at_sql("_source_file", S.stream_step_seconds)))
@@ -177,10 +184,9 @@ def silver_alarms():
 # the UC functions in governance/sql/01_functions.sql)
 # ---------------------------------------------------------------------------------------------------
 
-@dp.temporary_view(name="sessions_typed")
-def sessions_typed():
+def _sessions(dedupe: bool):
     return (
-        typed("sessions", ["start_ts", "end_ts", "emitted_ts"])
+        typed("sessions", ["start_ts", "end_ts", "emitted_ts"], dedupe=dedupe)
         .join(F.broadcast(dim_cells().select("cell_id", "site_id", "region_code", "timezone")), "cell_id", "left")
         # Pseudonymous subscriber key for downstream counts (not reversible from the gold tables alone).
         .withColumn("subscriber_key", F.expr("sha2(concat('banksia-netmon:', imsi), 256)"))
@@ -188,6 +194,17 @@ def sessions_typed():
         .withColumn("is_late", F.expr(f"coalesce(lag_s > {LATE}, false)"))
         .withColumn("start_ts_local", F.expr("from_utc_timestamp(start_ts, timezone)"))
     )
+
+
+@dp.temporary_view(name="sessions_typed")
+def sessions_typed():
+    return _sessions(dedupe=True)
+
+
+@dp.temporary_view(name="sessions_events")
+def sessions_events():
+    """Typed sessions without a watermark, for gold windows that need their own event-time watermark."""
+    return _sessions(dedupe=False)
 
 
 SESSIONS_SCHEMA = f"""

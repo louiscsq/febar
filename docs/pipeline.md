@@ -117,9 +117,9 @@ against `ground_truth/dq_injections`.
 
 | operator | watermark column | delay | why |
 |---|---|---|---|
-| silver dedupe (`dropDuplicatesWithinWatermark`) | `emitted_ts` (delivery time) | 15 min | redeliveries arrive 1–600 s after the original. Using delivery time rather than event time means a 36-hour-late record is still deduplicated, not discarded as late |
+| silver dedupe (`dropDuplicatesWithinWatermark`) | `least(emitted_ts, _file_modification_time)` (delivery time, capped at file landing) | 15 min | redeliveries arrive 1–600 s after the original. Using delivery time rather than event time means a 36-hour-late record is kept (flagged late), not discarded. The cap matters because the batch history "delivers" late records up to 36 h after its window, which is in the future relative to a stream started afterwards; uncapped, that pushed the watermark a day ahead and silently dropped the whole live stream (found on the first live run) |
 | `gold_cell_health_1m` / `_5m` | `event_ts` | 2 min | 1-minute KPIs arrive 6–30 s after their period ends; 2 minutes absorbs that plus pipeline jitter |
-| `gold_cell_sessions_5m` | `emitted_ts` (inherited from the silver dedupe) | 15 min | a stream can define one watermark, and the sessions view already has the dedupe watermark, so windows are on xDR delivery time (5–90 s after the session closes) |
+| `gold_cell_sessions_5m` | `end_ts` | 10 min | xDRs are emitted 5–90 s after the session closes. A stream can only define one watermark, so this table reads an un-watermarked sessions view and deduplicates on `record_id` itself (copies share `end_ts`) |
 
 Late arrivals (30 min – 36 h) are kept in silver, flagged `is_late`, and included in the batch MVs
 (baseline, rollup, eval), but they arrive behind the event-time watermark, so the streaming health windows
