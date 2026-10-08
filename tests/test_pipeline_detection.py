@@ -8,8 +8,8 @@ from datetime import datetime
 
 import pandas as pd
 import pytest
-from conftest import read_table
 
+from conftest import read_table
 from netmon_pipeline import detection as d
 
 

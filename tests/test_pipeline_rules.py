@@ -11,8 +11,8 @@ import json
 from collections import Counter, defaultdict
 
 import pytest
-from conftest import read_table
 
+from conftest import read_table
 from netmon_pipeline import rules
 
 FEEDS = ["kpis", "alarms", "sessions"]
