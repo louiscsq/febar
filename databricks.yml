@@ -60,6 +60,13 @@ variables:
     default: "2026-10-10"
   rca_train_days:
     default: "6"
+  rca_holdout_run:
+    description: Fresh holdout run (1-minute, new seed, same network, later dates) for the frozen model
+    default: holdout_1m
+  rca_holdout_start:
+    default: "2026-10-17"
+  rca_holdout_days:
+    default: "2"
   lakebase_instance:
     default: banksia-netmon-lakebase
   lakebase_database:

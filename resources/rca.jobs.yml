@@ -35,6 +35,31 @@ resources:
               seed: "42"
               overwrite: "true"
 
+    # A FRESH, untouched holdout for the frozen model: new run seed (new faults, noise and defects) on the same
+    # network (topology_seed = 42), later dates (after history_1m), its own run id. Evaluated once.
+    rca_generate_holdout:
+      name: banksia-rca-generate-holdout
+      parameters: *rca_gen_params
+      environments: *rca_gen_envs
+      tasks:
+        - task_key: generate_holdout_1m
+          environment_key: netmon
+          timeout_seconds: 5400
+          notebook_task:
+            notebook_path: ../notebooks/01_generate_history.py
+            base_parameters:
+              subdir: ${var.rca_holdout_run}
+              scale: small
+              days: ${var.rca_holdout_days}
+              start_date: ${var.rca_holdout_start}
+              step_minutes: "1"
+              fault_rate_multiplier: "200"
+              min_per_type: "1"
+              format: json
+              seed: "4242"
+              topology_seed: "42"
+              overwrite: "true"
+
     # Build features, train, calibrate, evaluate (held-out days + live run), register in UC, alias champion.
     rca_train:
       name: banksia-rca-train

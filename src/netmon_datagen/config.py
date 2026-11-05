@@ -107,12 +107,19 @@ class FaultConfig:
 class GeneratorConfig:
     scale: ScalePreset = field(default_factory=lambda: PRESETS["large"])
     seed: int = 42
+    # Network inventory seed (topology, per-cell base load, flapping set). None = `seed`. Set it to keep the same
+    # network while drawing new faults, noise and defects with a different `seed` (e.g. a fresh holdout run).
+    topology_seed: int | None = None
     days: int = 30
     start: str | None = None  # ISO date/datetime (UTC); default = today 00:00 UTC minus `days`
     step_minutes: int = 15  # KPI reporting period for batch history (3GPP ROP = 15 min)
     fmt: str = "parquet"  # parquet | json
     dq: DQConfig = field(default_factory=DQConfig)
     faults: FaultConfig = field(default_factory=FaultConfig)
+
+    @property
+    def network_seed(self) -> int:
+        return self.seed if self.topology_seed is None else self.topology_seed
 
     def with_(self, **kwargs) -> GeneratorConfig:
         return replace(self, **kwargs)
