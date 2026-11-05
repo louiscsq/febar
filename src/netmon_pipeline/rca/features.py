@@ -270,11 +270,16 @@ class RunState:
         cl_cands: dict[int, set[int]] = {h: set(np.unique(topo.cell_chain[cells_r[c]]).tolist())
                                          for h, c in clusters.items()}
         cl_routers = {h: {int(x) for x in topo.cell_chain[cells_r[c], 3]} for h, c in clusters.items()}
+        on_chains = set().union(*cl_cands.values()) if cl_cands else set()
         for i in a_sel:  # alarmed elements nearby: same router, or above router level, or service-down
             e = int(al.elem[i])
-            attached = False
+            attached = any(e in c for c in cl_cands.values())
+            if e in on_chains and topo.level[e] >= LEVEL["AGG_ROUTER"]:
+                # already an ancestor of some cluster's impacted cells (e.g. a dark cell with its own outage
+                # alarm): it belongs to that cluster, not to unrelated clusters under the same router
+                continue
             for h in clusters:
-                if topo.level[e] < LEVEL["AGG_ROUTER"] or topo.router_of[e] in cl_routers[h] or e in cl_cands[h]:
+                if topo.level[e] < LEVEL["AGG_ROUTER"] or topo.router_of[e] in cl_routers[h]:
                     cl_cands[h].add(e)
                     attached = True
             if al.service_down[i] and not attached:

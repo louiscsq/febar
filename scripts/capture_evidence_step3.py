@@ -163,8 +163,9 @@ def registry(r: Runner, w) -> None:
                          "storage_location": v.storage_location} for v in vs])
     import mlflow
 
+    mlflow.set_tracking_uri(f"databricks://{r.profile}")
     mlflow.set_registry_uri(f"databricks-uc://{r.profile}")
-    c = mlflow.MlflowClient(registry_uri=f"databricks-uc://{r.profile}")
+    c = mlflow.MlflowClient(tracking_uri=f"databricks://{r.profile}", registry_uri=f"databricks-uc://{r.profile}")
     mv = c.get_model_version_by_alias(MODEL, "champion")
     d.code("champion version tags", mv.tags)
     sig = mlflow.models.get_model_info(f"models:/{MODEL}@champion").signature
@@ -207,7 +208,16 @@ def serving(r: Runner, w, run: dict) -> None:
            "`[p(not root), p(root)]` per candidate; ranking by `p(root)` gives the suspects.")
     d.code("Request (first 2 of the records)", {"dataframe_records": body["dataframe_records"][:2]})
     d.code("Response (first 3 predictions)", {"predictions": preds[:3]})
-    d.code("Candidates ranked by p(root) (top 5)", ranked[:5])
+    case = recs[0]["case_id"]
+    cols2, rows2 = r.sql(f"""SELECT element_id, is_root, round(score, 4) AS batch_score FROM {R}.rca_training_labels
+                             WHERE case_id = '{case}'""")
+    batch = {x[0]: (x[1], x[2]) for x in rows2}
+    for z in ranked:
+        z["is_root (ground truth)"], z["batch_score (training job)"] = batch.get(z["element_id"], (None, None))
+    d.code("Candidates ranked by endpoint p(root), with the ground truth and the training job's batch score", ranked,
+           "The endpoint and the batch scoring in the job give the same calibrated scores (same UC version). This "
+           "case holds two concurrent incidents in one cluster (a cell outage under a degrading link), so both "
+           "top-2 elements are true roots.")
     d.text("Latency from this laptop (client side, includes internet round trip)",
            f"- first call: {cold_ms:.0f} ms (may include a scale-from-zero start)\n"
            f"- 20 warm single-record calls: p50 {statistics.median(lat):.0f} ms, max {max(lat):.0f} ms")
@@ -225,8 +235,8 @@ def lakebase(r: Runner, w) -> None:
         st = s.data_synchronization_status
         d.code(f"Synced table `{R}.{t}`", {
             "source": s.spec.source_table_full_name, "primary_key": s.spec.primary_key_columns,
-            "scheduling_policy": str(s.spec.scheduling_policy), "database_instance": s.database_instance_name,
-            "logical_database": s.logical_database_name, "state": str(st.detailed_state), "message": st.message,
+            "scheduling_policy": str(s.spec.scheduling_policy), "database_instance": s.database_instance_name or getattr(s, "effective_database_instance_name", None),
+            "logical_database": s.logical_database_name or getattr(s, "effective_logical_database_name", None), "state": str(st.detailed_state), "message": st.message,
             "pipeline_id": st.pipeline_id,
             "last_sync": str(getattr(st, "triggered_update_status", None) or getattr(st, "last_sync", None))[:600]})
     d.query("Read-latency check (psycopg + OAuth token, from a serverless job; latest run)", f"""

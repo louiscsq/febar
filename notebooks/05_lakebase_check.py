@@ -77,8 +77,6 @@ with connect(w["database"]) as conn:
     regions = [r[0] for r in conn.execute(f'SELECT DISTINCT region_code FROM "{S}"."lb_element_status"').fetchall()]
     print(json.dumps({k: v for k, v in results.items() if not k.endswith("_sample")}, indent=1))
 
-    # COMMAND ----------
-
     # Point-lookup latency, measured end to end from this job (warm connection, as an app pool would be).
     rng = random.Random(7)
     queries = {

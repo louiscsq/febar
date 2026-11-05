@@ -200,8 +200,8 @@ client.set_model_version_tag(MODEL, version, "alert_threshold", str(res.threshol
 client.set_model_version_tag(MODEL, version, "train_run", w["train_run"])
 client.set_model_version_tag(MODEL, version, "test_top1_pct", str(res.metrics["test_top1_pct"]))
 client.update_registered_model(MODEL, description=(
-    "Banksia NOC root-cause ranker: scores every candidate element of a customer-impact case (region x 1-minute "
-    "decision time) as the likely root cause. Input: the detection-time features in feature_columns.json; output: "
+    "Banksia NOC root-cause ranker: scores every candidate element of a customer-impact case (an impact cluster "
+    "at a 1-minute decision time) as the likely root cause. Input: the detection-time features in feature_columns.json; output: "
     "predict_proba [p(not root), p(root)], calibrated. Rank candidates of a case by p(root). See docs/rca_model.md."))
 print("run", run_id, "model", MODEL, "version", version, "metrics", res.metrics)
 

@@ -182,3 +182,27 @@ def test_vectorised_detection_labels_match_scoring_label_detection():
                 and d["signal_end_ts"] > r["start_ts"] - pd.Timedelta(minutes=5)
                 and d["signal_start_ts"] < r["end_ts"] + pd.Timedelta(seconds=scoring.MATCH_SLACK_S)]
         assert got.iloc[k] == scoring.label_detection(hits)
+
+
+def test_an_alarmed_impacted_element_stays_in_its_own_cluster():
+    # CELL-3a (under BH-2) is dark with its own outage alarm while BH-1 degrades: two clusters under one
+    # router (extra healthy sites under BH-2 keep the router below the 50 % cluster density). The dark cell
+    # must not become a candidate of the BH-1 case.
+    extra = pd.DataFrame([(f"SITE-{k}", "SITE", "BH-2") for k in (4, 5, 6)]
+                         + [(f"CELL-{k}{x}", "CELL", f"SITE-{k}") for k in (4, 5, 6) for x in "ab"],
+                         columns=["element_id", "element_type", "parent_id"]).assign(region_code="NSW")
+    topo = pd.concat([topo_df(), extra], ignore_index=True)
+    h = health_df()
+    healthy = h[h["cell_id"] == "CELL-3b"]
+    h = pd.concat([h] + [healthy.assign(cell_id=c) for c in extra.loc[extra.element_type == "CELL", "element_id"]])
+    h = h[~((h["cell_id"] == "CELL-3a") & (h["window_start"] >= T0 + pd.Timedelta(minutes=FAULT_FROM)))]
+    t = T0 + pd.Timedelta(minutes=FAULT_FROM + 1)
+    a = pd.concat([alarms_df(), pd.DataFrame([{
+        "alarm_id": "A3", "event_type": "RAISE", "element_id": "CELL-3a", "alarm_code": "CELL_OUT_OF_SERVICE",
+        "severity": "CRITICAL", "event_ts": t, "evidence_ts": t + pd.Timedelta(seconds=5), "is_service_down": True}])])
+    f = RunState(Topology(topo), h, a).case_features(FAULT_FROM + 8, "NSW")
+    by_case = {c: set(g["element_id"]) for c, g in f.groupby("case_id")}
+    assert len(by_case) == 2
+    bh1 = next(c for c, v in by_case.items() if "BH-1" in v)
+    assert "CELL-3a" not in by_case[bh1]
+    assert any("CELL-3a" in v for v in by_case.values())
