@@ -39,3 +39,16 @@ def queries(catalog: str, run: str, region: str | None = None, since: str | None
         "step2_detections": f"""SELECT source_run, element_id, signal_start_ts, signal_end_ts, in_maintenance
                                 FROM {e}.eval_detection_log WHERE source_run = {_q(run)}{reg}""",
     }
+
+
+def utc_frame(df):
+    """Spark Connect `toPandas()` returns naive datetimes in the session time zone (pinned to UTC by the
+    notebooks); make them tz-aware UTC so they compare with the rest of the code."""
+    import pandas as pd
+
+    df = df.copy()
+    df.attrs = {}
+    for c in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[c]) and getattr(df[c].dt, "tz", None) is None:
+            df[c] = df[c].dt.tz_localize("UTC")
+    return df

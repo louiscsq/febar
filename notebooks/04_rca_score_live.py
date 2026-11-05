@@ -37,8 +37,9 @@ import pandas as pd
 
 from netmon_pipeline.rca import live, model
 from netmon_pipeline.rca.features import FEATURE_COLUMNS, RunState, Topology
-from netmon_pipeline.rca.sources import queries
+from netmon_pipeline.rca.sources import queries, utc_frame
 
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 w = {k: dbutils.widgets.get(k) for k in ["catalog", "rca_schema", "live_run", "model_name", "lookback_minutes",
                                           "history_minutes", "sync_lakebase"]}
 CAT, SCH, RUN = w["catalog"], w["rca_schema"], w["live_run"]
@@ -62,12 +63,12 @@ print("latest window", latest, "reading since", since)
 
 regions = [r[0] for r in spark.sql(f"SELECT DISTINCT region_code FROM `{CAT}`.netmon_silver.silver_topology_nodes "
                                    "ORDER BY 1").collect()]
-topo_all = spark.sql(queries(CAT, RUN)["topology"]).toPandas()
+topo_all = utc_frame(spark.sql(queries(CAT, RUN)["topology"]).toPandas())
 parts = []
 for r in regions:
     qr = queries(CAT, RUN, region=r, since=since)
     topo = Topology(topo_all[topo_all["region_code"] == r])
-    st = RunState(topo, *(spark.sql(qr[k]).toPandas() for k in ("health", "alarms", "maintenance")))
+    st = RunState(topo, *(utc_frame(spark.sql(qr[k]).toPandas()) for k in ("health", "alarms", "maintenance")))
     times = st.decision_times()
     times = times[times >= times.max() - int(w["history_minutes"])]
     f = st.features(times=times, regions=[r])
@@ -119,6 +120,7 @@ upsert(inc, "open_incidents", "incident_id", live.OPEN_INCIDENTS_DDL,
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {FQ}.scratch COMMENT 'Staging Parquet for pandas -> Delta writes'")
 os.makedirs(f"/Volumes/{CAT}/{SCH}/scratch/live", exist_ok=True)
 _p = f"/Volumes/{CAT}/{SCH}/scratch/live/scores.parquet"
+scored.attrs = {}
 scored[["source_run", "decision_ts", "region_code", "case_id", "element_id", "element_type", "feature_evidence_ts",
         *FEATURE_COLUMNS, "score"]].assign(model_version=str(mv.version)).to_parquet(
     _p, index=False, coerce_timestamps="us", allow_truncated_timestamps=True)

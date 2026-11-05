@@ -41,13 +41,15 @@ except ImportError:
     sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..", "src")))
 
 import mlflow
+import numpy as np
 import pandas as pd
 from mlflow.models import infer_signature
 
 from netmon_pipeline.rca import evaluate, labels, model, train
 from netmon_pipeline.rca.features import FEATURE_COLUMNS, ID_COLUMNS
-from netmon_pipeline.rca.sources import queries
+from netmon_pipeline.rca.sources import queries, utc_frame
 
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 w = {k: dbutils.widgets.get(k) for k in ["catalog", "rca_schema", "train_run", "train_start", "train_days",
                                           "val_days", "live_run", "model_name", "experiment", "rebuild_features"]}
 CAT, SCH = w["catalog"], w["rca_schema"]
@@ -63,7 +65,7 @@ def loader(run):
         key = (name, region)
         if key not in cache:
             cache.clear() if name == "topology" else None  # one region at a time: bounded driver memory
-            cache[key] = spark.sql(queries(CAT, run, region)[name]).toPandas()
+            cache[key] = utc_frame(spark.sql(queries(CAT, run, region)[name]).toPandas())
         return cache[key]
 
     return load
@@ -83,6 +85,8 @@ def to_delta(df: pd.DataFrame, name: str, comment: str) -> None:
     millions of rows."""
     os.makedirs(SCRATCH, exist_ok=True)
     path = f"{SCRATCH}/{name}.parquet"
+    df = df.copy()
+    df.attrs = {}  # Spark Connect toPandas() leaves plan metrics here, which pandas cannot write to Parquet
     df.to_parquet(path, index=False, coerce_timestamps="us", allow_truncated_timestamps=True)
     sdf = spark.read.parquet(path)
     sdf.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{FQ}.{name}")
@@ -93,8 +97,8 @@ def flat(df: pd.DataFrame) -> pd.DataFrame:
     """Lists to strings so the evaluation tables are easy to read in SQL and in the evidence."""
     out = df.copy()
     for c in out.columns:
-        if out[c].map(lambda v: isinstance(v, list | tuple)).any():
-            out[c] = out[c].map(lambda v: ",".join(map(str, v)) if isinstance(v, list | tuple) else v)
+        if out[c].map(lambda v: isinstance(v, list | tuple | np.ndarray)).any():
+            out[c] = out[c].map(lambda v: ",".join(map(str, v)) if isinstance(v, list | tuple | np.ndarray) else v)
     return out
 
 # COMMAND ----------
@@ -108,14 +112,14 @@ if w["rebuild_features"] == "true" or not spark.catalog.tableExists(f"{FQ}.rca_c
     feats = train.build_features(loader(w["train_run"]), regions())
     print(f"features built in {time.time() - t0:.0f} s")
 else:
-    feats = spark.read.table(f"{FQ}.rca_candidate_features").toPandas()
+    feats = utc_frame(spark.read.table(f"{FQ}.rca_candidate_features").toPandas())
     print(f"features reused from the table ({len(feats)} rows) in {time.time() - t0:.0f} s")
 to_delta(feats[ID_COLUMNS + FEATURE_COLUMNS], "rca_candidate_features",
          "Detection-time candidate features per (case = run x region x 1-minute decision time, element). Built only "
          "from real-time tables (gold_cell_health_1m on-time windows, silver_alarms by arrival, topology, change "
          "calendar); feature_evidence_ts <= decision_ts. No ground truth.")
-gt = spark.sql(queries(CAT, w["train_run"])["incidents"]).toPandas()
-cmp_ = {k: spark.sql(queries(CAT, w["train_run"])[k]).toPandas()
+gt = utc_frame(spark.sql(queries(CAT, w["train_run"])["incidents"]).toPandas())
+cmp_ = {k: utc_frame(spark.sql(queries(CAT, w["train_run"])[k]).toPandas())
         for k in ("baseline", "step2_localisation", "step2_detections")}
 split = model.TimeSplit.by_days(pd.Timestamp(w["train_start"], tz="UTC"), int(w["train_days"]), int(w["val_days"]))
 print(split)
@@ -127,6 +131,9 @@ print(split)
 # COMMAND ----------
 
 mlflow.set_registry_uri("databricks-uc")
+from databricks.sdk import WorkspaceClient
+
+WorkspaceClient().workspace.mkdirs(os.path.dirname(w["experiment"]))  # the experiment's parent folder
 mlflow.set_experiment(w["experiment"])
 with mlflow.start_run(run_name=f"rca_ranker_{w['train_run']}") as run:
     res = train.train_and_evaluate(feats, gt, split, cmp_["baseline"], cmp_["step2_localisation"],
@@ -151,11 +158,11 @@ with mlflow.start_run(run_name=f"rca_ranker_{w['train_run']}") as run:
     # Extra out-of-run check on the live stream (different run and day; not used for any choice).
     live_load = loader(w["live_run"])
     live_feats = train.build_features(live_load, regions())
-    live_gt = spark.sql(queries(CAT, w["live_run"])["incidents"]).toPandas()
+    live_gt = utc_frame(spark.sql(queries(CAT, w["live_run"])["incidents"]).toPandas())
     live_inc = labels.prepare_incidents(live_gt)
     live = labels.label(live_feats, live_inc)
     live = live[live["case_label"] != "censored"].assign(score=lambda x: model.score(res.model, x))
-    live_base = spark.sql(queries(CAT, w["live_run"])["baseline"]).toPandas()
+    live_base = utc_frame(spark.sql(queries(CAT, w["live_run"])["baseline"]).toPandas())
     live_rank = evaluate.rank_incidents(live, live_inc).merge(
         live_base.rename(columns={"top_candidates": "baseline_top_candidates", "hit_at_1": "baseline_hit_at_1",
                                   "hit_at_3": "baseline_hit_at_3"}), on="incident_id", how="left")

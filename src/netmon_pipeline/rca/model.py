@@ -95,7 +95,7 @@ def choose_threshold(val_scored: pd.DataFrame) -> tuple[float, pd.DataFrame]:
     top = val_scored.loc[i.to_numpy()]
     n_fault = int((top["case_label"] == "fault").sum())
     rows = []
-    for thr in np.round(np.arange(0.05, 0.96, 0.025), 3):
+    for thr in np.round(np.arange(0.01, 0.96, 0.01), 3):
         a = top[top["score"] >= thr]
         tp = int(a["is_root"].sum())
         p = tp / len(a) if len(a) else 0.0
