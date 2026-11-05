@@ -203,7 +203,7 @@ def serving(r: Runner, w, run: dict) -> None:
                       "p_root": round(float(p[1]), 4)} for x, p in zip(recs, preds, strict=True)),
                     key=lambda z: -z["p_root"])
     d.text("Smoke test", f"Case `{recs[0]['case_id']}` (a held-out backhaul case, {len(recs)} candidates) sent as "
-           "`dataframe_records` with the model's 57 feature columns. The endpoint returns `predict_proba` "
+           "`dataframe_records` with the model's 55 feature columns. The endpoint returns `predict_proba` "
            "`[p(not root), p(root)]` per candidate; ranking by `p(root)` gives the suspects.")
     d.code("Request (first 2 of the records)", {"dataframe_records": body["dataframe_records"][:2]})
     d.code("Response (first 3 predictions)", {"predictions": preds[:3]})
