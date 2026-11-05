@@ -45,6 +45,7 @@ suspects are written to Lakebase for the step-5 topology app. Proof that all of 
 | `src/netmon_pipeline/rca/sources.py` | the SQL for every input (one run, one region) |
 | `notebooks/03_rca_train.py` | job `banksia-rca-train`: features, labels, MLflow, UC registration, evaluation tables |
 | `notebooks/04_rca_score_live.py` | job `banksia-rca-score-live`: batch scoring of the live run, Delta MERGE, Lakebase sync trigger |
+| `notebooks/06_rca_evaluate_holdout.py` | job `banksia-rca-evaluate-holdout`: frozen champion on `holdout_1m` (once) and the live run, GT-free scoring then matching |
 | `notebooks/05_lakebase_check.py` | job `banksia-rca-lakebase-check`: Postgres database setup, psycopg + OAuth read-latency check |
 | `resources/rca.*.yml` | jobs, Lakebase instance, synced tables, serving endpoint (bundle) |
 | `tests/test_rca_features.py`, `tests/test_rca_live.py` | leakage, timing, candidates, labels, split, evaluation, live outputs |
@@ -74,8 +75,7 @@ region usually has several incidents open at once.
 router, UPF, AMF), plus alarmed elements nearby: active alarms under one of the case's routers, above router
 level in the region, or service-down alarms. An alarmed element that is itself on another case's impacted
 chain (e.g. a dark cell raising its own `CELL_OUT_OF_SERVICE`) belongs to that case only. Without this rule it
-was pulled into every case under its router and outranked their true roots. In the test split the true root is among the candidates for
-**97.5 %** of the incidents.
+was pulled into every case under its router and outranked their true roots. On the holdout, 95.8 % of the scored incidents had a matched case output at the SLA moment (the rest count as misses).
 
 **Features** (`FEATURE_COLUMNS`, 55). Everything the NOC could see at `t`:
 
@@ -105,16 +105,18 @@ incident footprint contains one of the case's impacted cells (or service-down-al
 dropped** from training and scoring. Cases without a fault (noise, red herrings, planned work) stay in as
 all-negative cases, so scores learn not to fire on them.
 
-**Split by time**, never at random. Train on 2026-10-10 … 10-12, validation on 10-13 (calibration and
-alert threshold only), test on 10-14 … 10-15 (never used for a choice). Rows are assigned by decision time,
-with an embargo: a row matched to an incident that starts in a later split is dropped, so no incident is seen
-in two splits.
+**Split by time**, never at random. Train on 2026-10-10 … 10-12. Validation on 10-13: calibration and the alert
+threshold only. **Dev** on 10-14 … 10-15: seen during design, so not a holdout. Rows are assigned by decision
+time. **Embargo:** every incident, of any class, belongs wholly to the split in which it starts (impact start,
+else root-cause start). Every row matched to it in another split is dropped. So an incident starting in train
+and running into validation contributes no validation rows, and one starting in validation contributes no dev
+rows (tests cover both). The **held-out result** comes from a separate, later run, `holdout_1m` (see Results).
 
 | split | candidate rows | positive rows | cases |
 |---|---|---|---|
 | train (10-10 … 10-12) | 1,537,924 | 50,655 | 56,307 |
-| validation (10-13) | 538,552 | 25,547 | 27,242 |
-| test (10-14 … 10-15) | 998,086 | 38,114 | 40,953 |
+| validation (10-13) | 433,028 | 21,783 | 23,493 |
+| dev (10-14 … 10-15) | 845,723 | 35,869 | 39,032 |
 
 ## Model
 
@@ -149,69 +151,109 @@ version and tags it with `alert_threshold`, `train_run` and `test_top1_pct`.
 
 ## Results vs the step-2 localiser
 
-Final run: MLflow run `8d047e614f3941f795a2f8f638957328`, model version **3** (`@champion`), alert threshold
-**0.31**. Held-out test days 2026-10-14 … 10-15, **n = 355 scored fault incidents**. Full
-tables are in [`evidence/step3/02_evaluation.md`](../evidence/step3/02_evaluation.md).
+**Final model:** `rca_ranker` **v4** (`@champion`), training MLflow run `e40edbe6f9884c23ad9313f4e41f2845`,
+alert threshold **0.32** (validation F1). The design was frozen before the holdout was generated.
+Every number below comes from `evidence/step3/02_evaluation.md`.
 
-Two step-2 references, both on the same incidents:
+### How the evaluation is scored: GT-free first, ground truth after
 
-- **step-2 baseline**: `eval_rca_baseline` exactly as published. It ranks region-wide, in the first 15 minutes
-  of impact, by impacted descendant cells. This is the localiser behind the "58 % top-1" figure, which was
-  measured on the 19 incidents of the sparse 15-minute `history` run. On the dense 1-minute run it scores
-  25.8 % over the whole run and 23.4 % on its test days top-1, because several faults are usually open in a region at once.
-- **heuristic, same cases**: the same heuristic and filter applied to exactly the cases and candidates the
-  model ranks. It separates the gain from the case framing (clusters instead of regions) from the gain from
-  the model.
+1. **Score.** Every case of the run is ranked by the model. `evaluate.case_outputs` reads only the ID and
+   feature columns and the score; label columns do not reach it. A test checks that removing or permuting
+   them changes neither the outputs nor the evaluation. No incident ID, root list, footprint or fault type
+   influences which cases or candidates are scored. Training labels, censoring filters and the split embargo
+   apply to training and calibration only.
+2. **Match.** The ranked outputs are then attributed to ground-truth incidents: same run and region,
+   decision time in the incident window, case evidence (impacted cells, service-down-alarmed elements)
+   overlapping the incident footprint. Per minute, the matched output with the largest overlap is the
+   incident's *primary* output. Matching chooses which already-ranked output is judged; it never adds,
+   removes or re-ranks a candidate.
+3. **Top-1 / top-3.** The primary output at the first decision time at least 5 minutes after impact start
+   (the SLA moment), looking up to 15 minutes. No output means a miss: 4.2 % of holdout incidents had no
+   matched output in that window.
+4. **Early catch.** Every 1-minute decision time from 5 minutes before impact start to impact end. An
+   incident is localised at the first decision time whose primary output's top-1 is a valid root with
+   calibrated score ≥ 0.32. Times are **signed** (`decision_ts − impact_start_ts`). Catches before the impact
+   are negative, counted separately, and included in the median. "Within 5 min" means signed time ≤ 300 s.
 
-| test, n = 355 | n | model top-1 | step-2 baseline top-1 | heuristic, same cases top-1 | model top-3 | step-2 baseline top-3 | heuristic, same cases top-3 |
+The **step-2 heuristic** (`eval_rca_baseline`: ≥ 80 % of descendant cells impacted or a service-down alarm,
+then most impacted cells, then higher in the tree) is ranked on **exactly the same case outputs**. That is the
+primary comparison. Step 2's *published* `eval_rca_baseline` ranks a whole region in the first 15 minutes of
+impact, a different and much weaker framing. It is shown only as a secondary, clearly labelled column. Step 2's
+"58 % top-1" is that published figure on the sparse 15-minute `history` run (19 incidents), so it is not a
+comparison point for these dense 1-minute runs.
+
+**Why these numbers are higher than in the first PR #4 revision.** That evaluation pooled the candidates of
+every case attributed to an incident (attribution done with ground truth *before* ranking), and took each
+candidate's maximum score over 20 minutes. Early, briefly high scores of wrong candidates then won. Judging one
+GT-free case ranking at the SLA moment removes both effects. The old numbers (top-1 81.4 % for v3) are not
+comparable and are superseded.
+
+### Held-out result: `holdout_1m`
+
+A fresh 1-minute run, generated after the design was frozen: new seed 4242 for faults, noise and DQ defects,
+same network (`topology_seed` 42, verified identical), 2026-10-17 … 10-18. It ran through the unchanged step-2
+pipeline under its own run id and was evaluated **once** by `banksia-rca-evaluate-holdout` (evaluation MLflow
+run `b678bdd4d2c84591bdc4e1bfec61d5c2`). n = 337 scored faults.
+
+| holdout, n = 337 | n | **model top-1** | **heuristic, same cases top-1** | model top-3 | heuristic, same cases top-3 | *step 2 published, region-wide top-1 / top-3* |
+|---|---|---|---|---|---|---|
+| **all faults** | 337 | **93.2 %** | 78.3 % | **95.3 %** | 80.7 % | *27.9 % / 43.9 %* |
+| CELL_OUTAGE | 187 | 95.2 % | 94.7 % | 96.3 % | 94.7 % | *7.0 % / 21.4 %* |
+| BACKHAUL_DEGRADATION | 53 | **86.8 %** | 3.8 % | 86.8 % | 3.8 % | *41.5 % / 64.2 %* |
+| AGG_ROUTER_FAILURE | 40 | 87.5 % | 87.5 % | 95.0 % | 92.5 % | *82.5 % / 95.0 %* |
+| SITE_POWER_OUTAGE | 38 | 97.4 % | 84.2 % | 100 % | 100 % | *23.7 % / 50.0 %* |
+| AMF_OVERLOAD | 17 | 100 % | 100 % | 100 % | 100 % | *100 % / 100 %* |
+| BUSHFIRE_GRID_OUTAGE | 1 | 0 % | 0 % | 100 % | 0 % | *0 % / 0 %* |
+| LONG_HAUL_FIBRE_CUT | 1 | 100 % | 100 % | 100 % | 100 % | *0 % / 0 %* |
+
+| holdout early catch, n = 337 | n | model localised | **model within 5 min** | model pre-impact catches | **model median (signed)** | heuristic, same cases within 5 min / median | step-2 localisation within 5 min / median |
 |---|---|---|---|---|---|---|---|
-| **all faults** | 355 | **81.4 %** | 23.4 % | 76.1 % | **93.5 %** | 36.3 % | 85.1 % |
-| CELL_OUTAGE | 205 | 78.5 % | 5.4 % | 74.1 % | 96.1 % | 14.6 % | 83.9 % |
-| BACKHAUL_DEGRADATION | 55 | 76.4 % | 34.5 % | 67.3 % | 78.2 % | 49.1 % | 67.3 % |
-| SITE_POWER_OUTAGE | 46 | 84.8 % | 21.7 % | 73.9 % | 93.5 % | 50.0 % | 95.7 % |
-| AGG_ROUTER_FAILURE | 30 | 93.3 % | 83.3 % | 93.3 % | 100 % | 100 % | 100 % |
-| AMF_OVERLOAD | 18 | 100 % | 100 % | 100 % | 100 % | 100 % | 100 % |
-| LONG_HAUL_FIBRE_CUT | 1 | 100 % | 0 % | 100 % | 100 % | 100 % | 100 % |
+| **all faults** | 337 | 99.4 % | **80.4 %** | 35 | **106 s** | 76.9 % / 116 s | 65.6 % / 76 s |
+| CELL_OUTAGE | 187 | 99.5 % | 94.7 % | 0 | 98.5 s | 93.6 % / 97 s | 100 % / 51 s |
+| **BACKHAUL_DEGRADATION** | 53 | 98.1 % | **0 %** | 0 | **615 s** | 0 % / 727.5 s | 0 % / 1,011 s |
+| AGG_ROUTER_FAILURE | 40 | 100 % | 97.5 % | 26 | −12 s | 85.0 % / 193 s | 30.0 % / 392.5 s |
+| SITE_POWER_OUTAGE | 38 | 100 % | 97.4 % | 0 | 156 s | 84.2 % / 152.5 s | 57.9 % / 195 s |
+| AMF_OVERLOAD | 17 | 100 % | 100 % | 9 | −113 s | 100 % / 204 s | 0 % / 514 s |
+| BUSHFIRE_GRID_OUTAGE | 1 | 100 % | 0 % | 0 | 759 s | 0 % / 8,019 s | 0 % / 8,010 s |
+| LONG_HAUL_FIBRE_CUT | 1 | 100 % | 100 % | 0 | 236 s | 100 % / 176 s | 0 % / 416 s |
 
-The true root is among the model's candidates for 97.5 % of the test incidents (the ceiling for top-k).
-Validation day (n = 158): model top-1 82.3 %, top-3 93.7 %.
+- Pre-impact catches are real. Router failures raise `NODE_DOWN` and AMF overloads raise core alarms before
+  the generator's `impact_start_ts` (cells degrade 1–3 min after the root fails). The model names the root from
+  those alarms. They are counted, not clipped.
+- Step-2 times are step 2's own `localisation_ttd_s`, which step 2 clips at 0 and which is a lower bound for the
+  rollup path (MV refresh excluded). The heuristic on the same cases has no score threshold; its top-1 counts as
+  soon as it is a root. Step 2's median live pipeline latency of 39 s comes on top of every system's time.
+- **Slow backhaul degradation** (n = 53): **no system localises any within 5 minutes.** The model's median time
+  to correct localisation is 615 s, against 1,011 s for step 2 and 727.5 s for the heuristic on the same cases.
+  Top-1 accuracy at the SLA moment is 86.8 % (heuristic on the same cases: 3.8 %). The heuristic's filter needs
+  ≥ 80 % of a link's cells impacted, and a degrading link flags about 30 %.
+- **Secondary, alert-level fault precision** (step 2's definitions and code): model 395 alerts, **92.4 %** real
+  faults. Step-2 detections over the same days: 14,028 alerts, 97.6 %. The model pages about once per incident,
+  not once per impacted element, at lower precision.
 
-**Early catch** (the model scores every 1-minute decision time; an incident counts as localised at the first
-decision time whose top-1 is a valid root with calibrated score >= 0.31). Step 2 = `eval_incident_detection`
-localisation (a detection or the rollup on a root):
+**Where the model does not beat the heuristic on the same cases (holdout).**
+- Router failures: equal top-1 (87.5 %).
+- AMF overloads: equal (100 %).
+- Site power outages: equal top-3 (100 %).
+- Cell outages: practically equal (95.2 % vs 94.7 %).
+- The single bushfire cluster is a top-1 miss for both.
+- Early-catch median time for site power outages: slightly slower (156 s vs 152.5 s).
+- Against step-2 localisation, the model is slower for cell outages (median 98.5 s vs 51 s; 94.7 % vs 100 %
+  within 5 min). Step 2 localises a cell outage the moment the cell's own detection lands. The model waits for
+  its windows to become visible and the score to clear the threshold.
+- Alert precision is lower than step 2's (92.4 % vs 97.6 %).
 
-| test, n = 355 | n | model localised | model within 5 min | model median | step 2 localised | step 2 within 5 min | step 2 median |
-|---|---|---|---|---|---|---|---|
-| **all faults** | 355 | 99.4 % | **83.7 %** | 92 s | 100 % | 79.2 % | 46 s |
-| CELL_OUTAGE | 205 | 100 % | 97.6 % | 88 s | 100 % | 100 % | 36 s |
-| **BACKHAUL_DEGRADATION** | 55 | 96.4 % | **5.5 %** | **618 s** | 100 % | 0 % | 1,020 s |
-| SITE_POWER_OUTAGE | 46 | 100 % | 97.8 % | 104 s | 100 % | 97.8 % | 145 s |
-| AGG_ROUTER_FAILURE | 30 | 100 % | 100 % | 0 s | 100 % | 100 % | 12 s |
-| AMF_OVERLOAD | 18 | 100 % | 100 % | 0 s | 100 % | 0 % | 509 s |
-| LONG_HAUL_FIBRE_CUT | 1 | 100 % | 100 % | 168 s | 100 % | 100 % | 228 s |
+### Dev set (seen during design: not a holdout)
 
-Model times are decision time minus impact start. The decision time is when all of a case's inputs had
-arrived. Step 2's live pipeline latency (median 39 s) and the scoring time come on top. Step 2's rollup times
-are a lower bound (MV refresh excluded).
+The last two days of `history_1m` (2026-10-14 … 10-15, n = 355). These were the "test" days of the first PR #4
+revision. They were inspected while the design was iterated: the cluster cases, the heuristic's filter,
+dropping class weights, and the nearby-alarm candidate fix, found on one of their cases. They are therefore
+reported only as **dev**. Model v4: top-1 94.1 % (heuristic, same cases 80.8 %), top-3 96.6 % (83.9 %); within
+5 min 83.7 %, median 93 s signed. Slow backhaul: 5.5 % within 5 min, median 618 s. Alert precision 93.3 %.
+The validation day (n = 158) chose the calibration and the threshold: top-1 92.4 % (75.9 %).
 
-**Slow backhaul degradation.** Of 55 held-out slowly worsening links, the model localises 3 (5.5 %) within 5 minutes of impact start; step 2 localises none. The median time to correct localisation is **618 s against 1,020 s** (about 6.7 minutes earlier), and 96.4 % are localised at all before the impact ends. Top-1 accuracy on them is 76.4 % (step 2: 34.5 %). The 5-minute target is still missed for almost all of them: in the first minutes of a 10-30 minute ramp the link's cells sit inside normal variation (see Known limits).
-
-**Secondary: alert-level fault precision** (step 2's definitions and code, test days). Model alerts (case top-1 >= threshold, grouped per element with the 10-minute gap): **442 alerts, 93.3 % real faults** (393 TP, 28 unexplained, 21 planned work suppressed by the change calendar). Step 2's detections on the same days: 12,827 alerts, 96.1 %. The model pages far less often, about one page per incident instead of one per impacted element, at slightly lower precision.
-
-**Live stream run** (2026-10-08, a different run, n = 26, censored excluded; out-of-run check, not
-used for any choice): model top-1 80.8 % vs step-2 baseline 53.8 %, top-3 84.6 % vs
-73.1 %.
-
-**Where the model does not beat the baseline.** Top-1: no fault type is worse. For router failures (93.3 %) and AMF overloads (100 %), where the heuristic is already right, the model only equals the heuristic on the same cases. Top-3 for site power outages is slightly below it (93.5 % vs 95.7 %). In the early-catch mode the model is **slower than step 2 for cell outages** (median 88 s vs 36 s; 97.6 % vs 100 % within 5 minutes). Step 2 localises a cell outage the moment the cell's own detection lands, while the model waits for its windows to become visible and for the calibrated score to clear the threshold. Alert-level precision is lower than step 2's (93.3 % vs 96.1 %). Most of the gain over the published baseline comes from the case framing: the heuristic on the same cases already reaches 76.1 %. The model adds +5.3 points top-1 and +8.4 points top-3 on top of it.
-
-**How clean the test split is.** The design was iterated locally on one region (WA) over all six days, with
-WA's validation and test metrics visible. That led to the cluster cases, the heuristic's filter and
-dropping class weights. After a first full run (model v2: top-1 50.4 %, top-3 84.8 % on the same test set),
-the endpoint smoke test, run on a held-out case, showed the nearby-alarm attachment bug described under
-*Candidates*. Fixing it gave the final v3. That fix came from reading one test case, not from tuning against
-test metrics, but it is a design change made after seeing test data, and it is disclosed here. Hyperparameters, features and the threshold rule were not tuned against any test
-number, and NSW, VIC and NQL test days (about 85 % of the test incidents) were not looked at before the final
-run. The WA share of the test set is therefore not fully pristine.
+**Live stream run** (2026-10-08, out-of-run check, n = 26, censored incidents not scored): model top-1 84.6 %,
+heuristic on the same cases 73.1 %, step 2 published 53.8 %.
 
 ## Serving
 
@@ -221,7 +263,7 @@ run. The WA share of the test set is therefore not fully pristine.
 | **Model Serving endpoint** `banksia-rca-ranker` | serverless, `Small`, **scale to zero**, serves the same UC version | on-demand scoring by the step-5 app or other tools (re-rank one case's candidates, what-if). Idle costs nothing; the first call after idle pays a cold start |
 
 The endpoint takes `dataframe_records` with the 55 feature columns (signature in UC) and returns
-`predict_proba` `[p(not root), p(root)]`. Rank a case's candidates by `p(root)`. A smoke test with a held-out
+`predict_proba` `[p(not root), p(root)]`. Rank a case's candidates by `p(root)`. A smoke test with a fresh-holdout
 backhaul case and its request / response is in `evidence/step3/04_serving_endpoint.md`. The endpoint pins a
 version (`rca_model_version` in `databricks.yml`, since served entities take a version, not an alias). After
 retraining, set it to the new `champion` version and redeploy.
@@ -250,7 +292,7 @@ root-cause score and the open incident the element is a suspect of.
 - **No secrets.** `notebooks/05_lakebase_check.py` connects with **psycopg** using a one-hour OAuth token from
   `generate_database_credential` and the job's own identity. It creates the database (`stage=setup`) and runs
   the read-latency check (`stage=check`). Nothing in the repo holds a password, token or connection string.
-- **Read latency** (from a serverless job, warm connection, 300 lookups each): PK lookup of `lb_element_status` p50 **3.4 ms**, p95 **10.3 ms**, p99 19.8 ms; open incidents of a region p50 3.1 ms / p95 8.8 ms; suspects joined to their status p50 3.1 ms / p95 6.9 ms (CU_1, 1,887 + 17 rows; `evidence/step3/05_lakebase.md`).
+- **Read latency** (from a serverless job, warm connection, 300 lookups each): PK lookup of `lb_element_status` p50 **2.9 ms**, p95 **9.8 ms**, p99 18.6 ms; open incidents of a region p50 2.7 ms / p95 6.9 ms; suspects joined to their status p50 2.4 ms / p95 8.6 ms (CU_1, 1,887 + 17 rows; `evidence/step3/05_lakebase.md`).
 
 ## Deploy and run
 
@@ -260,7 +302,10 @@ databricks bundle deploy -t dev -p febar
 
 databricks bundle run -p febar rca_generate_training_history   # 6 days of 1-minute labelled history
 databricks bundle run -p febar netmon_pipeline                  # step-2 pipeline over the new run
-databricks bundle run -p febar rca_train                        # features, MLflow, UC model, @champion, eval
+databricks bundle run -p febar rca_train                        # features, MLflow, UC model, @champion, val/dev eval
+databricks bundle run -p febar rca_generate_holdout             # fresh holdout (new seed, same network, later days)
+databricks bundle run -p febar netmon_pipeline                  # step-2 pipeline over the holdout
+databricks bundle run -p febar rca_evaluate_holdout             # frozen champion on the holdout, once
 databricks bundle run -p febar rca_lakebase_check --params stage=setup
 databricks bundle run -p febar rca_score_live                   # element_status / open_incidents (+ sync)
 # set rca_model_version to the champion version, then deploy again (endpoint + synced tables)
@@ -290,7 +335,13 @@ offline (`train.build_features` / `train.train_and_evaluate` run unchanged on a 
   a 1-minute cadence, schedule it every minute against the continuous pipeline or move the scoring into a
   streaming `foreachBatch`. The live run scored here is the step-2 `stream` run (2026-10-08). No new live
   stream was started for step 3.
-- **Threshold choice.** F1 on validation picked 0.31 (v2 picked 0.18). A NOC that wants fewer pages would
+- **Watermark tail.** The real-time 1-minute windows are append-only behind a 2-minute event-time watermark,
+  so a run's last minutes only appear once a later run's data moves the watermark. `history_1m` gained its last
+  4.2 k windows when the holdout was ingested; the holdout's own last minutes are still pending.
+- **Matching picks the judged case.** The per-incident numbers judge the matched case with the largest overlap
+  with the footprint. That is ground truth deciding *which* ranking to grade, never what is ranked. A NOC
+  seeing several clusters for one fault would still have to pick, and alert precision measures the pages it gets.
+- **Threshold choice.** F1 on validation picked 0.32 for v4. A NOC that wants fewer pages would
   choose by a precision target instead and accept later early catches. The curve is logged.
 
 ## Workspace limitations
