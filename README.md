@@ -65,3 +65,22 @@ planned work as false positives.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the architecture, tables, expectations policy, latency
 budget, governance model and run book, and [`evidence/step2/`](evidence/step2/) for the captured run.
+
+## Root-cause model, serving and Lakebase (step 3)
+
+A trained root-cause ranker (scikit-learn gradient boosting, not an LLM; `src/netmon_pipeline/rca/`) scores every
+candidate element of a customer-impact case using only what the NOC could see at that minute. It is trained on
+a 6-day 1-minute labelled run with a time-based split and tracked in MLflow. It is registered in Unity Catalog
+as `telco_netmon_febar_catalog.netmon_rca.rca_ranker@champion` and served on a serverless, scale-to-zero
+endpoint (`banksia-rca-ranker`). A scoring job publishes `element_status` and `open_incidents` (top-3
+suspects), which Lakebase synced tables copy into Postgres for the topology app.
+
+```bash
+databricks bundle run -p febar rca_generate_training_history && databricks bundle run -p febar netmon_pipeline
+databricks bundle run -p febar rca_train            # features, MLflow, UC model + champion, evaluation
+databricks bundle run -p febar rca_score_live       # element_status / open_incidents -> Lakebase
+databricks bundle run -p febar rca_lakebase_check   # psycopg + OAuth read-latency check
+```
+
+See [`docs/rca_model.md`](docs/rca_model.md) for features, labels, split, model choice, results against the
+step-2 localiser, serving and the Lakebase design, and [`evidence/step3/`](evidence/step3/) for the captured run.

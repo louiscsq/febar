@@ -96,7 +96,7 @@ def training(r: Runner, w, run: dict) -> None:
     d.query("Feature importance (permutation, average precision, validation sample)", f"""
         SELECT feature, round(importance_mean, 5) AS importance_mean, round(importance_std, 5) AS importance_std
         FROM {R}.rca_feature_importance ORDER BY importance_mean DESC LIMIT 25""")
-    d.query("Alert threshold curve (validation days only)", f"""
+    d.query("Validation-day alert-level precision at the chosen threshold", f"""
         SELECT * FROM {R}.rca_eval_val_alert_precision""",
             "The threshold itself was chosen by validation F1 on case top-1 (threshold_curve.csv artifact); this is the "
             "validation alert-level precision at that threshold.")
@@ -215,9 +215,9 @@ def serving(r: Runner, w, run: dict) -> None:
     for z in ranked:
         z["is_root (ground truth)"], z["batch_score (training job)"] = batch.get(z["element_id"], (None, None))
     d.code("Candidates ranked by endpoint p(root), with the ground truth and the training job's batch score", ranked,
-           "The endpoint and the batch scoring in the job give the same calibrated scores (same UC version). This "
-           "case holds two concurrent incidents in one cluster (a cell outage under a degrading link), so both "
-           "top-2 elements are true roots.")
+           "The endpoint and the batch scoring in the job give the same calibrated scores (same UC version). "
+           f"True roots among this case's candidates: {[z['element_id'] for z in ranked if batch.get(z['element_id'], (None,))[0] in (True, 'true')]}; "
+           f"endpoint top-1: `{ranked[0]['element_id']}`.")
     d.text("Latency from this laptop (client side, includes internet round trip)",
            f"- first call: {cold_ms:.0f} ms (may include a scale-from-zero start)\n"
            f"- 20 warm single-record calls: p50 {statistics.median(lat):.0f} ms, max {max(lat):.0f} ms")
