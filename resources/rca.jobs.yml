@@ -48,6 +48,7 @@ resources:
         - {name: live_run, default: stream}
         - {name: model_name, default: rca_ranker}
         - {name: experiment, default: /Shared/banksia_netmon/rca_ranker}
+        - {name: rebuild_features, default: "true"}
       environments: &rca_ml_envs
         - environment_key: rca
           spec:

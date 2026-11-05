@@ -25,6 +25,7 @@ dbutils.widgets.text("val_days", "1")
 dbutils.widgets.text("live_run", "stream")
 dbutils.widgets.text("model_name", "rca_ranker")
 dbutils.widgets.text("experiment", "/Shared/banksia_netmon/rca_ranker")
+dbutils.widgets.dropdown("rebuild_features", "true", ["true", "false"], "Rebuild features (false: reuse the table)")
 
 # COMMAND ----------
 
@@ -48,7 +49,7 @@ from netmon_pipeline.rca.features import FEATURE_COLUMNS, ID_COLUMNS
 from netmon_pipeline.rca.sources import queries
 
 w = {k: dbutils.widgets.get(k) for k in ["catalog", "rca_schema", "train_run", "train_start", "train_days",
-                                          "val_days", "live_run", "model_name", "experiment"]}
+                                          "val_days", "live_run", "model_name", "experiment", "rebuild_features"]}
 CAT, SCH = w["catalog"], w["rca_schema"]
 FQ = f"`{CAT}`.`{SCH}`"
 MODEL = f"{CAT}.{SCH}.{w['model_name']}"
@@ -82,7 +83,7 @@ def to_delta(df: pd.DataFrame, name: str, comment: str) -> None:
     millions of rows."""
     os.makedirs(SCRATCH, exist_ok=True)
     path = f"{SCRATCH}/{name}.parquet"
-    df.to_parquet(path, index=False)
+    df.to_parquet(path, index=False, coerce_timestamps="us", allow_truncated_timestamps=True)
     sdf = spark.read.parquet(path)
     sdf.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{FQ}.{name}")
     spark.sql(f"COMMENT ON TABLE {FQ}.{name} IS {json.dumps(comment)}")
@@ -102,8 +103,13 @@ def flat(df: pd.DataFrame) -> pd.DataFrame:
 
 # COMMAND ----------
 
-load = loader(w["train_run"])
-feats = train.build_features(load, regions())
+t0 = time.time()
+if w["rebuild_features"] == "true" or not spark.catalog.tableExists(f"{FQ}.rca_candidate_features"):
+    feats = train.build_features(loader(w["train_run"]), regions())
+    print(f"features built in {time.time() - t0:.0f} s")
+else:
+    feats = spark.read.table(f"{FQ}.rca_candidate_features").toPandas()
+    print(f"features reused from the table ({len(feats)} rows) in {time.time() - t0:.0f} s")
 to_delta(feats[ID_COLUMNS + FEATURE_COLUMNS], "rca_candidate_features",
          "Detection-time candidate features per (case = run x region x 1-minute decision time, element). Built only "
          "from real-time tables (gold_cell_health_1m on-time windows, silver_alarms by arrival, topology, change "

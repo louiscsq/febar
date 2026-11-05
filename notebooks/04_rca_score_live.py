@@ -120,7 +120,8 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {FQ}.scratch COMMENT 'Staging Parquet fo
 os.makedirs(f"/Volumes/{CAT}/{SCH}/scratch/live", exist_ok=True)
 _p = f"/Volumes/{CAT}/{SCH}/scratch/live/scores.parquet"
 scored[["source_run", "decision_ts", "region_code", "case_id", "element_id", "element_type", "feature_evidence_ts",
-        *FEATURE_COLUMNS, "score"]].assign(model_version=str(mv.version)).to_parquet(_p, index=False)
+        *FEATURE_COLUMNS, "score"]].assign(model_version=str(mv.version)).to_parquet(
+    _p, index=False, coerce_timestamps="us", allow_truncated_timestamps=True)
 spark.read.parquet(_p).write.mode("append").option("mergeSchema", "true").saveAsTable(f"{FQ}.rca_live_scores")
 
 # COMMAND ----------

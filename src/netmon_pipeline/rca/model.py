@@ -20,7 +20,10 @@ from netmon_pipeline.rca.features import FEATURE_COLUMNS, LABEL_COLUMNS
 
 PARAMS = {
     "learning_rate": 0.05, "max_iter": 400, "max_leaf_nodes": 31, "min_samples_leaf": 40, "l2_regularization": 1.0,
-    "class_weight": "balanced", "early_stopping": False, "random_state": 7,
+    # No class weighting: positives are ~4 % of candidates, the ranking only needs an ordering, and isotonic
+    # calibration on the validation days fixes the probabilities. (class_weight also makes sklearn's HGB ~20x
+    # slower, through its sample-weight path.)
+    "early_stopping": False, "random_state": 7,
 }
 
 
