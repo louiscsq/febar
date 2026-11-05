@@ -35,6 +35,10 @@ resources:
       catalog_name: ${var.catalog}
       name: ${var.rca_schema}
       comment: Step 3 root-cause ranking - detection-time features, model scores, the UC-registered ranker, and the Delta sources (element_status, open_incidents) synced to Lakebase.
+    netmon_genai:
+      catalog_name: ${var.catalog}
+      name: ${var.genai_schema}
+      comment: Step 4 Gen AI NOC assistant - grounded incident contexts, structured root-cause summaries and customer SMS drafts (status = draft, human approval required, never sent), their evaluation, and the AI Gateway inference table of the assistant endpoint. No PII, no ground truth in any prompt.
 
   volumes:
     landing:

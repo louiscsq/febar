@@ -71,6 +71,10 @@ variables:
     default: banksia-netmon-lakebase
   lakebase_database:
     default: netmon_serving
+  # Step 4 (Gen AI NOC assistant + customer SMS drafts)
+  genai_schema:
+    description: Gen AI assistant outputs (summaries, SMS drafts), evaluation set and the AI Gateway inference table
+    default: netmon_genai
   rca_model_version:
     description: UC model version served by the endpoint (the one the `champion` alias points at)
     default: "4"
