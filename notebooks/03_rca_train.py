@@ -73,8 +73,17 @@ def regions():
                                     "ORDER BY 1").collect()]
 
 
+SCRATCH = f"/Volumes/{CAT}/{SCH}/scratch/train"
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {FQ}.scratch COMMENT 'Staging Parquet for pandas -> Delta writes'")
+
+
 def to_delta(df: pd.DataFrame, name: str, comment: str) -> None:
-    sdf = spark.createDataFrame(df)
+    """pandas -> Parquet in a UC Volume -> Delta: much faster than createDataFrame over Spark Connect for
+    millions of rows."""
+    os.makedirs(SCRATCH, exist_ok=True)
+    path = f"{SCRATCH}/{name}.parquet"
+    df.to_parquet(path, index=False)
+    sdf = spark.read.parquet(path)
     sdf.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{FQ}.{name}")
     spark.sql(f"COMMENT ON TABLE {FQ}.{name} IS {json.dumps(comment)}")
 

@@ -7,8 +7,6 @@ Runs a local SparkSession (pyspark + a Java 17/21 runtime). Skipped only if pysp
 from __future__ import annotations
 
 import ast
-import os
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,32 +25,6 @@ HEALTHY = {"availability_pct": 100.0, "active_users": 20.0, "prb_util_pct": 40.0
            "ul_throughput_mbps": 10.0, "latency_ms": 30.0, "packet_loss_pct": 0.2}
 METRICS = list(HEALTHY)
 ANC = ["site_id"]
-
-
-def _java_home():
-    for p in ("/opt/homebrew/opt/openjdk@17", "/opt/homebrew/Cellar/openjdk@17", "/usr/lib/jvm/java-17-openjdk-amd64",
-              "/usr/lib/jvm/java-17-openjdk-arm64"):
-        for cand in sorted(Path(p).glob("**/Contents/Home")) if Path(p).exists() and "Cellar" in p else [Path(p)]:
-            if (cand / "bin" / "java").exists():
-                return str(cand)
-    return None
-
-
-@pytest.fixture(scope="module")
-def spark():
-    jh = _java_home()
-    if jh and "JAVA_HOME" not in os.environ:
-        os.environ["JAVA_HOME"] = jh
-    # pyspark returns naive datetimes in the process time zone: pin it to UTC
-    os.environ["TZ"] = "UTC"
-    time.tzset()
-    from pyspark.sql import SparkSession
-
-    s = (SparkSession.builder.master("local[1]").appName("netmon-windows-test")
-         .config("spark.sql.session.timeZone", "UTC").config("spark.ui.enabled", "false")
-         .config("spark.sql.shuffle.partitions", "1").getOrCreate())
-    yield s
-    s.stop()
 
 
 def kpi(event_ts, emitted_ts, availability, cell="CELL-A"):

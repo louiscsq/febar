@@ -60,6 +60,10 @@ variables:
     default: "2026-10-10"
   rca_train_days:
     default: "6"
+  lakebase_instance:
+    default: banksia-netmon-lakebase
+  lakebase_database:
+    default: netmon_serving
 
 targets:
   dev:

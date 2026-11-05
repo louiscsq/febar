@@ -64,3 +64,39 @@ resources:
           timeout_seconds: 7200
           notebook_task:
             notebook_path: ../notebooks/03_rca_train.py
+
+    # Score the live run with the champion, publish element_status / open_incidents, trigger the Lakebase sync.
+    rca_score_live:
+      name: banksia-rca-score-live
+      max_concurrent_runs: 1
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: live_run, default: stream}
+        - {name: model_name, default: rca_ranker}
+        - {name: lookback_minutes, default: "120"}
+        - {name: history_minutes, default: "60"}
+        - {name: sync_lakebase, default: "true"}
+      environments: *rca_ml_envs
+      tasks:
+        - task_key: score
+          environment_key: rca
+          notebook_task:
+            notebook_path: ../notebooks/04_rca_score_live.py
+
+    # Lakebase: create the serving database (stage=setup) / read-latency check with psycopg + OAuth (stage=check).
+    rca_lakebase_check:
+      name: banksia-rca-lakebase-check
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: instance, default: "${resources.database_instances.netmon_lakebase.name}"}
+        - {name: database, default: "${var.lakebase_database}"}
+        - {name: stage, default: check}
+        - {name: n_lookups, default: "300"}
+      environments: *rca_ml_envs
+      tasks:
+        - task_key: lakebase
+          environment_key: rca
+          notebook_task:
+            notebook_path: ../notebooks/05_lakebase_check.py
