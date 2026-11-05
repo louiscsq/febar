@@ -1,0 +1,62 @@
+# Banksia Mobile NOC: streaming network monitoring on Databricks (Lakeflow + Unity Catalog).
+# Deploy: databricks bundle deploy -t dev    Run: see docs/pipeline.md ("Deploy and run").
+bundle:
+  name: banksia_netmon
+
+include:
+  - resources/*.yml
+
+artifacts:
+  # One wheel with the synthetic data generator (netmon_datagen) and the pipeline helpers (netmon_pipeline),
+  # installed into the serverless job environments.
+  netmon_wheel:
+    type: whl
+    path: .
+    build: uv build --wheel
+
+sync:
+  exclude:
+    - evidence/**
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for every schema of the project
+  schema:
+    description: Landing schema holding the raw-data Volume
+    default: netmon_raw
+  volume:
+    description: Landing Volume the generators write into (one sub-directory per generator run)
+    default: landing
+  bronze_schema:
+    default: netmon_bronze
+  silver_schema:
+    default: netmon_silver
+  gold_schema:
+    default: netmon_gold
+  eval_schema:
+    description: Ground truth and evaluation (kept apart from the feature tables)
+    default: netmon_eval
+  noc_schema:
+    description: Region-filtered serving views for the regional NOC groups
+    default: netmon_noc
+  gov_schema:
+    description: Governance objects (mask / row-filter functions)
+    default: netmon_gov
+  pipeline_continuous:
+    description: Run the pipeline continuously (live demo, lowest latency) instead of triggered
+    default: false
+  history_scale:
+    default: small
+  history_days:
+    default: "14"
+
+targets:
+  dev:
+    # Not `mode: development`: that would prefix the UC schema names per user, and the governance SQL and
+    # the downstream steps (ML, Lakebase, Genie, App) address the schemas by their plain names.
+    default: true
+    workspace:
+      profile: febar
+      host: https://fevm-telco-netmon-febar.cloud.databricks.com
+    variables:
+      catalog: telco_netmon_febar_catalog
