@@ -89,8 +89,11 @@ def label(features: pd.DataFrame, gt: pd.DataFrame) -> pd.DataFrame:
     roots = faults.explode("roots")[["source_run", "case_id", "roots"]].drop_duplicates() \
         .rename(columns={"roots": "element_id"}).assign(is_root=True)
     ids = faults.groupby(CASE_KEYS)["incident_id"].agg(lambda s: sorted(set(s))).rename("incident_ids")
+    # every matched incident of any class (faults, censored, planned, red herrings): used by the split embargo
+    all_ids = m.groupby(CASE_KEYS)["incident_id"].agg(lambda s: sorted(set(s))).rename("matched_incident_ids")
     out = features.merge(case_label.reset_index(), on=CASE_KEYS, how="left") \
         .merge(ids.reset_index(), on=CASE_KEYS, how="left") \
+        .merge(all_ids.reset_index(), on=CASE_KEYS, how="left") \
         .merge(roots, on=["source_run", "case_id", "element_id"], how="left")
     out["case_label"] = out["case_label"].fillna("none")
     out["is_root"] = out["is_root"].fillna(False).astype(bool)

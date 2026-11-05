@@ -1,22 +1,30 @@
 """Evaluation of the root-cause ranker against ground truth, side by side with the step-2 localiser.
 
-Primary measures (on the held-out time split, scored incidents only: customer-impacting, uncensored faults):
+Two stages, and ground truth only enters the second:
 
-- **top-1 / top-3 accuracy** (`rank_incidents`): the cases attributed to the incident (labels.py: its
-  footprint contains one of the case's impacted cells), decision times in the first 15 minutes of impact
-  (from 5 minutes before, step 2's `eval_rca_baseline` window), each candidate ranked by its highest score
-  in that span. Step 2's heuristic is reported both as published (`eval_rca_baseline`, region-wide) and on
-  exactly the same cases (`heuristic_score`), so the model's gain is separated from the case framing. A hit when the incident's valid root-cause list
-  contains the top-ranked element (top-1) or one of the top three (top-3).
-- **early catch** (`early_catch`): the model scores every 1-minute decision time; an incident is localised
-  at the first decision time whose top-1 element is a valid root **and** whose calibrated score is at least
-  the alert threshold chosen on the validation days. Reported as the share localised within 5 minutes of
-  impact start and the median time to correct localisation.
+1. **Score (GT-free).** `case_outputs` turns the scored candidate rows of every case into what the live scorer
+   publishes: per case and 1-minute decision time, the ranked top-k elements with their scores, plus the case's
+   own evidence (its impacted cells and service-down-alarmed elements). It reads only the ID and feature
+   columns and the score; label columns are dropped before anything is ranked (tested: removing or permuting
+   them changes nothing). The step-2 heuristic is turned into outputs from exactly the same cases.
+2. **Match (after scoring).** `match_outputs` attributes outputs to ground-truth incidents: same run and
+   region, decision time in the incident's window, and case evidence overlapping the incident footprint. Per
+   incident and decision time the *primary* output is the matched case with the largest overlap. Matching only
+   picks which already-ranked outputs belong to an incident; it never adds, removes or re-ranks candidates.
 
-Secondary (reported, never optimised): **alert-level fault precision** (`alert_precision`). Model alerts are
-top-1 elements above the threshold; they are grouped and labelled with step 2's own definitions
-(`netmon_pipeline.scoring`: `label_detection`, `alerts`, `alert_label`, `fault_precision`), and the same code
-scores the step-2 detections of the same period.
+Primary measures (scored incidents: customer-impacting, uncensored faults):
+
+- **top-1 / top-3** (`rank_incidents`): the primary output at the first decision time at least 5 minutes after
+  impact start (the SLA moment) that has a matched output, looking up to 15 minutes after impact start. A hit
+  when the incident's valid root list contains its top-1 / one of its top-3.
+- **early catch** (`early_catch`): over every 1-minute decision time from 5 minutes before impact start to
+  impact end, the first time the primary output's top-1 is a valid root **and** its score is at least the
+  validation-chosen threshold. Times are signed (`decision_ts - impact_start_ts`): a catch before the impact
+  starts is negative and counted separately, never clipped to 0.
+
+Secondary (reported, never optimised): **alert-level fault precision** (`alert_precision`): case top-1 elements
+at or above the threshold, grouped and labelled with step 2's own definitions (`netmon_pipeline.scoring`); the
+same code scores the step-2 detections of the same period.
 """
 
 from __future__ import annotations
@@ -25,77 +33,143 @@ import numpy as np
 import pandas as pd
 
 from netmon_pipeline import scoring
+from netmon_pipeline.rca.features import FEATURE_COLUMNS, ID_COLUMNS
 
-RANK_PRE = pd.Timedelta(minutes=5)
-RANK_POST = pd.Timedelta(minutes=15)
-CATCH_PRE = pd.Timedelta(minutes=10)
-
-
-class _Index:
-    """Scored candidate rows sorted per (source_run, region) for fast time slicing."""
-
-    def __init__(self, scored: pd.DataFrame):
-        self.groups = {}
-        for key, g in scored.sort_values("decision_ts").groupby(["source_run", "region_code"], sort=False):
-            self.groups[key] = (g, g["decision_ts"].to_numpy())
-
-    def slice(self, run, region, lo, hi) -> pd.DataFrame:
-        g = self.groups.get((run, region))
-        if g is None:
-            return pd.DataFrame()
-        df, ts = g
-        a = np.searchsorted(ts, _np(lo, ts), side="left")
-        b = np.searchsorted(ts, _np(hi, ts), side="left")
-        return df.iloc[a:b]
+SNAPSHOT_AFTER = pd.Timedelta(minutes=5)
+SNAPSHOT_LIMIT = pd.Timedelta(minutes=15)
+CATCH_PRE = pd.Timedelta(minutes=5)
+CASE_KEYS = ["source_run", "case_id"]
 
 
-def _np(t: pd.Timestamp, like: np.ndarray):
-    if like.dtype == object:
-        return t
-    return np.datetime64(t.tz_convert("UTC").tz_localize(None), "ns") if t.tzinfo else np.datetime64(t, "ns")
+# ---------------------------------------------------------------------------------------------------
+# Stage 1: GT-free outputs
+# ---------------------------------------------------------------------------------------------------
+
+def heuristic_score(df: pd.DataFrame) -> pd.Series:
+    """Step 2's topology heuristic (eval_rca_baseline) as a score on the same candidates: elements passing its
+    filter (>= 80 % of descendant cells impacted, or a service-down alarm) first, then most impacted descendant
+    cells, then higher in the tree."""
+    ok = (df["impacted_fraction"] >= 0.8) | (df["n_service_down_alarms"] > 0)
+    return ok.astype(float) * 1e6 + df["n_impacted_cells"].astype(float) - 0.001 * df["level"].astype(float)
+
+
+def case_outputs(scored: pd.DataFrame, score: str = "score", k: int = 3) -> pd.DataFrame:
+    """Per (source_run, case_id): decision_ts, region_code, top-k elements / types / scores (ranked by `score`,
+    ties by element_id) and the case's evidence elements. Only ID / feature columns and `score` are read."""
+    cols = list(dict.fromkeys([*ID_COLUMNS, *FEATURE_COLUMNS, score]))
+    x = scored[cols].sort_values([*CASE_KEYS, score, "element_id"], ascending=[True, True, False, True],
+                                 kind="stable")
+    x["_rank"] = x.groupby(CASE_KEYS, sort=False).cumcount()
+    top = x[x["_rank"] < k]
+    g = top.groupby(CASE_KEYS, sort=False)
+    out = g.agg(decision_ts=("decision_ts", "first"), region_code=("region_code", "first"),
+                top_elements=("element_id", list), top_types=("element_type", list), top_scores=(score, list))
+    out["top1_element"] = out["top_elements"].str[0]
+    out["top1_score"] = out["top_scores"].str[0]
+    ev = x[((x["level"] == 5) & (x["n_impacted_cells"] > 0)) | (x["n_service_down_alarms"] > 0)]
+    out = out.join(ev.groupby(CASE_KEYS)["element_id"].agg(list).rename("evidence"))
+    out["evidence"] = out["evidence"].map(lambda v: v if isinstance(v, list) else [])
+    out["n_candidates"] = x.groupby(CASE_KEYS, sort=False).size()
+    return out.reset_index()
+
+
+# ---------------------------------------------------------------------------------------------------
+# Stage 2: matching outputs to ground truth (after scoring)
+# ---------------------------------------------------------------------------------------------------
+
+def match_outputs(outputs: pd.DataFrame, incidents: pd.DataFrame) -> pd.DataFrame:
+    """(incident, case output) pairs: same run and region, decision time in [impact_start - 5 min,
+    impact_end + 10 min], case evidence overlapping the footprint. `overlap` = shared elements."""
+    inc = incidents[incidents["is_scored"]]
+    fp = inc[["source_run", "incident_id", "region_code", "footprint", "match_from", "match_to"]] \
+        .explode("footprint").rename(columns={"footprint": "element_id"})
+    ev = outputs[["source_run", "case_id", "region_code", "decision_ts", "evidence"]].explode("evidence") \
+        .rename(columns={"evidence": "element_id"}).dropna(subset=["element_id"])
+    m = ev.merge(fp, on=["source_run", "region_code", "element_id"])
+    m = m[(m["decision_ts"] >= m["match_from"]) & (m["decision_ts"] <= m["match_to"])]
+    m = m.groupby(["source_run", "incident_id", "case_id", "decision_ts"]).size().rename("overlap").reset_index()
+    return m.merge(outputs.drop(columns=["region_code", "decision_ts", "evidence"]), on=CASE_KEYS)
+
+
+def primary_outputs(matches: pd.DataFrame) -> pd.DataFrame:
+    """Per (incident, decision time) the matched output with the largest overlap (ties: more candidates,
+    then case_id), so an incident split over several cases is judged on one ranking per minute."""
+    m = matches.sort_values(["source_run", "incident_id", "decision_ts", "overlap", "n_candidates", "case_id"],
+                            ascending=[True, True, True, False, False, True])
+    return m.drop_duplicates(["source_run", "incident_id", "decision_ts"])
 
 
 def _scored_incidents(inc: pd.DataFrame) -> pd.DataFrame:
     return inc[inc["is_scored"]]
 
 
-def _cases_by_incident(scored: pd.DataFrame) -> dict[tuple, set]:
-    """(source_run, incident_id) -> case_ids attributed to it (labels.label's `incident_ids`)."""
-    c = scored[["source_run", "case_id", "incident_ids"]].drop_duplicates("case_id")
-    c = c[c["incident_ids"].map(lambda v: isinstance(v, list | np.ndarray) and len(v) > 0)].explode("incident_ids")
-    out: dict[tuple, set] = {}
-    for run, case, inc in zip(c["source_run"], c["case_id"], c["incident_ids"], strict=True):
-        out.setdefault((run, inc), set()).add(case)
-    return out
-
-
-def heuristic_score(df: pd.DataFrame) -> pd.Series:
-    """Step 2's topology heuristic (eval_rca_baseline) as a score: most impacted descendant cells first, then
-    higher in the tree. Used to rank the *same* cases as the model."""
-    ok = (df["impacted_fraction"] >= 0.8) | (df["n_service_down_alarms"] > 0)  # eval_rca_baseline's filter
-    return (df["n_impacted_cells"].astype(float) - 0.001 * df["level"].astype(float)).where(ok, -np.inf)
-
-
-def rank_incidents(scored: pd.DataFrame, inc: pd.DataFrame, k: int = 3, score: str = "score") -> pd.DataFrame:
-    """Per scored incident: top-k candidates by max `score` over the cases attributed to the incident with
-    decision times in [impact_start - 5 min, impact_start + 15 min) (step 2's baseline window)."""
-    idx = _Index(scored)
-    by_inc = _cases_by_incident(scored)
+def rank_incidents(outputs: pd.DataFrame, incidents: pd.DataFrame) -> pd.DataFrame:
+    """Per scored incident: the primary output at the first decision time >= impact_start + 5 min (up to + 15
+    min) and whether its top-1 / top-3 contains a valid root."""
+    prim = primary_outputs(match_outputs(outputs, incidents))
+    prim = prim.merge(incidents[["source_run", "incident_id", "impact_start_ts"]], on=["source_run", "incident_id"])
+    prim = prim[(prim["decision_ts"] >= prim["impact_start_ts"] + SNAPSHOT_AFTER)
+                & (prim["decision_ts"] <= prim["impact_start_ts"] + SNAPSHOT_LIMIT)]
+    first = prim.sort_values("decision_ts").drop_duplicates(["source_run", "incident_id"]) \
+        .set_index(["source_run", "incident_id"])
     rows = []
-    for r in _scored_incidents(inc).itertuples(index=False):
-        s = idx.slice(r.source_run, r.region_code, r.impact_start_ts - RANK_PRE, r.impact_start_ts + RANK_POST)
-        if not s.empty:
-            s = s[s["case_id"].isin(by_inc.get((r.source_run, r.incident_id), set()))]
-        roots = set(r.roots)
-        if s.empty:
-            top, n_cases, in_cand = [], 0, False
-        else:
-            best = s.groupby("element_id")[score].max().sort_values(ascending=False, kind="stable")
-            top, n_cases, in_cand = list(best.index[:k]), s["case_id"].nunique(), bool(roots & set(best.index))
+    for r in _scored_incidents(incidents).itertuples(index=False):
+        roots = sorted(r.roots)
+        key = (r.source_run, r.incident_id)
+        o = first.loc[key] if key in first.index else None
+        top = list(o["top_elements"]) if o is not None else []
         rows.append({"source_run": r.source_run, "incident_id": r.incident_id, "fault_type": r.fault_type,
-                     "root_element_ids": sorted(roots), "top_candidates": top, "n_cases": n_cases,
-                     "root_in_candidates": in_cand, "hit_at_1": scoring.rca_hit(top, sorted(roots), 1),
-                     "hit_at_3": scoring.rca_hit(top, sorted(roots), 3)})
+                     "root_element_ids": roots, "case_id": None if o is None else o["case_id"],
+                     "evaluated_at_s": None if o is None else (o["decision_ts"] - r.impact_start_ts).total_seconds(),
+                     "top_candidates": top, "has_output": o is not None,
+                     "hit_at_1": scoring.rca_hit(top, roots, 1), "hit_at_3": scoring.rca_hit(top, roots, 3)})
+    return pd.DataFrame(rows)
+
+
+def early_catch(outputs: pd.DataFrame, incidents: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    """Per scored incident: first decision time in [impact_start - 5 min, impact_end] whose primary output's
+    top-1 is a valid root with score >= threshold. `localisation_s` is signed (negative = before impact)."""
+    prim = primary_outputs(match_outputs(outputs, incidents))
+    inc = _scored_incidents(incidents).set_index(["source_run", "incident_id"])
+    rows = []
+    groups = dict(tuple(prim.groupby(["source_run", "incident_id"]))) if len(prim) else {}
+    for key, r in inc.iterrows():
+        end = r["impact_end_ts"] if pd.notna(r["impact_end_ts"]) else r["end_ts"]
+        g = groups.get(key)
+        t = pd.NaT
+        if g is not None:
+            g = g[(g["decision_ts"] >= r["impact_start_ts"] - CATCH_PRE) & (g["decision_ts"] <= end)]
+            hit = g[g["top1_element"].isin(set(r["roots"])) & (g["top1_score"] >= threshold)]
+            t = hit["decision_ts"].min() if len(hit) else pd.NaT
+        s = (t - r["impact_start_ts"]).total_seconds() if pd.notna(t) else None
+        rows.append({"source_run": key[0], "incident_id": key[1], "fault_type": r["fault_type"],
+                     "impact_start_ts": r["impact_start_ts"], "localised_ts": t, "localisation_s": s,
+                     "localised": s is not None, "pre_impact": s is not None and s < 0,
+                     "within_5min": s is not None and s <= scoring.SLA_S})
+    return pd.DataFrame(rows)
+
+
+def catch_summary(catch: pd.DataFrame, step2: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Per fault type: localised %, within 5 min % (signed time <= 300 s, pre-impact included), pre-impact
+    count, median signed time; plus step 2's published localisation (clipped at 0 by step 2) when given."""
+    c = catch.copy()
+    if step2 is not None:
+        c = c.merge(step2[["incident_id", "localisation_ttd_s", "localised_within_sla"]].rename(
+            columns={"localisation_ttd_s": "step2_localisation_s", "localised_within_sla": "step2_within_5min"}),
+            on="incident_id", how="left")
+        c["step2_within_5min"] = c["step2_within_5min"].fillna(False).astype(bool)
+    rows = []
+    for ft, g in [("ALL", c), *c.groupby("fault_type")]:
+        row = {"fault_type": ft, "n": len(g),
+               "model_localised_pct": round(100 * g["localised"].mean(), 1),
+               "model_within_5min_pct": round(100 * g["within_5min"].mean(), 1),
+               "model_pre_impact_n": int(g["pre_impact"].sum()),
+               "model_median_signed_s": median_or_none(g["localisation_s"])}
+        if step2 is not None:
+            row.update({"step2_localised_pct": round(100 * g["step2_localisation_s"].notna().mean(), 1),
+                        "step2_within_5min_pct": round(100 * g["step2_within_5min"].mean(), 1),
+                        "step2_median_s": median_or_none(g["step2_localisation_s"])})
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -103,26 +177,6 @@ def case_top1(scored: pd.DataFrame) -> pd.DataFrame:
     """The highest-scoring candidate of every case."""
     i = scored.groupby(["source_run", "case_id"])["score"].idxmax()
     return scored.loc[i.to_numpy()]
-
-
-def early_catch(scored: pd.DataFrame, inc: pd.DataFrame, threshold: float) -> pd.DataFrame:
-    """Per scored incident: first decision time whose top-1 is a valid root with score >= threshold."""
-    top = case_top1(scored)
-    idx = _Index(top)
-    by_inc = _cases_by_incident(scored)
-    rows = []
-    for r in _scored_incidents(inc).itertuples(index=False):
-        end = r.impact_end_ts if pd.notna(r.impact_end_ts) else r.end_ts
-        s = idx.slice(r.source_run, r.region_code, r.impact_start_ts - CATCH_PRE, end + pd.Timedelta(minutes=1))
-        if not s.empty:
-            s = s[s["case_id"].isin(by_inc.get((r.source_run, r.incident_id), set()))]
-        hit = s[s["element_id"].isin(set(r.roots)) & (s["score"] >= threshold)] if not s.empty else s
-        t = hit["decision_ts"].min() if not hit.empty else pd.NaT
-        ttl = max(0.0, (t - r.impact_start_ts).total_seconds()) if pd.notna(t) else None
-        rows.append({"source_run": r.source_run, "incident_id": r.incident_id, "fault_type": r.fault_type,
-                     "impact_start_ts": r.impact_start_ts, "localised_ts": t, "localisation_s": ttl,
-                     "within_5min": ttl is not None and ttl <= scoring.SLA_S})
-    return pd.DataFrame(rows)
 
 
 def _matched_labels(dets: pd.DataFrame, gt: pd.DataFrame) -> pd.Series:

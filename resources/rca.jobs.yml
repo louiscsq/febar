@@ -70,7 +70,6 @@ resources:
         - {name: train_start, default: "${var.rca_train_start}"}
         - {name: train_days, default: "3"}
         - {name: val_days, default: "1"}
-        - {name: live_run, default: stream}
         - {name: model_name, default: rca_ranker}
         - {name: experiment, default: /Shared/banksia_netmon/rca_ranker}
         - {name: rebuild_features, default: "true"}
@@ -126,3 +125,21 @@ resources:
           environment_key: rca
           notebook_task:
             notebook_path: ../notebooks/05_lakebase_check.py
+
+    # Frozen champion on the fresh holdout run (evaluated once) and the live run: GT-free scoring, then matching.
+    rca_evaluate_holdout:
+      name: banksia-rca-evaluate-holdout
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: holdout_run, default: "${var.rca_holdout_run}"}
+        - {name: live_run, default: stream}
+        - {name: model_name, default: rca_ranker}
+        - {name: experiment, default: /Shared/banksia_netmon/rca_ranker}
+      environments: *rca_ml_envs
+      tasks:
+        - task_key: evaluate
+          environment_key: rca
+          timeout_seconds: 7200
+          notebook_task:
+            notebook_path: ../notebooks/06_rca_evaluate_holdout.py

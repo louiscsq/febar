@@ -29,10 +29,12 @@ PARAMS = {
 
 @dataclass(frozen=True)
 class TimeSplit:
-    """Train on earlier days, choose the calibration and threshold on the next day(s), test on the last."""
+    """Train on the earlier days, calibrate and choose the alert threshold on the next day ("val"); the last
+    days of the training run are a development set ("dev", seen during design, so not a holdout). The held-out
+    result comes from a separate, later run (`holdout_1m`)."""
 
     val_start: pd.Timestamp
-    test_start: pd.Timestamp
+    dev_start: pd.Timestamp
 
     @classmethod
     def by_days(cls, t0: pd.Timestamp, train_days: int, val_days: int) -> TimeSplit:
@@ -40,22 +42,25 @@ class TimeSplit:
         return cls(t0 + pd.Timedelta(days=train_days), t0 + pd.Timedelta(days=train_days + val_days))
 
     def split_of(self, ts: pd.Series) -> pd.Series:
-        return pd.Series(np.select([ts < self.val_start, ts < self.test_start], ["train", "val"], "test"),
+        return pd.Series(np.select([ts < self.val_start, ts < self.dev_start], ["train", "val"], "dev"),
                          index=ts.index)
 
     def assign(self, labelled: pd.DataFrame, incidents: pd.DataFrame) -> pd.DataFrame:
-        """`split` per candidate row by decision time, with an embargo: a row matched to an incident that
-        starts in a later split is dropped, so no incident is seen in two splits."""
+        """`split` per candidate row by decision time, with an incident embargo: every incident (any class)
+        belongs wholly to the split in which it starts (impact start, else root-cause start), and every row
+        matched to it outside that split is dropped. So an incident that starts in train and runs on into val
+        contributes no val rows, and one that starts in val contributes no dev rows (and vice versa)."""
         out = labelled.copy()
         out["split"] = self.split_of(out["decision_ts"])
-        start = incidents.set_index(["source_run", "incident_id"])["impact_start_ts"]
-        inc_split = self.split_of(start.reset_index(drop=True)).set_axis(start.index)
-        order = {"train": 0, "val": 1, "test": 2}
-        ex = out[["source_run", "incident_ids", "split"]].explode("incident_ids").dropna(subset=["incident_ids"])
-        inc_rank = pd.Series([order[x] for x in inc_split.to_numpy()], index=inc_split.index)
-        later = pd.Series(list(zip(ex["source_run"], ex["incident_ids"], strict=True)), index=ex.index).map(inc_rank)
-        drop_idx = ex.index[(later > ex["split"].map(order)).to_numpy()]
-        drop = out.index.isin(drop_idx)
+        start = incidents["impact_start_ts"].fillna(incidents["start_ts"])
+        inc_split = pd.Series(self.split_of(start).to_numpy(),
+                              index=pd.MultiIndex.from_arrays([incidents["source_run"], incidents["incident_id"]]))
+        col = "matched_incident_ids" if "matched_incident_ids" in out else "incident_ids"
+        ex = out[["source_run", col, "split"]].explode(col).dropna(subset=[col])
+        keys = pd.MultiIndex.from_arrays([ex["source_run"], ex[col]])
+        own = inc_split.reindex(keys)
+        other = own.notna().to_numpy() & (own.to_numpy() != ex["split"].to_numpy())
+        drop = out.index.isin(ex.index[other])
         return out[~drop]
 
 

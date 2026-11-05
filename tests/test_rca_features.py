@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from netmon_pipeline import scoring
-from netmon_pipeline.rca import evaluate, features, labels, model
+from netmon_pipeline.rca import evaluate, features, labels, model, train
 from netmon_pipeline.rca.features import FEATURE_COLUMNS, LABEL_COLUMNS, RunState, Topology
 
 T0 = pd.Timestamp("2026-10-10T00:00:00Z")
@@ -140,27 +140,81 @@ def test_censored_incidents_are_labelled_censored():
     assert set(lab["case_label"]) == {"censored"} and not lab["is_root"].any()
 
 
-def test_time_split_embargoes_incidents_that_start_later():
-    split = model.TimeSplit(val_start=T0 + pd.Timedelta(minutes=90), test_start=T0 + pd.Timedelta(minutes=95))
-    inc = labels.prepare_incidents(gt_df().assign(impact_start_ts=T0 + pd.Timedelta(minutes=92)))
-    rows = pd.DataFrame({"source_run": "history_1m", "decision_ts": [T0 + pd.Timedelta(minutes=85)] * 2,
-                         "incident_ids": [["INC-1"], np.nan]})
-    out = split.assign(rows, inc)
-    assert len(out) == 1 and out["split"].tolist() == ["train"]
+def _split_rows(starts_min, row_min):
+    split = model.TimeSplit(val_start=T0 + pd.Timedelta(minutes=90), dev_start=T0 + pd.Timedelta(minutes=95))
+    gt = pd.concat([gt_df().assign(incident_id=f"INC-{i}", impact_start_ts=T0 + pd.Timedelta(minutes=m))
+                    for i, m in enumerate(starts_min)], ignore_index=True)
+    inc = labels.prepare_incidents(gt)
+    rows = pd.DataFrame({"source_run": "history_1m",
+                         "decision_ts": [T0 + pd.Timedelta(minutes=m) for m, _ in row_min],
+                         "matched_incident_ids": [ids for _, ids in row_min]})
+    return split.assign(rows, inc)
 
 
-def test_rank_and_early_catch_and_alert_precision_use_step2_definitions(state):
+def test_time_split_drops_rows_of_an_incident_outside_the_split_it_starts_in():
+    # INC-0 starts in train (minute 85) and runs into val; INC-1 starts in val and runs into dev.
+    out = _split_rows([85, 92], [(86, ["INC-0"]), (91, ["INC-0"]), (93, ["INC-1"]), (97, ["INC-1"]),
+                                 (88, ["INC-1"]), (99, np.nan)])
+    kept = list(zip(out["decision_ts"].map(lambda t: int((t - T0).total_seconds() // 60)), out["split"],
+                    strict=True))
+    assert kept == [(86, "train"), (93, "val"), (99, "dev")]  # train->val and val->dev spill-over dropped
+
+
+def test_time_split_keeps_rows_of_incidents_inside_their_split():
+    out = _split_rows([92], [(92, ["INC-0"]), (94, ["INC-0"])])
+    assert out["split"].tolist() == ["val", "val"]
+
+
+def _scored_frame(state):
     f = state.features(times=range(70, N_MIN + 2))
-    lab = labels.label(f, gt_df())
-    lab["score"] = np.where(lab["element_id"] == "BH-1", 0.9, 0.1)
+    return f.assign(score=np.where(f["element_id"] == "BH-1", 0.9, 0.1))
+
+
+def test_scored_cases_and_candidates_do_not_depend_on_ground_truth(state):
+    f = _scored_frame(state)
+    base = evaluate.case_outputs(f)
+    lab = labels.label(f, gt_df())  # adds is_root, case_label, incident_ids, matched_incident_ids
+    rng = np.random.default_rng(0)
+    perm = lab.copy()
+    for c in ("is_root", "case_label", "incident_ids", "matched_incident_ids"):
+        perm[c] = perm[c].to_numpy()[rng.permutation(len(perm))]
+    for variant in (lab, perm, lab.drop(columns=["is_root", "case_label"])):
+        pd.testing.assert_frame_equal(evaluate.case_outputs(variant), base)
+    # and the evaluation result does not change when label columns are present, permuted or absent
     inc = labels.prepare_incidents(gt_df())
-    r = evaluate.rank_incidents(lab, inc)
-    assert r["hit_at_1"].all() and r["top_candidates"].iloc[0][0] == "BH-1"
-    e = evaluate.early_catch(lab, inc, threshold=0.5)
-    assert e["localisation_s"].iloc[0] <= scoring.SLA_S and e["within_5min"].all()
-    alerts = evaluate.model_alert_rows(lab, threshold=0.5)
+    r = [train.evaluate_run(x, inc, 0.5, None, None, None)[0]["holdout_ranking"] for x in (f, lab, perm)]
+    pd.testing.assert_frame_equal(r[0], r[1])
+    pd.testing.assert_frame_equal(r[0], r[2])
+
+
+def test_rank_early_catch_and_alert_precision_on_gt_free_outputs(state):
+    f = _scored_frame(state)
+    inc = labels.prepare_incidents(gt_df())
+    out = evaluate.case_outputs(f)
+    r = evaluate.rank_incidents(out, inc)
+    assert r["hit_at_1"].all() and r["top_candidates"].iloc[0][0] == "BH-1" and r["evaluated_at_s"].iloc[0] >= 300
+    e = evaluate.early_catch(out, inc, threshold=0.5)
+    assert e["localised"].all() and e["localisation_s"].iloc[0] <= scoring.SLA_S and not e["pre_impact"].any()
+    alerts = evaluate.model_alert_rows(f, threshold=0.5)
     p = evaluate.alert_precision(alerts, inc)
     assert p["n_alerts"] >= 1 and p["fault"] >= 1
+
+
+def test_early_catch_keeps_pre_impact_catches_signed(state):
+    # the labelled impact starts 4 minutes after the link's cells first degrade: the catch is before impact
+    late = gt_df().assign(impact_start_ts=T0 + pd.Timedelta(minutes=FAULT_FROM + 10))
+    inc = labels.prepare_incidents(late)
+    e = evaluate.early_catch(evaluate.case_outputs(_scored_frame(state)), inc, threshold=0.5)
+    assert e["localisation_s"].iloc[0] < 0 and e["pre_impact"].iloc[0] and e["within_5min"].iloc[0]
+    s = evaluate.catch_summary(e)
+    assert s.loc[0, "model_pre_impact_n"] == 1 and s.loc[0, "model_median_signed_s"] < 0
+
+
+def test_heuristic_is_scored_on_the_same_cases(state):
+    f = _scored_frame(state)
+    m = evaluate.case_outputs(f)
+    h = evaluate.case_outputs(f.assign(h=evaluate.heuristic_score(f)), "h")
+    assert m["case_id"].tolist() == h["case_id"].tolist() and m["evidence"].tolist() == h["evidence"].tolist()
 
 
 def test_vectorised_detection_labels_match_scoring_label_detection():
