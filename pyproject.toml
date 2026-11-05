@@ -16,6 +16,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
+# step 3 (RCA model, Lakebase); pyspark only for the local Spark test of the shared window transforms
+rca = ["scikit-learn>=1.6", "mlflow-skinny>=3", "databricks-sdk>=0.81", "psycopg[binary]>=3.2"]
+spark-tests = ["pyspark>=4.0,<4.1"]
 
 [project.scripts]
 netmon-datagen = "netmon_datagen.cli:main"

@@ -49,6 +49,17 @@ variables:
     default: small
   history_days:
     default: "14"
+  # Step 3 (RCA model + Lakebase)
+  rca_schema:
+    description: Features, scores, the registered model and the Delta sources of the Lakebase tables
+    default: netmon_rca
+  rca_train_run:
+    description: Generator run (landing sub-directory / source_run) holding the 1-minute labelled training history
+    default: history_1m
+  rca_train_start:
+    default: "2026-10-10"
+  rca_train_days:
+    default: "6"
 
 targets:
   dev:

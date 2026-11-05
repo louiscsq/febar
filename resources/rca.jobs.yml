@@ -1,0 +1,66 @@
+# Step 3: root-cause ranking model (training data, training, live scoring) and the Lakebase sync.
+# Everything runs on serverless jobs; see docs/rca_model.md.
+resources:
+  jobs:
+    # A 1-minute-granularity labelled history for the RCA model, as its own generator run (`history_1m`,
+    # source_run = history_1m). It starts after the step-2 runs (history 09-24..10-07, stream 10-08) so the
+    # append-only real-time health windows and their watermark only ever move forward.
+    rca_generate_training_history:
+      name: banksia-rca-generate-training-history
+      parameters: &rca_gen_params
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: schema, default: "${resources.schemas.netmon_raw.name}"}
+        - {name: volume, default: "${resources.volumes.landing.name}"}
+      environments: &rca_gen_envs
+        - environment_key: netmon
+          spec:
+            client: "4"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: generate_history_1m
+          environment_key: netmon
+          timeout_seconds: 5400
+          notebook_task:
+            notebook_path: ../notebooks/01_generate_history.py
+            base_parameters:
+              subdir: ${var.rca_train_run}
+              scale: small
+              days: ${var.rca_train_days}
+              start_date: ${var.rca_train_start}
+              step_minutes: "1"
+              fault_rate_multiplier: "200"
+              min_per_type: "1"
+              format: json
+              seed: "42"
+              overwrite: "true"
+
+    # Build features, train, calibrate, evaluate (held-out days + live run), register in UC, alias champion.
+    rca_train:
+      name: banksia-rca-train
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: train_run, default: "${var.rca_train_run}"}
+        - {name: train_start, default: "${var.rca_train_start}"}
+        - {name: train_days, default: "3"}
+        - {name: val_days, default: "1"}
+        - {name: live_run, default: stream}
+        - {name: model_name, default: rca_ranker}
+        - {name: experiment, default: /Shared/banksia_netmon/rca_ranker}
+      environments: &rca_ml_envs
+        - environment_key: rca
+          spec:
+            client: "4"
+            dependencies:
+              - ../dist/*.whl
+              - scikit-learn==1.7.2
+              - mlflow>=3.1
+              - databricks-sdk>=0.81
+              - psycopg[binary]>=3.2
+      tasks:
+        - task_key: train
+          environment_key: rca
+          timeout_seconds: 7200
+          notebook_task:
+            notebook_path: ../notebooks/03_rca_train.py

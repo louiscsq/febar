@@ -31,6 +31,10 @@ resources:
       catalog_name: ${var.catalog}
       name: ${var.gov_schema}
       comment: Governance objects - column-mask and row-filter functions.
+    netmon_rca:
+      catalog_name: ${var.catalog}
+      name: ${var.rca_schema}
+      comment: Step 3 root-cause ranking - detection-time features, model scores, the UC-registered ranker, and the Delta sources (element_status, open_incidents) synced to Lakebase.
 
   volumes:
     landing:
