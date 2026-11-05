@@ -1,67 +1,80 @@
 # Step 3 evidence: root-cause model, serving and Lakebase
 
 All files are text, captured on 2026-11-05 (UTC) from workspace profile `febar` by
-`scripts/capture_evidence_step3.py`. SQL ran on the serverless warehouse; MLflow, the UC model registry,
-Model Serving and Lakebase metadata came from the Databricks SDK. Every number comes from the final code
-(model version 3): features were rebuilt from scratch in the final training run, then the endpoint, live
-scoring, Lakebase sync and latency check were run again. Design and limits: [`docs/rca_model.md`](../../docs/rca_model.md).
+`scripts/capture_evidence_step3.py`. SQL ran on the serverless warehouse; MLflow, the UC model registry, Model
+Serving and Lakebase metadata came from the Databricks SDK.
 
-## Headline (held-out test days 2026-10-14 … 10-15 of `history_1m`, scored faults only)
+Every number comes from the final code and the final model, **v4**: features rebuilt from scratch, the
+whole-incident split embargo, and GT-free evaluation. After it, the frozen-model holdout evaluation, the
+endpoint update, live scoring, the Lakebase sync and the latency check were all run again. Design, the
+evaluation protocol and limits are in [`docs/rca_model.md`](../../docs/rca_model.md).
 
-| measure | n | model (v3) | step-2 localiser |
-|---|---|---|---|
-| **top-1 accuracy** | 355 | **81.4 %** | 23.4 % as published (`eval_rca_baseline`); 76.1 % with its heuristic on the model's own cases |
-| **top-3 accuracy** | 355 | **93.5 %** | 36.3 %; 85.1 % on the same cases |
-| **slow backhaul: localised within 5 min** | 55 | **5.5 %** (3 of 55) | 0 % |
-| **slow backhaul: median time to correct localisation** | 55 | **618 s** | 1,020 s |
-| all faults localised within 5 min (early-catch mode) | 355 | 83.7 % | 79.2 % |
-| alert-level fault precision (secondary) | 442 / 12,827 alerts | 93.3 % | 96.1 % |
-| live `stream` run, top-1 (out-of-run check) | 26 | 80.8 % | 53.8 % |
-| live open incidents whose suspect #1 is the true root | 17 | 17 | |
-| Lakebase PK lookup p50 / p95 | 300 | 3.4 ms / 10.3 ms | |
+## Headline: fresh holdout `holdout_1m` (frozen model, evaluated once; scored faults only)
 
-- The step-2 "58 % top-1" was measured on the sparse 15-minute `history` run (19 incidents). On this dense
-  1-minute run, with several faults usually open per region, the same heuristic scores 23.4 %. Run on the
-  model's clustered cases instead of whole regions, it reaches 76.1 %. So most of the gain comes from the case
-  framing, and the model adds +5.3 points top-1 and +8.4 points top-3 on top.
-- **Where the model is not better**:
-  - Router failures and AMF overloads: it only ties the heuristic on the same cases.
-  - Site power outages, top-3: slightly below it (93.5 % vs 95.7 %).
-  - Cell outages, early catch: slower than step 2 (median 88 s vs 36 s).
-  - Alert precision: lower than step 2's (93.3 % vs 96.1 %).
-  - Slow backhaul: still almost never localised within 5 minutes.
-- Test-set hygiene: design iterations looked at WA's test days, and the final candidate fix came from
-  inspecting a held-out smoke-test case. Both are disclosed in docs/rca_model.md ("How clean the test split is").
+`holdout_1m` was generated after the design was frozen: new seed 4242 for faults, noise and defects, same
+network, 2026-10-17 … 10-18. It went through the unchanged step-2 pipeline. Every case is scored GT-free first;
+ground truth is matched to the ranked outputs afterwards. The primary comparison is step 2's heuristic ranked on
+the **same cases**.
+
+| measure | n | model v4 | step-2 heuristic, same cases | step-2 localisation (`eval_incident_detection`) |
+|---|---|---|---|---|
+| **top-1 accuracy** | 337 | **93.2 %** | 78.3 % | |
+| **top-3 accuracy** | 337 | **95.3 %** | 80.7 % | |
+| localised within 5 min (signed times) | 337 | **80.4 %** | 76.9 % | 65.6 % |
+| pre-impact catches (alarm before impact start) | 337 | 35 | | |
+| median time to correct localisation (signed) | 337 | 106 s | 116 s | 76 s (clipped at 0 by step 2) |
+| **slow backhaul localised within 5 min** | 53 | **0 %** | 0 % | 0 % |
+| **slow backhaul median time to correct localisation** | 53 | **615 s** | 727.5 s | 1,011 s |
+| alert-level fault precision (secondary) | 395 / 14,028 alerts | 92.4 % | | 97.6 % (step-2 detections) |
+
+- **Secondary framing:** step 2's *published*, region-wide `eval_rca_baseline` scores 27.9 % top-1 / 43.9 %
+  top-3 on the holdout. Step 2's "58 % top-1" was that framing on the sparse 15-minute `history` run
+  (19 incidents), so it is not a comparison point for these runs.
+- **Where the model is not better** (holdout):
+  - Ties with the heuristic on the same cases: router failures (87.5 %), AMF overloads (100 %), cell outages
+    (95.2 % vs 94.7 %), site power top-3 (100 %).
+  - Bushfire cluster (n = 1): missed at top-1 by both.
+  - Cell outages, early catch: slower than step-2 localisation (median 98.5 s vs 51 s).
+  - Alert precision: lower than step 2's.
+  - Slow backhaul: never localised within 5 minutes.
+- **Dev** (the old "test" days of `history_1m`, 2026-10-14 … 10-15, seen during design, so not a holdout,
+  n = 355): top-1 94.1 % vs 80.8 %; top-3 96.6 % vs 83.9 %; within 5 min 83.7 %.
+- **Live `stream` run** (n = 26): top-1 84.6 % vs 73.1 %.
+- **Live open incidents** in Lakebase: 17, each with the true root of an in-flight fault as suspect #1.
+- **Lakebase** PK lookup: p50 2.9 ms / p95 9.8 ms.
 
 ## Files
 
 | file | content |
 |---|---|
-| [`01_training_run.md`](01_training_run.md) | MLflow run ID, experiment, parameters, all metrics, artifacts; rows / positives / cases per split; case labels per split; permutation feature importance; validation alert precision |
-| [`02_evaluation.md`](02_evaluation.md) | top-1 / top-3 vs step 2 overall and by fault type with n; early catch vs step-2 localisation by fault type; every held-out backhaul incident; alert-level precision (model vs step-2 detections, same code); validation day; live run; step 2's published baseline per run; sample of top-1 misses |
-| [`03_registered_model.md`](03_registered_model.md) | UC registered model, versions, `champion` alias, version tags (threshold), signature |
-| [`04_serving_endpoint.md`](04_serving_endpoint.md) | endpoint state and config (serverless, scale to zero, version 3); smoke-test request / response for a held-out backhaul case; endpoint vs batch scores and ground truth; client-side latency |
+| [`01_training_run.md`](01_training_run.md) | training MLflow run ID, experiment, parameters (incl. embargo rule), all metrics (val / dev), artifacts; rows / positives / cases per split (train / val / dev); case labels per split; permutation feature importance; validation-day alert precision |
+| [`02_evaluation.md`](02_evaluation.md) | evaluation protocol; **holdout** and **dev**: top-1 / top-3 by fault type with n (model vs heuristic on the same cases, step 2's published framing as a secondary column), early catch with signed times and pre-impact counts (model vs heuristic vs step-2 localisation), every slow-backhaul incident, alert-level precision; validation day; live run; step 2's published baseline per run; holdout top-1 misses |
+| [`03_registered_model.md`](03_registered_model.md) | UC registered model, versions, `champion` alias (v4), version tags (threshold, dev and holdout top-1, holdout evaluation run), signature |
+| [`04_serving_endpoint.md`](04_serving_endpoint.md) | endpoint state and config (serverless, scale to zero, v4); smoke test on a fresh-holdout backhaul case: request / response, endpoint vs batch scores and ground truth; client-side latency |
 | [`05_lakebase.md`](05_lakebase.md) | Lakebase Provisioned instance; both synced tables (source, PK, TRIGGERED, state, last synced commit); latency check (p50 / p95 / p99 / max); row counts and sample rows read back from Postgres; PK lookup plan |
-| [`06_live_scoring.md`](06_live_scoring.md) | `element_status` / `open_incidents` row counts, states, open incidents with top-3 suspects, open incidents checked against the live run's ground truth (evidence only), element status sample, scored candidates per run |
+| [`06_live_scoring.md`](06_live_scoring.md) | `element_status` / `open_incidents` counts, states, open incidents with top-3 suspects, open incidents checked against the live run's ground truth (evidence only), element status sample, scored candidates per model version |
 | [`07_pr3_review_notes.md`](07_pr3_review_notes.md) | the three PR #3 notes: Spark test of the late-data rule, signed evidence lag (negative lags shown), shared baseline-comparison code |
 
-## What was run
+## What was run (final)
 
-1. `banksia-rca-generate-training-history`: 6 days of 1-minute labelled history (`history_1m`, 12.0 M real-time
-   windows, 982 scored faults), then `banksia-netmon-pipeline` (incremental update, COMPLETED), with the PR #3
-   changes deployed.
-2. `banksia-rca-train` (run with `rebuild_features=true`): features from scratch, train / calibrate /
-   threshold, evaluation, MLflow run `8d047e614f3941f795a2f8f638957328`, model version 3, alias `champion`.
-3. Bundle deploy with `rca_model_version=3`: endpoint `banksia-rca-ranker` READY on version 3.
-4. `banksia-rca-score-live` on the live `stream` run: `MERGE` into `element_status` / `open_incidents`, then
-   a TRIGGERED sync of both Lakebase synced tables.
-5. `banksia-rca-lakebase-check`: psycopg + OAuth token, row counts, samples, 300 point lookups per query.
-6. This capture.
+1. `banksia-rca-generate-training-history` (6 days of 1-minute history, `history_1m`) and the step-2 pipeline:
+   from the first PR #4 revision, unchanged.
+2. `banksia-rca-train` (`rebuild_features=true`). Training MLflow run `e40edbe6f9884c23ad9313f4e41f2845`;
+   model v4 registered, `@champion`; threshold 0.32; val / dev evaluation.
+3. `banksia-rca-generate-holdout` (`holdout_1m`, seed 4242, topology seed 42; topology checked identical, 1,887
+   elements, 0 differences), then a `banksia-netmon-pipeline` update (COMPLETED; 4.0 M windows, 337 scored
+   faults).
+4. `banksia-rca-evaluate-holdout`, **once**, with the frozen v4 (evaluation MLflow run
+   `b678bdd4d2c84591bdc4e1bfec61d5c2`).
+5. Bundle deploy with `rca_model_version=4`: endpoint `banksia-rca-ranker` READY on v4.
+6. `banksia-rca-score-live` (v4) → `MERGE` + TRIGGERED Lakebase sync; then `banksia-rca-lakebase-check`.
+7. This capture (all files regenerated).
 
 ## Limitations recorded
 
-- **No `CREATE CATALOG`** on the metastore. No Lakebase database catalog could be created, so the synced tables
-  are registered in the project catalog (`netmon_rca.lb_*`). The Postgres side is unaffected.
-- Latency figures in `04` are from a laptop over the internet; the Lakebase figures in `05` are from a
-  serverless job in the workspace.
-- The live run scored is the step-2 `stream` run (2026-10-08); no new live stream was started for step 3.
+- **No `CREATE CATALOG`** on the metastore. No Lakebase database catalog, so the synced tables are registered in
+  the project catalog (`netmon_rca.lb_*`). The Postgres side is unaffected.
+- **Matching picks the judged case.** Per-incident accuracy grades the matched case with the largest footprint
+  overlap. Ground truth chooses *which* ranking is graded, never what is ranked.
+- **Latency sources differ.** `04` latency is laptop → endpoint over the internet; `05` is from a serverless job.
+- **Old live run.** The live run scored is the step-2 `stream` run (2026-10-08); no new live stream was started.

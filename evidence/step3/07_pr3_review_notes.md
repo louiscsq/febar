@@ -1,6 +1,6 @@
 # PR #3 review notes folded in
 
-Captured 2026-11-05 16:34 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
+Captured 2026-11-05 17:35 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
 
 ## a. Python late-data rule tied to the Spark transform
 
@@ -41,12 +41,19 @@ SELECT source_run, fault_type, n_incidents, median_evidence_lag_s, median_signed
 | history_1m | CORE_CONGESTION | 2 | 349.0 | 349.0 | 306 | 0 |
 | history_1m | LONG_HAUL_FIBRE_CUT | 2 | 58.0 | 58.0 | 40 | 0 |
 | history_1m | SITE_POWER_OUTAGE | 122 | 40.0 | 42.0 | 8 | 0 |
+| holdout_1m | AGG_ROUTER_FAILURE | 40 | 0.0 | -45.0 | -53 | 33 |
+| holdout_1m | AMF_OVERLOAD | 17 | 121.0 | 121.0 | 55 | 0 |
+| holdout_1m | BACKHAUL_DEGRADATION | 53 | 559.0 | 562.0 | 260 | 0 |
+| holdout_1m | BUSHFIRE_GRID_OUTAGE | 1 | 408.0 | 408.0 | 408 | 0 |
+| holdout_1m | CELL_OUTAGE | 187 | 51.0 | 51.0 | 12 | 0 |
+| holdout_1m | LONG_HAUL_FIBRE_CUT | 1 | 19519.0 | 19519.0 | 19519 | 0 |
+| holdout_1m | SITE_POWER_OUTAGE | 38 | 69.5 | 107.5 | 15 | 0 |
 | stream | AGG_ROUTER_FAILURE | 1 | 0.0 | -34.0 | -34 | 1 |
 | stream | BACKHAUL_DEGRADATION | 3 | 746.0 | 746.0 | 507 | 0 |
 | stream | CELL_OUTAGE | 20 | 80.0 | 80.0 | 30 | 0 |
 | stream | SITE_POWER_OUTAGE | 2 | 197.5 | 197.5 | 165 | 0 |
 
-_21 row(s)_
+_28 row(s)_
 
 ## b. Incidents whose first evidence predates impact (sample)
 

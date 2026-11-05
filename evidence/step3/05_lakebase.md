@@ -1,6 +1,6 @@
 # Lakebase: instance, synced tables, rows, read latency
 
-Captured 2026-11-05 16:34 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
+Captured 2026-11-05 17:35 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
 
 ## Instance (Lakebase Provisioned)
 
@@ -28,9 +28,9 @@ Captured 2026-11-05 16:34 UTC from workspace profile `febar` by `scripts/capture
   "database_instance": "banksia-netmon-lakebase",
   "logical_database": "netmon_serving",
   "state": "SyncedTableState.SYNCED_TABLE_ONLINE_NO_PENDING_UPDATE",
-  "message": "Synced table creation succeeded using Delta Live Tables: https://fevm-telco-netmon-febar.cloud.databricks.com#joblist/pipelines/eb85df61-12fb-4bfe-8baf-0a24254ef161/updates/a46256ad-215c-43b9-a028-56f16b3e7eac.",
+  "message": "Synced table creation succeeded using Delta Live Tables: https://fevm-telco-netmon-febar.cloud.databricks.com#joblist/pipelines/eb85df61-12fb-4bfe-8baf-0a24254ef161/updates/27fe39b7-f99e-4139-945a-0f1cb41f8251.",
   "pipeline_id": "eb85df61-12fb-4bfe-8baf-0a24254ef161",
-  "last_sync": "SyncedTableTriggeredUpdateStatus(last_processed_commit_version=8, timestamp='2026-11-05T16:23:25Z', triggered_update_progress=None)"
+  "last_sync": "SyncedTableTriggeredUpdateStatus(last_processed_commit_version=10, timestamp='2026-11-05T17:24:47Z', triggered_update_progress=None)"
 }
 ```
 
@@ -46,9 +46,9 @@ Captured 2026-11-05 16:34 UTC from workspace profile `febar` by `scripts/capture
   "database_instance": "banksia-netmon-lakebase",
   "logical_database": "netmon_serving",
   "state": "SyncedTableState.SYNCED_TABLE_ONLINE_NO_PENDING_UPDATE",
-  "message": "Synced table creation succeeded using Delta Live Tables: https://fevm-telco-netmon-febar.cloud.databricks.com#joblist/pipelines/de1a6b07-9c92-4c50-bc8d-dd195d68e6f5/updates/a1321dbe-e48b-4347-b449-010837c26bf2.",
+  "message": "Synced table creation succeeded using Delta Live Tables: https://fevm-telco-netmon-febar.cloud.databricks.com#joblist/pipelines/de1a6b07-9c92-4c50-bc8d-dd195d68e6f5/updates/70b4b4e6-29e6-48d8-9f91-e2eea913893b.",
   "pipeline_id": "de1a6b07-9c92-4c50-bc8d-dd195d68e6f5",
-  "last_sync": "SyncedTableTriggeredUpdateStatus(last_processed_commit_version=8, timestamp='2026-11-05T16:23:24Z', triggered_update_progress=None)"
+  "last_sync": "SyncedTableTriggeredUpdateStatus(last_processed_commit_version=11, timestamp='2026-11-05T17:24:46Z', triggered_update_progress=None)"
 }
 ```
 
@@ -61,9 +61,9 @@ SELECT run_at, query, n, p50_ms, p95_ms, p99_ms, max_ms, capacity, element_statu
 
 | run_at | query | n | p50_ms | p95_ms | p99_ms | max_ms | capacity | element_status_rows | open_incidents_rows |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-11-05T16:23:35.088048+00:00 | element_status by element_id (PK) | 300 | 3.39 | 10.32 | 19.81 | 33.68 | CU_1 | 1887 | 17 |
-| 2026-11-05T16:23:35.088048+00:00 | open_incidents by region_code | 300 | 3.09 | 8.76 | 22.99 | 34.95 | CU_1 | 1887 | 17 |
-| 2026-11-05T16:23:35.088048+00:00 | open_incident suspects joined to element_status | 300 | 3.07 | 6.85 | 12.22 | 15.04 | CU_1 | 1887 | 17 |
+| 2026-11-05T17:24:58.381817+00:00 | element_status by element_id (PK) | 300 | 2.94 | 9.76 | 18.63 | 24.34 | CU_1 | 1887 | 17 |
+| 2026-11-05T17:24:58.381817+00:00 | open_incidents by region_code | 300 | 2.69 | 6.94 | 12.63 | 13.29 | CU_1 | 1887 | 17 |
+| 2026-11-05T17:24:58.381817+00:00 | open_incident suspects joined to element_status | 300 | 2.4 | 8.57 | 17.88 | 20.96 | CU_1 | 1887 | 17 |
 
 _3 row(s)_
 
@@ -96,8 +96,8 @@ _3 row(s)_
     "open_incident_id": "None",
     "suspect_rank": "None",
     "last_updated_ts": "2026-10-09 00:56:00+00:00",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00",
-    "model_version": "3"
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00",
+    "model_version": "4"
   },
   {
     "element_id": "AGG-NQL-02",
@@ -115,8 +115,8 @@ _3 row(s)_
     "open_incident_id": "RCA-d28473ab1bd7b846",
     "suspect_rank": "1.0",
     "last_updated_ts": "2026-10-09 00:56:00+00:00",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00",
-    "model_version": "3"
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00",
+    "model_version": "4"
   },
   {
     "element_id": "AGG-NQL-03",
@@ -134,8 +134,8 @@ _3 row(s)_
     "open_incident_id": "None",
     "suspect_rank": "None",
     "last_updated_ts": "2026-10-09 00:56:00+00:00",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00",
-    "model_version": "3"
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00",
+    "model_version": "4"
   },
   {
     "element_id": "AGG-NQL-04",
@@ -153,8 +153,8 @@ _3 row(s)_
     "open_incident_id": "None",
     "suspect_rank": "None",
     "last_updated_ts": "2026-10-09 00:56:00+00:00",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00",
-    "model_version": "3"
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00",
+    "model_version": "4"
   },
   {
     "element_id": "AGG-NSW-01",
@@ -167,13 +167,13 @@ _3 row(s)_
     "silent_fraction": "0.0357142873108387",
     "n_alarms": "1.0",
     "n_service_down_alarms": "0.0",
-    "rca_score": "0.06888093018692047",
+    "rca_score": "0.07429145516074451",
     "state": "impacted",
     "open_incident_id": "RCA-fbd7ff66e62b0b42",
     "suspect_rank": "2.0",
     "last_updated_ts": "2026-10-09 00:56:00+00:00",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00",
-    "model_version": "3"
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00",
+    "model_version": "4"
   }
 ]
 ```
@@ -201,8 +201,8 @@ _3 row(s)_
     "suspect_3_score": "0.0",
     "n_impacted_cells": "1",
     "n_candidates": "6",
-    "model_version": "3",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00"
+    "model_version": "4",
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00"
   },
   {
     "incident_id": "RCA-27ed3e8af852d33a",
@@ -223,8 +223,8 @@ _3 row(s)_
     "suspect_3_score": "0.0",
     "n_impacted_cells": "12",
     "n_candidates": "19",
-    "model_version": "3",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00"
+    "model_version": "4",
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00"
   },
   {
     "incident_id": "RCA-399fe9bb03f3b4cb",
@@ -245,8 +245,8 @@ _3 row(s)_
     "suspect_3_score": "0.0",
     "n_impacted_cells": "1",
     "n_candidates": "7",
-    "model_version": "3",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00"
+    "model_version": "4",
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00"
   },
   {
     "incident_id": "RCA-4b24e8c0bfedac1a",
@@ -261,14 +261,14 @@ _3 row(s)_
     "suspect_1_score": "1.0",
     "suspect_2_id": "AGG-NSW-01",
     "suspect_2_type": "AGG_ROUTER",
-    "suspect_2_score": "0.0689",
+    "suspect_2_score": "0.0743",
     "suspect_3_id": "SITE-NSW-00025",
     "suspect_3_type": "SITE",
-    "suspect_3_score": "0.0689",
+    "suspect_3_score": "0.0743",
     "n_impacted_cells": "3",
     "n_candidates": "11",
-    "model_version": "3",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00"
+    "model_version": "4",
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00"
   },
   {
     "incident_id": "RCA-55424701801c7330",
@@ -289,8 +289,8 @@ _3 row(s)_
     "suspect_3_score": "0.0",
     "n_impacted_cells": "1",
     "n_candidates": "9",
-    "model_version": "3",
-    "refreshed_at": "2026-11-05 16:22:16.711567+00:00"
+    "model_version": "4",
+    "refreshed_at": "2026-11-05 17:23:35.677210+00:00"
   }
 ]
 ```
