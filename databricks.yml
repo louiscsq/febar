@@ -73,7 +73,7 @@ variables:
     default: netmon_serving
   rca_model_version:
     description: UC model version served by the endpoint (the one the `champion` alias points at)
-    default: "3"
+    default: "4"
 
 targets:
   dev:

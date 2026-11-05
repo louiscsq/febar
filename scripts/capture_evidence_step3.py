@@ -79,7 +79,8 @@ def training(r: Runner, w, run: dict) -> None:
         f"- registered model: `{MODEL}` version `{run['model_version']}` (alias `champion`)",
         f"- training job wall time (features + training + evaluation + registration): {run['minutes']} min"]))
     d.code("Parameters", dict(sorted(mr.data.params.items())))
-    d.code("Metrics (val = calibration / threshold day, test = held-out days; live = stream run)",
+    d.code("Metrics (val = calibration / threshold day, dev = last two training-run days, seen during design; "
+           "the held-out holdout_1m result is in 02_evaluation.md)",
            dict(sorted(mr.data.metrics.items())))
     arts = [a.path for a in m.list_artifacts(mr.info.run_id)] + \
         [a.path for a in m.list_artifacts(mr.info.run_id, "evaluation")]
@@ -88,8 +89,9 @@ def training(r: Runner, w, run: dict) -> None:
         SELECT split, count(*) AS candidate_rows, count_if(is_root) AS positive_rows,
                count(DISTINCT case_id) AS cases, min(decision_ts) AS first_decision, max(decision_ts) AS last_decision
         FROM {R}.rca_training_labels GROUP BY split ORDER BY min(decision_ts)""",
-            "Censored incidents are excluded before the split; rows matched to an incident that starts in a later "
-            "split are dropped (embargo).")
+            "Censored incidents are excluded from training before the split. Embargo: every incident (any class) "
+            "belongs wholly to the split it starts in; its rows in any other split are dropped. These labels are "
+            "for training and calibration only; the evaluation scores every case GT-free.")
     d.query("Case labels per split", f"""
         SELECT split, case_label, count(DISTINCT case_id) AS cases FROM {R}.rca_training_labels
         GROUP BY ALL ORDER BY 1, 2""")
@@ -104,51 +106,78 @@ def training(r: Runner, w, run: dict) -> None:
 
 
 def evaluation(r: Runner, run: dict) -> None:
-    d = Doc(r, "02_evaluation.md", "Evaluation vs the step-2 localiser (held-out time split)", f"""
-Test split = the last two days of `history_1m` (decision times from 2026-10-14 00:00 UTC), never used for any
-choice. Validation (2026-10-13) chose the calibration and the alert threshold ({run['threshold']}). Incidents are
-scored faults only (customer-impacting, uncensored). `baseline_*` is step 2's `eval_rca_baseline` exactly as
-published (region-wide ranking); `heuristic_same_cases_*` is the same heuristic applied to exactly the cases the
-model ranks, so the framing and the model contributions can be told apart. n = incidents.""")
-    d.query("Top-1 / top-3 accuracy, overall and by fault type (test)", f"""
-        SELECT fault_type, n, model_top1_pct, baseline_top1_pct, heuristic_same_cases_top1_pct,
-               model_top3_pct, baseline_top3_pct, heuristic_same_cases_top3_pct
-        FROM {R}.rca_eval_test_accuracy ORDER BY fault_type = 'ALL' DESC, n DESC""")
-    d.query("Early catch: localised by the model's top-1 above the threshold, vs step-2 localisation (test)", f"""
-        SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_median_s,
-               step2_localised_pct, step2_within_5min_pct, step2_median_s
-        FROM {R}.rca_eval_test_early_catch_summary ORDER BY fault_type = 'ALL' DESC, n DESC""",
-            "Model time = first 1-minute decision time whose top-1 element is a valid root with calibrated score >= "
-            "threshold, minus impact start (decision time = when all its inputs had arrived; pipeline latency, median "
-            "39 s live in step 2, comes on top). Step 2 = `eval_incident_detection.localisation_ttd_s` (a detection or "
-            "the rollup on a root; a lower bound for the rollup path).")
-    d.query("Slow backhaul degradation, per incident (test)", f"""
-        SELECT incident_id, impact_start_ts, localisation_s AS model_localisation_s, within_5min AS model_within_5min,
-               step2_localisation_s, step2_within_5min
-        FROM {R}.rca_eval_test_early_catch WHERE fault_type = 'BACKHAUL_DEGRADATION' ORDER BY impact_start_ts""")
-    d.query("Secondary: alert-level fault precision (test days), step 2's definitions", f"""
-        SELECT system, n_alerts, fault, censored, planned_suppressed, planned_fp, red_herring, unexplained,
-               fault_precision_pct, maintenance_suppression_pct
-        FROM {R}.rca_eval_test_alert_precision""",
-            "Model alerts = case top-1 elements at or above the threshold, grouped per element with step 2's 10-minute "
-            "gap and labelled with `netmon_pipeline.scoring` (the same code scores the step-2 detection rows of the "
-            "same days). Reported, not optimised.")
-    d.query("Validation day (for reference; used for calibration and the threshold)", f"""
-        SELECT fault_type, n, model_top1_pct, baseline_top1_pct, heuristic_same_cases_top1_pct, model_top3_pct,
-               baseline_top3_pct FROM {R}.rca_eval_val_accuracy ORDER BY fault_type = 'ALL' DESC, n DESC""")
-    d.query("Out-of-run check: live stream run (2026-10-08, different run, censored excluded)", f"""
-        SELECT fault_type, n, model_top1_pct, baseline_top1_pct, model_top3_pct, baseline_top3_pct
+    cols, rows = r.sql(f"SELECT * FROM {R}.rca_holdout_runs")
+    h = dict(zip(cols, rows[0], strict=True))
+    d = Doc(r, "02_evaluation.md", "Evaluation vs the step-2 localiser: fresh holdout and dev", f"""
+**How it is scored (GT-free first, ground truth after).** Every case of the run is scored by the frozen model
+(`evaluate.case_outputs`: ID / feature columns and the score only). The ranked outputs are then attributed to
+ground-truth incidents (same run and region, decision time in the incident window, case evidence overlapping
+the footprint; per minute the output with the largest overlap). Matching never adds, removes or re-ranks
+candidates. The step-2 heuristic is ranked on exactly the same case outputs ("heuristic, same cases"); step 2's
+published region-wide `eval_rca_baseline` is shown as a secondary framing.
+
+- **Top-1 / top-3**: the incident's primary output at the first decision time at least 5 minutes after impact
+  start (up to 15 minutes).
+- **Early catch**: every 1-minute decision time, the first one whose top-1 is a valid root with calibrated score
+  >= the validation threshold ({run['threshold']}). Times are signed `decision_ts - impact_start_ts`: pre-impact
+  catches are negative, counted separately and kept in the median.
+
+**Splits.**
+- **Holdout** = `holdout_1m`: a fresh run generated after the design was frozen (new seed 4242 for faults,
+  noise and defects, same network, 2026-10-17 … 10-18), through the unchanged step-2 pipeline, evaluated once
+  with the frozen champion v{h['model_version']} (evaluation MLflow run `{h['mlflow_run_id']}`).
+- **Dev** = the last two days of `history_1m` (2026-10-14 … 10-15). They were seen while the design was
+  iterated, so they are **not** a holdout.
+- **Validation** (2026-10-13) chose the calibration and the threshold.
+
+Scored incidents only (customer-impacting, uncensored faults); n = incidents.""")
+    for split, label in (("holdout", "HOLDOUT (holdout_1m, untouched)"), ("dev", "DEV (history_1m 10-14 … 10-15, "
+                                                                                   "seen during design)")):
+        d.query(f"{label}: top-1 / top-3, model vs the step-2 heuristic on the same cases", f"""
+            SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_pct,
+                   heuristic_same_cases_top3_pct, baseline_top1_pct AS stepwise2_region_wide_top1_pct,
+                   baseline_top3_pct AS stepwise2_region_wide_top3_pct
+            FROM {R}.rca_eval_{split}_accuracy ORDER BY fault_type = 'ALL' DESC, n DESC""".replace(
+            "stepwise2", "step2"),
+                "`step2_region_wide_*` = step 2's published `eval_rca_baseline` (whole region, first 15 minutes), a "
+                "different and weaker framing, shown for reference only.")
+        d.query(f"{label}: early catch (signed times), model vs heuristic on the same cases vs step-2 localisation",
+                f"""
+            SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_pre_impact_n,
+                   model_median_signed_s, heuristic_same_cases_within_5min_pct, heuristic_same_cases_median_signed_s,
+                   step2_localised_pct, step2_within_5min_pct, step2_median_s
+            FROM {R}.rca_eval_{split}_early_catch_summary ORDER BY fault_type = 'ALL' DESC, n DESC""",
+                "within 5 min = signed time <= 300 s (pre-impact catches included). The heuristic has no score "
+                "threshold (its top-1 counts as soon as it is a root). Step 2 = "
+                "`eval_incident_detection.localisation_ttd_s`, which step 2 clips at 0 (a lower bound for the "
+                "rollup path); median 39 s of live pipeline latency comes on top of every system's time.")
+        d.query(f"{label}: slow backhaul degradation, per incident", f"""
+            SELECT incident_id, impact_start_ts, localisation_s AS model_signed_s, within_5min AS model_within_5min,
+                   heuristic_same_cases_localisation_s AS heuristic_signed_s, step2_localisation_s, step2_within_5min
+            FROM {R}.rca_eval_{split}_early_catch WHERE fault_type = 'BACKHAUL_DEGRADATION' ORDER BY impact_start_ts""")
+        d.query(f"{label}: secondary, alert-level fault precision (step 2's definitions)", f"""
+            SELECT system, n_alerts, fault, censored, planned_suppressed, planned_fp, red_herring, unexplained,
+                   fault_precision_pct FROM {R}.rca_eval_{split}_alert_precision""",
+                "Model alerts = case top-1 elements at or above the threshold, grouped per element with step 2's "
+                "10-minute gap and labelled with `netmon_pipeline.scoring`; the same code scores the step-2 "
+                "detection rows of the same period. Reported, not optimised.")
+    d.query("Validation day (calibration and threshold were chosen here)", f"""
+        SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_pct,
+               heuristic_same_cases_top3_pct FROM {R}.rca_eval_val_accuracy ORDER BY fault_type = 'ALL' DESC, n DESC""")
+    d.query("Live stream run (2026-10-08, out-of-run check; censored incidents not scored)", f"""
+        SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_pct,
+               heuristic_same_cases_top3_pct, baseline_top1_pct AS step2_region_wide_top1_pct
         FROM {R}.rca_eval_live_accuracy ORDER BY fault_type = 'ALL' DESC, n DESC""")
-    d.query("Step 2's published RCA baseline per run (eval_rca_baseline)", f"""
+    d.query("Step 2's published RCA baseline per run (eval_rca_baseline, region-wide framing)", f"""
         SELECT source_run, count(*) AS n, round(100 * avg(CAST(hit_at_1 AS INT)), 1) AS hit_at_1_pct,
                round(100 * avg(CAST(hit_at_3 AS INT)), 1) AS hit_at_3_pct
         FROM {E}.eval_rca_baseline GROUP BY 1 ORDER BY 1""",
-            "The 58 % quoted in step 2 is `history` (15-minute ROP, 19 incidents). The 1-minute training run has ~60x "
-            "more concurrent faults, where the region-wide heuristic is much weaker.")
-    d.query("Test incidents the model missed at top-1 (sample)", f"""
-        SELECT fault_type, incident_id, root_element_ids, top_candidates, baseline_top_candidates, n_cases,
-               root_in_candidates
-        FROM {R}.rca_eval_test_ranking WHERE NOT hit_at_1 ORDER BY fault_type, incident_id LIMIT 25""")
+            "Step 2's \"58 % top-1\" is the `history` row: 19 incidents of a sparse 15-minute run. It is not "
+            "comparable with the dense 1-minute runs, where several faults are usually open per region.")
+    d.query("Holdout incidents the model missed at top-1 (sample)", f"""
+        SELECT fault_type, incident_id, root_element_ids, top_candidates, heuristic_same_cases_top, has_output,
+               evaluated_at_s FROM {R}.rca_eval_holdout_ranking WHERE NOT hit_at_1 ORDER BY fault_type, incident_id
+        LIMIT 25""")
     d.write()
 
 
@@ -182,11 +211,9 @@ def serving(r: Runner, w, run: dict) -> None:
          "workload_size": s.workload_size, "scale_to_zero_enabled": s.scale_to_zero_enabled,
          "state": str(s.state.deployment if s.state else None)} for s in ep.config.served_entities]})
     cols, rows = r.sql(f"""
-        SELECT f.* FROM {R}.rca_candidate_features f JOIN {R}.rca_training_labels l
-          ON l.case_id = f.case_id AND l.element_id = f.element_id
-        WHERE l.split = 'test' AND l.case_label = 'fault'
-          AND f.case_id = (SELECT case_id FROM {R}.rca_training_labels WHERE split = 'test' AND is_root
-                           AND element_id LIKE 'BH-%' ORDER BY decision_ts LIMIT 1)""")
+        SELECT * FROM {R}.rca_holdout_scores
+        WHERE case_id = (SELECT case_id FROM {R}.rca_eval_holdout_ranking
+                         WHERE fault_type = 'BACKHAUL_DEGRADATION' AND has_output ORDER BY incident_id LIMIT 1)""")
     from netmon_pipeline.rca.features import FEATURE_COLUMNS
 
     recs = [dict(zip(cols, row, strict=True)) for row in rows]
@@ -203,20 +230,21 @@ def serving(r: Runner, w, run: dict) -> None:
     ranked = sorted(({"element_id": x["element_id"], "element_type": x["element_type"],
                       "p_root": round(float(p[1]), 4)} for x, p in zip(recs, preds, strict=True)),
                     key=lambda z: -z["p_root"])
-    d.text("Smoke test", f"Case `{recs[0]['case_id']}` (a held-out backhaul case, {len(recs)} candidates) sent as "
+    d.text("Smoke test", f"Case `{recs[0]['case_id']}` (a fresh-holdout backhaul case, {len(recs)} candidates) sent as "
            "`dataframe_records` with the model's 55 feature columns. The endpoint returns `predict_proba` "
            "`[p(not root), p(root)]` per candidate; ranking by `p(root)` gives the suspects.")
     d.code("Request (first 2 of the records)", {"dataframe_records": body["dataframe_records"][:2]})
     d.code("Response (first 3 predictions)", {"predictions": preds[:3]})
     case = recs[0]["case_id"]
-    cols2, rows2 = r.sql(f"""SELECT element_id, is_root, round(score, 4) AS batch_score FROM {R}.rca_training_labels
-                             WHERE case_id = '{case}'""")
-    batch = {x[0]: (x[1], x[2]) for x in rows2}
+    _, rows2 = r.sql(f"""SELECT root_element_ids FROM {R}.rca_eval_holdout_ranking WHERE case_id = '{case}'
+                         LIMIT 1""")
+    roots = set(str(rows2[0][0]).split(",")) if rows2 else set()
+    batch = {x["element_id"]: (x["element_id"] in roots, round(float(x["score"]), 4)) for x in recs}
     for z in ranked:
-        z["is_root (ground truth)"], z["batch_score (training job)"] = batch.get(z["element_id"], (None, None))
-    d.code("Candidates ranked by endpoint p(root), with the ground truth and the training job's batch score", ranked,
+        z["is_root (ground truth)"], z["batch_score (holdout job)"] = batch.get(z["element_id"], (None, None))
+    d.code("Candidates ranked by endpoint p(root), with the ground truth and the holdout job's batch score", ranked,
            "The endpoint and the batch scoring in the job give the same calibrated scores (same UC version). "
-           f"True roots among this case's candidates: {[z['element_id'] for z in ranked if batch.get(z['element_id'], (None,))[0] in (True, 'true')]}; "
+           f"True roots among this case's candidates: {[z['element_id'] for z in ranked if z['is_root (ground truth)']]}; "
            f"endpoint top-1: `{ranked[0]['element_id']}`.")
     d.text("Latency from this laptop (client side, includes internet round trip)",
            f"- first call: {cold_ms:.0f} ms (may include a scale-from-zero start)\n"
