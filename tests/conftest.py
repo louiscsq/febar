@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import glob
 import json
+import os
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -66,3 +68,32 @@ def counterfactual_pair(tmp_path_factory) -> tuple[Path, Path]:
     generate_history(tiny_cfg(dq=DQConfig.none()), with_f, log=lambda *a: None)
     generate_history(tiny_cfg(dq=DQConfig.none(), faults=FaultConfig(enabled=False)), without_f, log=lambda *a: None)
     return with_f, without_f
+
+
+# ---- local Spark (tests of the Spark transforms the pipeline runs; needs pyspark + Java 17/21) ----
+
+def _java_home():
+    for p in ("/opt/homebrew/opt/openjdk@17", "/opt/homebrew/Cellar/openjdk@17", "/usr/lib/jvm/java-17-openjdk-amd64",
+              "/usr/lib/jvm/java-17-openjdk-arm64"):
+        for cand in sorted(Path(p).glob("**/Contents/Home")) if Path(p).exists() and "Cellar" in p else [Path(p)]:
+            if (cand / "bin" / "java").exists():
+                return str(cand)
+    return None
+
+
+@pytest.fixture(scope="session")
+def spark():
+    pytest.importorskip("pyspark")
+    jh = _java_home()
+    if jh and "JAVA_HOME" not in os.environ:
+        os.environ["JAVA_HOME"] = jh
+    # pyspark returns naive datetimes in the process time zone: pin it to UTC
+    os.environ["TZ"] = "UTC"
+    time.tzset()
+    from pyspark.sql import SparkSession
+
+    s = (SparkSession.builder.master("local[1]").appName("netmon-windows-test")
+         .config("spark.sql.session.timeZone", "UTC").config("spark.ui.enabled", "false")
+         .config("spark.sql.shuffle.partitions", "1").getOrCreate())
+    yield s
+    s.stop()

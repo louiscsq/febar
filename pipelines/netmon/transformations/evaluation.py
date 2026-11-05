@@ -120,6 +120,12 @@ def _incident_detection_sql() -> str:
            first_available_ts IS NOT NULL AS impact_detected,
            first_signal_source, first_element_id, first_element_type, first_flags, first_evidence_ts,
            first_pipeline_latency_s, n_matched_detections, n_detected_elements,
+           -- Signed lag: negative when the first matching evidence predates impact_start_ts (e.g. a backhaul
+           -- RSL_LOW / HIGH_BER or bushfire TEMPERATURE_HIGH alarm raised before customers notice). The clipped
+           -- evidence_lag_s (>= 0) is kept for continuity; TTD is clipped the same way (detection cannot be
+           -- credited before the impact exists).
+           unix_timestamp(first_evidence_ts) - unix_timestamp(impact_start_ts) AS signed_evidence_lag_s,
+           coalesce(first_evidence_ts < impact_start_ts, false) AS evidence_before_impact,
            greatest(unix_timestamp(first_evidence_ts) - unix_timestamp(impact_start_ts), 0) AS evidence_lag_s,
            greatest((unix_millis(first_available_ts) - unix_millis(impact_start_ts)) / 1000.0, 0) AS impact_ttd_s,
            coalesce((unix_millis(first_available_ts) - unix_millis(impact_start_ts)) / 1000.0 <= {scoring.SLA_S},
@@ -169,6 +175,9 @@ def eval_ttd_summary():
                round(percentile(localisation_ttd_s, 0.5), 1) AS localisation_median_ttd_s,
                round(100.0 * count_if(localised_within_sla) / count(*), 1) AS localised_within_5min_pct,
                round(percentile(evidence_lag_s, 0.5), 1) AS median_evidence_lag_s,
+               round(percentile(signed_evidence_lag_s, 0.5), 1) AS median_signed_evidence_lag_s,
+               min(signed_evidence_lag_s) AS min_signed_evidence_lag_s,
+               count_if(evidence_before_impact) AS n_evidence_before_impact,
                round(percentile(first_pipeline_latency_s, 0.5), 1) AS median_pipeline_latency_s
         FROM {S.eval}.eval_incident_detection
         GROUP BY GROUPING SETS ((source_run), (source_run, event_class), (source_run, event_class, fault_type))""")

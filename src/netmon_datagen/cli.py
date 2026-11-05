@@ -12,6 +12,8 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out", required=True, help="output directory (local path or /Volumes/<cat>/<schema>/<vol>/...)")
     p.add_argument("--scale", default="large", choices=sorted(PRESETS))
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--topology-seed", type=int, default=None,
+                   help="network inventory seed (default: --seed); keep it fixed to draw a new run on the same network")
     p.add_argument("--dq-scale", type=float, default=1.0, help="multiply all DQ defect rates (0 disables)")
     p.add_argument("--fault-rate-multiplier", type=float, default=1.0)
     p.add_argument("--no-faults", action="store_true", help="disable faults and red herrings (clean baseline)")
@@ -23,7 +25,7 @@ def _common(p: argparse.ArgumentParser) -> None:
 def _config(a: argparse.Namespace, **extra) -> GeneratorConfig:
     faults = FaultConfig(enabled=not a.no_faults, rate_multiplier=a.fault_rate_multiplier,
                          red_herrings=not a.no_red_herrings, min_per_type=a.min_per_type)
-    return GeneratorConfig.for_scale(a.scale, seed=a.seed, dq=DQConfig().scaled(a.dq_scale), faults=faults, **extra)
+    return GeneratorConfig.for_scale(a.scale, seed=a.seed, topology_seed=a.topology_seed, dq=DQConfig().scaled(a.dq_scale), faults=faults, **extra)
 
 
 def main(argv: list[str] | None = None) -> int:

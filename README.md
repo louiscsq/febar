@@ -65,3 +65,30 @@ planned work as false positives.
 
 See [`docs/pipeline.md`](docs/pipeline.md) for the architecture, tables, expectations policy, latency
 budget, governance model and run book, and [`evidence/step2/`](evidence/step2/) for the captured run.
+
+## Root-cause model, serving and Lakebase (step 3)
+
+A trained root-cause ranker (scikit-learn gradient boosting, not an LLM; `src/netmon_pipeline/rca/`) scores every
+candidate element of a customer-impact case using only what the NOC could see at that minute. It is trained on
+a 6-day 1-minute labelled run with a time-based split (evaluated on a separate fresh holdout run) and tracked in MLflow. It is registered in Unity Catalog
+as `telco_netmon_febar_catalog.netmon_rca.rca_ranker@champion` and served on a serverless, scale-to-zero
+endpoint (`banksia-rca-ranker`). A scoring job publishes `element_status` and `open_incidents` (top-3
+suspects), which Lakebase synced tables copy into Postgres for the topology app.
+
+```bash
+databricks bundle run -p febar rca_generate_training_history && databricks bundle run -p febar netmon_pipeline
+databricks bundle run -p febar rca_train            # features, MLflow, UC model + champion, evaluation
+databricks bundle run -p febar rca_score_live       # element_status / open_incidents -> Lakebase
+databricks bundle run -p febar rca_lakebase_check   # psycopg + OAuth read-latency check
+```
+
+On a fresh holdout run generated after the design was frozen (337 faults), the model's top-1 is **93.2 %
+against 78.3 %** for step 2's topology heuristic on the same GT-free cases (top-3 95.3 % vs 80.7 %). 80.4 % of
+faults are localised within 5 minutes (step-2 localisation: 65.6 %). Slowly degrading backhaul links are still
+not localised within 5 minutes by any system: median 615 s vs 1,011 s for step 2. Step 2's *published*,
+region-wide baseline (27.9 % top-1 on the holdout; the "58 %" figure was the sparse 15-minute history) is a
+different, weaker framing.
+
+See [`docs/rca_model.md`](docs/rca_model.md) for features, labels, split, model choice, the evaluation protocol,
+results against the step-2 localiser, serving and the Lakebase design, and [`evidence/step3/`](evidence/step3/)
+for the captured run.

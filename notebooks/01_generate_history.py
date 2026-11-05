@@ -29,9 +29,12 @@ dbutils.widgets.dropdown("scale", "large", ["tiny", "small", "large", "xl"], "Sc
 dbutils.widgets.text("days", "30", "Days of history")
 dbutils.widgets.text("start_date", "", "Start date (YYYY-MM-DD, blank = today - days)")
 dbutils.widgets.text("seed", "42", "Random seed")
+dbutils.widgets.text("topology_seed", "", "Network seed (blank = seed); fix it to keep the same network")
 dbutils.widgets.dropdown("format", "parquet", ["parquet", "json"], "File format")
 dbutils.widgets.text("dq_scale", "1.0", "DQ defect rate multiplier (0 = clean)")
 dbutils.widgets.text("fault_rate_multiplier", "1.0", "Fault rate multiplier")
+dbutils.widgets.text("step_minutes", "15", "KPI reporting period in minutes (15 = 3GPP ROP, 1 = streaming-like)")
+dbutils.widgets.text("min_per_type", "1", "Guarantee at least N incidents of every fault type")
 dbutils.widgets.dropdown("overwrite", "true", ["true", "false"], "Delete existing output first")
 
 # COMMAND ----------
@@ -51,7 +54,7 @@ from netmon_datagen.config import DQConfig, FaultConfig, GeneratorConfig
 
 w = {k: dbutils.widgets.get(k) for k in [
     "catalog", "schema", "volume", "subdir", "scale", "days", "start_date", "seed", "format", "dq_scale",
-    "fault_rate_multiplier", "overwrite"]}
+    "fault_rate_multiplier", "step_minutes", "min_per_type", "topology_seed", "overwrite"]}
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{w['catalog']}`.`{w['schema']}`")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS `{w['catalog']}`.`{w['schema']}`.`{w['volume']}`")
@@ -64,9 +67,11 @@ cfg = GeneratorConfig.for_scale(
     days=int(w["days"]),
     start=w["start_date"] or None,
     seed=int(w["seed"]),
+    topology_seed=int(w["topology_seed"]) if w["topology_seed"] else None,
+    step_minutes=int(w["step_minutes"]),
     fmt=w["format"],
     dq=DQConfig().scaled(float(w["dq_scale"])),
-    faults=FaultConfig(rate_multiplier=float(w["fault_rate_multiplier"])),
+    faults=FaultConfig(rate_multiplier=float(w["fault_rate_multiplier"]), min_per_type=int(w["min_per_type"])),
 )
 print(f"Writing to {target}")
 

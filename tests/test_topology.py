@@ -154,3 +154,15 @@ def test_remote_areas_are_sparse_slow_and_long_haul(large):
     # Site share follows the weights; Sydney & NSW is the biggest region.
     share = sites.region_code.value_counts(normalize=True)
     assert share.idxmax() == "NSW" and share["PIL"] < 0.03
+
+
+def test_topology_seed_keeps_the_network_while_the_run_seed_changes():
+    from netmon_datagen.config import GeneratorConfig
+    from netmon_datagen.engine import Engine
+
+    base = Engine(GeneratorConfig.for_scale("tiny", seed=42)).topo
+    same = Engine(GeneratorConfig.for_scale("tiny", seed=4242, topology_seed=42)).topo
+    other = Engine(GeneratorConfig.for_scale("tiny", seed=4242)).topo
+    cols = ["element_id", "parent_id", "element_type", "lat", "lon"]
+    assert base.nodes[cols].equals(same.nodes[cols])
+    assert not base.nodes[cols].equals(other.nodes[cols])

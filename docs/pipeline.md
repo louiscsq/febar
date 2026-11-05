@@ -155,6 +155,16 @@ window qualify (it is excluded, so nothing is localised from it). They also chec
 is never stamped earlier than the arrival of its qualifying row, and that a late record's own detection is
 timed at its arrival.
 
+**One implementation, tested in Spark.** The late rule (`windows.is_late_sql`, used by silver for kpis, alarms
+and sessions), the real-time record filter (`windows.realtime_records`), the window aggregate
+(`windows.window_health`) and the per-record baseline comparison (`windows.score_against_baseline`) live in
+`src/netmon_pipeline/windows.py` and are what `silver.py` / `gold.py` call. The real-time stream and the
+after-the-fact `gold_cell_health_5m_retrospective` share the same baseline-comparison and window code.
+`tests/test_pipeline_windows_spark.py` runs these functions on a local SparkSession and checks them, record by
+record and window by window, against the Python mirror (`rules.is_late_py`, `windows.realtime_window`),
+including the 20-minute threshold edge; it also asserts that the pipeline sources contain no private copy of
+the rule. It needs `pyspark` and a Java 17/21 runtime (`pip install -e ".[dev,spark-tests]"`).
+
 **Latency budget** (impact start → detection row available to the NOC), live 1-minute feed:
 
 | stage | budget | |
@@ -219,6 +229,12 @@ ancestors and neighbours is step 3's job (`eval_rca_baseline` is the heuristic b
 headline tables lead with fault-only rows; planned work is reported separately because the NOC suppresses
 it via the change calendar.
 
+- **Evidence before impact.** `evidence_lag_s` and the TTDs are clipped at 0 (a detection is never credited
+  before the impact exists). The unclipped value is kept as `signed_evidence_lag_s`, with
+  `evidence_before_impact`; it is negative when the first matching evidence, typically an alarm such as a
+  router's `NODE_DOWN` raised before its cells lose service, predates `impact_start_ts`.
+  `eval_ttd_summary` reports `median_signed_evidence_lag_s`, `min_signed_evidence_lag_s` and
+  `n_evidence_before_impact`.
 - **Timing.** `ttd = available_ts − impact_start_ts`, where `available_ts = evidence_ts + pipeline_latency_s`.
   `evidence_ts` is when the evidence reached the NOC on the generator's clock: the micro-batch landing
   time (from the file name) for live files, `emitted_ts` for batch history. `pipeline_latency_s` is

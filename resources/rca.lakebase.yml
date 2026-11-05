@@ -1,0 +1,13 @@
+# Lakebase (managed Postgres) for the step-5 topology app: Lakebase Provisioned, because bundles declare its
+# synced tables (`synced_database_tables`) natively. The synced tables (resources/rca.synced_tables.yml) copy the
+# Delta tables netmon_rca.element_status and netmon_rca.open_incidents into the Postgres database
+# `netmon_serving` on this instance. They are registered in the project catalog (netmon_rca schema) rather than
+# in a Lakebase database catalog: creating a catalog needs CREATE CATALOG on the metastore, which this
+# workspace denies (docs/rca_model.md, "Workspace limitations"). No credentials anywhere: readers and the
+# latency check use short-lived OAuth tokens (generate_database_credential). See docs/rca_model.md.
+resources:
+  database_instances:
+    netmon_lakebase:
+      name: ${var.lakebase_instance}
+      capacity: CU_1
+

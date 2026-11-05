@@ -1,0 +1,17 @@
+# Serverless Model Serving endpoint for the UC-registered ranker (the version the `champion` alias points at;
+# set rca_model_version after a training run). Scale to zero: no cost while idle, a cold start on first call.
+resources:
+  model_serving_endpoints:
+    rca_ranker:
+      name: banksia-rca-ranker
+      config:
+        served_entities:
+          - name: rca-ranker
+            entity_name: ${var.catalog}.${resources.schemas.netmon_rca.name}.rca_ranker
+            entity_version: ${var.rca_model_version}
+            workload_size: Small
+            scale_to_zero_enabled: true
+        traffic_config:
+          routes:
+            - served_model_name: rca-ranker
+              traffic_percentage: 100

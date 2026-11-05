@@ -21,7 +21,6 @@ HEALTH_WATERMARK = "2 minutes"
 METRICS = ["availability_pct", "active_users", "prb_util_pct", "rrc_setup_success_pct", "attach_success_pct",
            "session_drop_rate_pct", "dl_throughput_mbps", "ul_throughput_mbps", "latency_ms", "packet_loss_pct"]
 BASE = detection.BASELINE_METRICS
-BASE_COLS = [f"b_{m}_{s}" for m in BASE for s in ("mean", "std")]
 ANCESTOR_COLS = ["site_id", "backhaul_id", "router_id", "upf_id", "amf_id"]
 
 
@@ -71,55 +70,16 @@ def gold_cell_baseline():
 @dp.temporary_view(name="kpis_scored")
 def kpis_scored():
     """Silver KPI stream joined to its baseline, with z-scores and the detection rules that fire."""
-    base = spark.read.table(f"{S.gold}.gold_cell_baseline").withColumnRenamed("valid_date", "local_date") \
-        .select("cell_id", "local_hour", "day_type", "local_date", "n_days", *BASE_COLS)
-    df = spark.readStream.table(f"{S.silver}.silver_kpis").join(
-        F.broadcast(base), ["cell_id", "local_hour", "day_type", "local_date"], "left")
-    for m in BASE:
-        df = df.withColumn(f"{m}_z", F.expr(detection.zscore_sql(m)))
-    return df.withColumn("flags", F.expr(detection.flags_sql()))
-
-
-def _window_health(df, width: str):
-    """Per-cell window aggregate, baseline z-scores and fired rules over `df` (stream or batch)."""
-    agg = (
-        # source_run keeps generator runs apart even if their windows ever overlap in time.
-        df.groupBy(F.window("event_ts", width).alias("w"), "source_run", "cell_id", *ANCESTOR_COLS, "region_code",
-                   "timezone")
-        .agg(
-            F.count("*").alias("n_reports"),
-            F.max("granularity_s").alias("granularity_s"),
-            F.min("availability_pct").alias("min_availability_pct"),
-            *[F.avg(m).alias(m) for m in METRICS],
-            *[F.avg(c).alias(c) for c in BASE_COLS],
-            F.sum(F.when(F.size("flags") > 0, 1).otherwise(0)).alias("n_flagged_reports"),
-            F.sum(F.col("is_late").cast("int")).alias("n_late_reports"),
-            # Latest arrival among exactly the records this window is built from.
-            F.max("evidence_ts").alias("evidence_ts"),
-        )
-    )
-    out = (
-        agg.withColumn("window_start", F.col("w.start")).withColumn("window_end", F.col("w.end")).drop("w")
-        .withColumn("window_start_local", F.expr("from_utc_timestamp(window_start, timezone)"))
-    )
-    for m in BASE:
-        out = out.withColumn(f"{m}_z", F.expr(detection.zscore_sql(m)))
-    out = (
-        out.withColumn("flags", F.expr(detection.flags_sql()))
-        .withColumn("is_degraded", F.size("flags") > 0)
-        .withColumn("max_abs_z", F.greatest(*[F.abs(F.col(f"{m}_z")) for m in BASE]))
-    )
-    # Keys first: Delta collects stats on the leading 32 columns, which liquid clustering needs.
-    keys = ["window_start", "window_end", "source_run", "cell_id", "region_code", "is_degraded", "flags"]
-    return out.select(*keys, *[c for c in out.columns if c not in keys])
+    return windows.score_against_baseline(spark.readStream.table(f"{S.silver}.silver_kpis"),
+                                          spark.read.table(f"{S.gold}.gold_cell_baseline"))
 
 
 def health(width: str):
     """Real-time windows: on-time records only, so qualification and timing use the same record set
     (netmon_pipeline.windows). These feed the topology rollup and rollup localisation."""
-    return _window_health(
-        spark.readStream.table("kpis_scored").where(windows.REALTIME_FILTER_SQL)
-        .withWatermark("event_ts", HEALTH_WATERMARK), width)
+    return windows.window_health(
+        windows.realtime_records(spark.readStream.table("kpis_scored")).withWatermark("event_ts", HEALTH_WATERMARK),
+        width, METRICS, ANCESTOR_COLS)
 
 
 @dp.table(
@@ -153,13 +113,10 @@ def gold_cell_health_5m():
     cluster_by=["window_start", "cell_id"],
 )
 def gold_cell_health_5m_retrospective():
-    base = spark.read.table(f"{S.gold}.gold_cell_baseline").withColumnRenamed("valid_date", "local_date") \
-        .select("cell_id", "local_hour", "day_type", "local_date", "n_days", *BASE_COLS)
-    df = spark.read.table(f"{S.silver}.silver_kpis").join(
-        F.broadcast(base), ["cell_id", "local_hour", "day_type", "local_date"], "left")
-    for m in BASE:
-        df = df.withColumn(f"{m}_z", F.expr(detection.zscore_sql(m)))
-    return _window_health(df.withColumn("flags", F.expr(detection.flags_sql())), "5 minutes")
+    # The same baseline comparison and window code as the real-time tables, over every record.
+    scored = windows.score_against_baseline(spark.read.table(f"{S.silver}.silver_kpis"),
+                                            spark.read.table(f"{S.gold}.gold_cell_baseline"))
+    return windows.window_health(scored, "5 minutes", METRICS, ANCESTOR_COLS)
 
 
 # ---------------------------------------------------------------------------------------------------

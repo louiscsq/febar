@@ -14,12 +14,11 @@ sys.path.insert(0, spark.conf.get("netmon.src_path"))
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
-from netmon_pipeline import paths, rules
+from netmon_pipeline import paths, rules, windows
 from netmon_pipeline.detection import DAY_TYPE_SQL, LOCAL_TS_SQL, alarm_signal_sql
 from netmon_pipeline.settings import Settings
 
 S = Settings.from_conf(spark.conf.get)
-LATE = rules.LATE_THRESHOLD_S
 RECORD_ID_RE = '"record_id":"([^"]+)"'
 PII_REDACT = r"regexp_replace(regexp_replace({c}, '00101[0-9]{{10}}', '00101**********'), '[+]999[0-9]{{9}}', '+999*********')"
 
@@ -117,7 +116,7 @@ def kpis_typed():
         .join(F.broadcast(dim_cells()), "cell_id", "left")
         .withColumn("event_end_ts", F.expr("timestampadd(SECOND, granularity_s, event_ts)"))
         .withColumn("lag_s", F.expr("unix_timestamp(emitted_ts) - unix_timestamp(event_end_ts)"))
-        .withColumn("is_late", F.expr(f"coalesce(lag_s > {LATE}, false)"))
+        .withColumn("is_late", F.expr(windows.is_late_sql("lag_s")))
         .withColumn("event_ts_local", F.expr(LOCAL_TS_SQL.format(ts="event_ts")))
         .withColumn("local_date", F.expr("to_date(event_ts_local)"))  # baseline day (local calendar)
         .withColumn("local_hour", F.expr("hour(event_ts_local)"))
@@ -154,7 +153,7 @@ def alarms_typed():
         typed("alarms", ["event_ts", "emitted_ts"])
         .join(F.broadcast(dim_elements()), "element_id", "left")
         .withColumn("lag_s", F.expr("unix_timestamp(emitted_ts) - unix_timestamp(event_ts)"))
-        .withColumn("is_late", F.expr(f"coalesce(lag_s > {LATE}, false)"))
+        .withColumn("is_late", F.expr(windows.is_late_sql("lag_s")))
         .withColumn("event_ts_local", F.expr("from_utc_timestamp(event_ts, timezone)"))
         .withColumn("is_service_down", F.expr(f"coalesce({alarm_signal_sql()}, false)"))
     )
@@ -190,7 +189,7 @@ def _sessions(dedupe: bool):
         # Pseudonymous subscriber key for downstream counts (not reversible from the gold tables alone).
         .withColumn("subscriber_key", F.expr("sha2(concat('banksia-netmon:', imsi), 256)"))
         .withColumn("lag_s", F.expr("unix_timestamp(emitted_ts) - unix_timestamp(end_ts)"))
-        .withColumn("is_late", F.expr(f"coalesce(lag_s > {LATE}, false)"))
+        .withColumn("is_late", F.expr(windows.is_late_sql("lag_s")))
         .withColumn("start_ts_local", F.expr("from_utc_timestamp(start_ts, timezone)"))
     )
 

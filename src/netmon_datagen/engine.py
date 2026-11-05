@@ -38,9 +38,9 @@ def config_dict(cfg: GeneratorConfig) -> dict:
 class Engine:
     def __init__(self, cfg: GeneratorConfig):
         self.cfg = cfg
-        self.topo = build_topology(cfg.scale, cfg.seed)
+        self.topo = build_topology(cfg.scale, cfg.network_seed)
         self.subs = SubscriberBase.build(self.topo, cfg.scale.subscribers)
-        self.flappers = select_flapping(self.topo, cfg.faults, cfg.seed)
+        self.flappers = select_flapping(self.topo, cfg.faults, cfg.network_seed)
         self.spool = Spool()
         self.generated = dict.fromkeys(FEEDS, 0)
         # Streaming bookkeeping: an observer called with (feed, post-DQ frame) for every generated batch of
