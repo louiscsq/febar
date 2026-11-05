@@ -46,6 +46,7 @@ suspects are written to Lakebase for the step-5 topology app. Proof that all of 
 | `notebooks/03_rca_train.py` | job `banksia-rca-train`: features, labels, MLflow, UC registration, evaluation tables |
 | `notebooks/04_rca_score_live.py` | job `banksia-rca-score-live`: batch scoring of the live run, Delta MERGE, Lakebase sync trigger |
 | `notebooks/06_rca_evaluate_holdout.py` | job `banksia-rca-evaluate-holdout`: frozen champion on `holdout_1m` (once) and the live run, GT-free scoring then matching |
+| `notebooks/07_rca_any_alert_metric.py` | job `banksia-rca-any-alert-metric`: the non-oracle companion metric (any live alert correct at the SLA moment) on the frozen scores |
 | `notebooks/05_lakebase_check.py` | job `banksia-rca-lakebase-check`: Postgres database setup, psycopg + OAuth read-latency check |
 | `resources/rca.*.yml` | jobs, Lakebase instance, synced tables, serving endpoint (bundle) |
 | `tests/test_rca_features.py`, `tests/test_rca_live.py` | leakage, timing, candidates, labels, split, evaluation, live outputs |
@@ -143,11 +144,12 @@ chosen on the validation day only, by the best F1 of "the alerted top-1 is a tru
 alerting cases, recall over fault cases). The curve is logged as `evaluation/threshold_curve.csv`.
 
 **MLflow and UC.** Experiment `/Shared/banksia_netmon/rca_ranker`. The run logs parameters, split sizes,
-metrics (validation, test, live), permutation feature importance (average precision on validation), the
+metrics (validation and dev; the holdout and live run are scored by a separate frozen-model run), permutation feature importance (average precision on validation), the
 threshold curve, every evaluation table, the feature list, and the model with signature and input example.
 `pyfunc` returns `predict_proba`. The model is registered as
 `telco_netmon_febar_catalog.netmon_rca.rca_ranker`. The job moves the alias **`champion`** to the new
-version and tags it with `alert_threshold`, `train_run` and `test_top1_pct`.
+version and tags it with `alert_threshold`, `train_run` and `dev_top1_pct`. The one-shot holdout evaluation
+(`banksia-rca-evaluate-holdout`) adds `holdout_top1_pct` and `holdout_eval_run_id`.
 
 ## Results vs the step-2 localiser
 
@@ -227,6 +229,15 @@ run `b678bdd4d2c84591bdc4e1bfec61d5c2`). n = 337 scored faults.
   to correct localisation is 615 s, against 1,011 s for step 2 and 727.5 s for the heuristic on the same cases.
   Top-1 accuracy at the SLA moment is 86.8 % (heuristic on the same cases: 3.8 %). The heuristic's filter needs
   ≥ 80 % of a link's cells impacted, and a degrading link flags about 30 %.
+- **Non-oracle companion: any live alert correct at the SLA moment** (`evaluate.any_alert_at_sla`, job
+  `banksia-rca-any-alert-metric` on the frozen v4 scores). Top-1 above judges the case output that ground truth
+  picked by footprint overlap, with no score threshold. The companion uses no footprint: at the same fixed
+  decision time (first decision time ≥ impact start + 5 min), is **any** live alert of the incident's region (a
+  case whose top-1 score ≥ 0.32) naming a valid root? **Holdout 81.0 %** (top-1 93.2 % on the same 337
+  incidents), **dev 83.9 %** (94.1 %). It matches top-1 for cell outages (95.2 %), site power (97.4 %), router
+  failures (87.5 %) and AMF overloads (100 %). The whole gap is **slow backhaul: 9.4 %** (top-1 86.8 %): at 5
+  minutes the right link is ranked first in its case but has not cleared the alert threshold yet, which is the
+  early-catch result again (0 % within 5 min). A region has a median of 5 live alerts at that minute.
 - **Secondary, alert-level fault precision** (step 2's definitions and code): model 395 alerts, **92.4 %** real
   faults. Step-2 detections over the same days: 14,028 alerts, 97.6 %. The model pages about once per incident,
   not once per impacted element, at lower precision.
@@ -306,6 +317,7 @@ databricks bundle run -p febar rca_train                        # features, MLfl
 databricks bundle run -p febar rca_generate_holdout             # fresh holdout (new seed, same network, later days)
 databricks bundle run -p febar netmon_pipeline                  # step-2 pipeline over the holdout
 databricks bundle run -p febar rca_evaluate_holdout             # frozen champion on the holdout, once
+databricks bundle run -p febar rca_any_alert_metric             # non-oracle companion metric (frozen scores)
 databricks bundle run -p febar rca_lakebase_check --params stage=setup
 databricks bundle run -p febar rca_score_live                   # element_status / open_incidents (+ sync)
 # set rca_model_version to the champion version, then deploy again (endpoint + synced tables)

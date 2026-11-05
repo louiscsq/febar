@@ -141,6 +141,16 @@ Scored incidents only (customer-impacting, uncensored faults); n = incidents."""
             "stepwise2", "step2"),
                 "`step2_region_wide_*` = step 2's published `eval_rca_baseline` (whole region, first 15 minutes), a "
                 "different and weaker framing, shown for reference only.")
+        d.query(f"{label}: non-oracle companion, any live alert correct at the SLA decision time", f"""
+            SELECT fault_type, n, any_alert_correct_pct, matched_top1_pct AS oracle_matched_top1_pct,
+                   median_region_alerts FROM {R}.rca_eval_{split}_any_alert_summary
+            ORDER BY fault_type = 'ALL' DESC, n DESC""",
+                "No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any "
+                "live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a "
+                "valid root? Ground truth supplies only the region, the impact start and the root list. "
+                "`oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), "
+                "on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job "
+                "`banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.")
         d.query(f"{label}: early catch (signed times), model vs heuristic on the same cases vs step-2 localisation",
                 f"""
             SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_pre_impact_n,

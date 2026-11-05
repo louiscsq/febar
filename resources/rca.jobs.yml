@@ -143,3 +143,22 @@ resources:
           timeout_seconds: 7200
           notebook_task:
             notebook_path: ../notebooks/06_rca_evaluate_holdout.py
+
+    # Non-oracle companion metric (PR #4 review): any live alert correct at the SLA decision time, no footprint
+    # matching. Reuses the frozen champion's stored scores (holdout) / the dev days' features; nothing is retrained.
+    rca_any_alert_metric:
+      name: banksia-rca-any-alert-metric
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: train_run, default: "${var.rca_train_run}"}
+        - {name: holdout_run, default: "${var.rca_holdout_run}"}
+        - {name: dev_start, default: "2026-10-14"}
+        - {name: model_name, default: rca_ranker}
+      environments: *rca_ml_envs
+      tasks:
+        - task_key: any_alert
+          environment_key: rca
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../notebooks/07_rca_any_alert_metric.py

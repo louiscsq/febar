@@ -124,8 +124,12 @@ def evaluate_run(scored: pd.DataFrame, inc: pd.DataFrame, threshold: float, base
         prec_rows.append({"system": "step2 detections", **evaluate.alert_precision(d, inc)})
     prec = pd.DataFrame(prec_rows)
 
+    any_alert = evaluate.any_alert_at_sla(out_model, inc_p, threshold)  # non-oracle: no footprint matching
+    any_sum = evaluate.any_alert_summary(any_alert, ranks)
+
     tables = {f"{name}_ranking": ranks, f"{name}_accuracy": acc, f"{name}_early_catch": catch,
-              f"{name}_early_catch_summary": csum, f"{name}_alert_precision": prec}
+              f"{name}_early_catch_summary": csum, f"{name}_alert_precision": prec,
+              f"{name}_any_alert": any_alert, f"{name}_any_alert_summary": any_sum}
     a = acc.set_index("fault_type").loc["ALL"]
     c = csum.set_index("fault_type")
     m = {f"{name}_n_incidents": int(a["n"]), f"{name}_top1_pct": float(a["model_top1_pct"]),
@@ -133,7 +137,8 @@ def evaluate_run(scored: pd.DataFrame, inc: pd.DataFrame, threshold: float, base
          f"{name}_heuristic_same_cases_top1_pct": float(a["heuristic_same_cases_top1_pct"]),
          f"{name}_heuristic_same_cases_top3_pct": float(a["heuristic_same_cases_top3_pct"]),
          f"{name}_within_5min_pct": float(c.loc["ALL", "model_within_5min_pct"]),
-         f"{name}_alert_precision_pct": float(prec_rows[0]["fault_precision_pct"] or 0.0)}
+         f"{name}_alert_precision_pct": float(prec_rows[0]["fault_precision_pct"] or 0.0),
+         f"{name}_any_alert_correct_pct": float(any_sum.set_index("fault_type").loc["ALL", "any_alert_correct_pct"])}
     if "baseline_top1_pct" in a:
         m[f"{name}_baseline_top1_pct"] = float(a["baseline_top1_pct"])
     if "BACKHAUL_DEGRADATION" in c.index:

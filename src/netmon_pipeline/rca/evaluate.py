@@ -22,6 +22,12 @@ Primary measures (scored incidents: customer-impacting, uncensored faults):
   validation-chosen threshold. Times are signed (`decision_ts - impact_start_ts`): a catch before the impact
   starts is negative and counted separately, never clipped to 0.
 
+Non-oracle companion (`any_alert_at_sla`): the primary measures judge the case output that ground truth *picked*
+(largest footprint overlap). The companion uses no footprint: at the same fixed decision time (the first decision
+time at least 5 minutes after impact start), is **any** live alert of the incident's region (a case whose top-1
+score is at least the threshold) naming a valid root? It is what a NOC reading every page at that minute would
+see, without knowing which page belongs to which incident.
+
 Secondary (reported, never optimised): **alert-level fault precision** (`alert_precision`): case top-1 elements
 at or above the threshold, grouped and labelled with step 2's own definitions (`netmon_pipeline.scoring`); the
 same code scores the step-2 detections of the same period.
@@ -169,6 +175,48 @@ def catch_summary(catch: pd.DataFrame, step2: pd.DataFrame | None = None) -> pd.
             row.update({"step2_localised_pct": round(100 * g["step2_localisation_s"].notna().mean(), 1),
                         "step2_within_5min_pct": round(100 * g["step2_within_5min"].mean(), 1),
                         "step2_median_s": median_or_none(g["step2_localisation_s"])})
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def any_alert_at_sla(outputs: pd.DataFrame, incidents: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    """Per scored incident, without footprint matching: at the first decision time of the incident's run and
+    region at least 5 minutes after impact start (up to 15 minutes), the region's live alerts (case outputs
+    whose top-1 score >= threshold), and whether any of them names a valid root as its top-1. Ground truth
+    only supplies the region, the impact start and the root list; it never chooses which output is judged."""
+    alerts = outputs[outputs["top1_score"] >= threshold]
+    times = {k: np.sort(g["decision_ts"].unique()) for k, g in outputs.groupby(["source_run", "region_code"])}
+    by_t = {k: g for k, g in alerts.groupby(["source_run", "region_code", "decision_ts"])}
+    rows = []
+    for r in _scored_incidents(incidents).itertuples(index=False):
+        ts = times.get((r.source_run, r.region_code), np.array([], dtype="datetime64[ns]"))
+        lo, hi = r.impact_start_ts + SNAPSHOT_AFTER, r.impact_start_ts + SNAPSHOT_LIMIT
+        cand = [t for t in pd.to_datetime(ts, utc=True) if lo <= t <= hi]
+        t = cand[0] if cand else None
+        a = by_t.get((r.source_run, r.region_code, t)) if t is not None else None
+        tops = [] if a is None else sorted(a["top1_element"].tolist())
+        roots = set(r.roots)
+        rows.append({"source_run": r.source_run, "incident_id": r.incident_id, "fault_type": r.fault_type,
+                     "region_code": r.region_code, "decision_ts": t,
+                     "evaluated_at_s": None if t is None else (t - r.impact_start_ts).total_seconds(),
+                     "n_region_alerts": len(tops), "alert_top1_elements": tops,
+                     "n_correct_alerts": sum(e in roots for e in tops),
+                     "any_alert_correct": any(e in roots for e in tops)})
+    return pd.DataFrame(rows)
+
+
+def any_alert_summary(per_incident: pd.DataFrame, ranks: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Per fault type: n, any-alert-correct %, median live alerts in the region at that minute, and (when the
+    ranking table is given) the oracle-matched top-1 % on the same incidents, side by side."""
+    x = per_incident.copy()
+    if ranks is not None:
+        x = x.merge(ranks[["source_run", "incident_id", "hit_at_1"]], on=["source_run", "incident_id"], how="left")
+    rows = []
+    for ft, g in [("ALL", x), *x.groupby("fault_type")]:
+        row = {"fault_type": ft, "n": len(g), "any_alert_correct_pct": round(100 * g["any_alert_correct"].mean(), 1),
+               "median_region_alerts": median_or_none(g["n_region_alerts"].astype(float))}
+        if ranks is not None:
+            row["matched_top1_pct"] = round(100 * g["hit_at_1"].fillna(False).astype(bool).mean(), 1)
         rows.append(row)
     return pd.DataFrame(rows)
 
