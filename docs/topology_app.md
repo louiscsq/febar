@@ -41,9 +41,9 @@ App: `banksia-noc-topology`, https://banksia-noc-topology-7474648429104135.aws.d
 | `GET /api/regions/{r}/topology[?incident_id=]` | UC inventory (user, cached) + Lakebase status | graph (overview or incident focus) and map points |
 | `POST /api/incidents/{id}/sms-review` | Lakebase write | `{decision: approve|reject, summary_id, note}` |
 | `GET /api/incidents/{id}/sms-reviews` | Lakebase | review history |
-| `GET /api/kpis` | UC (user) | operational MTTD and share within 5 min per region; the scored scorecard (national only) |
+| `GET /api/kpis` | UC (user) | operational MTTD and share within 5 min per region (`netmon_noc.incident_detection_times`) |
 | `POST /api/genie/ask` | Genie (user) | `{question, conversation_id?}` → text, SQL, result table |
-| `GET /api/health` | Lakebase | round trip as the app service principal |
+| `GET /api/health` | Lakebase | connection status only: the Postgres role and server time (no data) |
 
 ## Lakebase hot path, SQL warehouse for reference data and analytics
 
@@ -52,7 +52,7 @@ App: `banksia-noc-topology`, https://banksia-noc-topology-7474648429104135.aws.d
 | open incidents + top-3 suspects, element status, AI summary + SMS draft | **Lakebase** (`netmon_rca.lb_open_incidents`, `lb_element_status`, `netmon_genai.lb_incident_ai_latest`) | changes every scoring / assistant run, read on every click: millisecond Postgres lookups (server-side p50 10–29 ms per API call, `04_app_deployment.md`) with no warehouse to keep warm |
 | SMS approve / reject | **Lakebase** write (`netmon_app.sms_draft_reviews`) | an operational, transactional write with who / when; Delta is not an OLTP store |
 | region scope, network inventory (names, hierarchy, coordinates) | SQL warehouse, **as the user** | reference data that changes with network builds, not by the minute (cached 15 min per region); reading it as the user is also how Unity Catalog's row filter decides the user's regions |
-| operational detection timing, KPI tiles, scorecard | SQL warehouse, as the user | analytics over gold detections; seconds are fine, and the scorecard needs the user's grants |
+| operational detection timing, KPI tiles | SQL warehouse, as the user | analytics over gold detections (operational, no ground truth); seconds are fine |
 | Ask Genie | Genie, as the user | Genie generates and runs the SQL itself |
 
 ## Identity and governance
@@ -71,10 +71,23 @@ for the VIC topology (shown in `07`). The SMS review records `reviewed_by` from 
 (`x-forwarded-email`); a request without one is refused (401).
 
 **No subscriber data and no ground truth.** The app's sources hold neither: the Lakebase tables carry the ranker's
-and the assistant's outputs, the UC reads are the `netmon_noc` views (never `silver_sessions`), and the only eval-schema
-read is the labelled KPI scorecard. On top of that, `safety.scrub` drops any IMSI / MSISDN / subscriber-key column and
+and the assistant's outputs, the UC reads are the `netmon_noc` views (never `silver_sessions`), and nothing reads the ground-truth `netmon_eval`
+schema (`tests/test_no_ground_truth_surface.py` scans the app's SQL, sources and every API response). On top of that, `safety.scrub` drops any IMSI / MSISDN / subscriber-key column and
 every ground-truth label column (step 3's `LABEL_COLUMNS`) at any depth of every response, Genie results included, and
 redacts raw IMSI- or MSISDN-shaped strings (`tests/test_app_api_safety.py` poisons every source with them).
+
+**Trust boundary: forwarded headers.** A Databricks App is reachable only through the Apps proxy, which authenticates
+the browser session and sets `x-forwarded-email`, `x-forwarded-preferred-username` and the downscoped
+`x-forwarded-access-token` on every request. The app trusts those headers for `reviewed_by` and passes the token to UC
+and Genie. A client cannot impersonate someone else by sending its own values: the evidence call that sends spoofed
+`x-forwarded-email` / `x-forwarded-access-token` through the proxy shows the backend still saw the real signed-in user
+(`04_app_deployment.md`). And the token, not the email, is what UC and Genie authorise. If the app were ever
+exposed without the proxy (for example, run locally), the headers would be untrusted: local runs use
+`NOC_DEV_REGIONS` and the developer's own CLI identity.
+
+**Lakebase permission.** The app's `database` resource grants `CAN_CONNECT_AND_CREATE`, the only permission level
+the Apps `database` resource offers (bundle schema enum). The app needs CREATE once, to create and own
+`netmon_app.sms_draft_reviews`; on the synced tables it gets SELECT only (`app_lakebase_grants`).
 
 **Never sends.** The review table has `CHECK (sent_at IS NULL)` and `CHECK (send_channel = 'none')`; the app has no
 messaging integration; a privileged `UPDATE … SET sent_at = now()` is rejected by the constraint

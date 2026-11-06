@@ -130,8 +130,8 @@ See [`docs/genai_assistant.md`](docs/genai_assistant.md) and [`evidence/step4/`]
 A **Genie space** for the NOC (`resources/genie.yml`, defined in `src/netmon_pipeline/genie_space.py`) answers questions
 about open incidents, the failing element and its top-3 suspects, element health, customer impact by region and the
 detection KPIs over region-filtered `netmon_noc` views: Genie queries as the asking user, so a regional analyst only
-sees their region and nobody sees IMSI / MSISDN. Its 18-question benchmark scores 17 / 18 on the final run by Genie's grader
-(15–17 across four runs; misses and variance in `evidence/step5/README.md`).
+sees their region and nobody sees IMSI / MSISDN. Its 18-question benchmark: final run 16 / 18 by Genie's grader;
+post-fix runs varied 16–18 / 18 (misses in `evidence/step5/README.md`).
 
 The **Databricks App** `banksia-noc-topology` (`app/`, FastAPI + a static page) draws the region's network from core to
 cells with live health and pinpoints the failing element of the selected incident on a tree and on a map of Australia.

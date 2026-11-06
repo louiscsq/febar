@@ -1,6 +1,6 @@
 # Auth and governance: who reads what, and what a regional user sees
 
-Captured 2026-11-06 12:29 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
+Captured 2026-11-06 13:52 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
 
 **Identities.**
 
@@ -84,7 +84,7 @@ _1 row(s)_
 {
   "request": "GET /api/me",
   "http_status": 200,
-  "latency_ms": 1944,
+  "latency_ms": 1196,
   "body": {
     "user": "louis.chen@databricks.com",
     "name": "Louis Chen",
@@ -108,7 +108,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents",
   "http_status": 200,
-  "latency_ms": 1009,
+  "latency_ms": 1046,
   "body": {
     "n": 17,
     "regions": [
@@ -143,7 +143,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents/RCA-27ed3e8af852d33a  (a VIC incident)",
   "http_status": 200,
-  "latency_ms": 1956,
+  "latency_ms": 2056,
   "body": {
     "incident_id": "RCA-27ed3e8af852d33a",
     "region_code": "VIC"
@@ -155,7 +155,7 @@ _1 row(s)_
 {
   "request": "GET /api/regions/VIC/topology",
   "http_status": 200,
-  "latency_ms": 1682,
+  "latency_ms": 1569,
   "body": {
     "region": "VIC",
     "n_elements": 685
@@ -167,7 +167,7 @@ _1 row(s)_
 {
   "request": "GET /api/kpis",
   "http_status": 200,
-  "latency_ms": 2497,
+  "latency_ms": 1912,
   "body": {
     "operational": [
       {
@@ -188,17 +188,7 @@ _1 row(s)_
         "mttd_s": 168.5,
         "pct_detected_within_5min": 100.0
       }
-    ],
-    "scorecard": {
-      "available": true,
-      "n_incidents": 26,
-      "impact_detected_pct": 100.0,
-      "impact_median_ttd_s": 141.4,
-      "impact_p90_ttd_s": 430.4,
-      "impact_within_5min_pct": 88.5,
-      "root_localised_pct": 100.0,
-      "localised_within_5min_pct": 88.5
-    }
+    ]
   }
 }
 ```
@@ -207,12 +197,12 @@ _1 row(s)_
 {
   "request": "POST /api/genie/ask {How many open incidents are there per region?}",
   "http_status": 200,
-  "latency_ms": 13784,
+  "latency_ms": 19420,
   "body": {
     "text": [
-      "There are **3 regions** with open incidents in the visible data: **NSW has 9**, **VIC has 7**, and **NQL has 1**. **NSW** has the highest count, and incident volume drops sharply outside NSW and VIC."
+      "There are **3 regions** with open incidents in the visible data: **NSW has 9**, **VIC has 7**, and **NQL has 1**. **NSW has the most** open incidents, while **NQL has the fewest** among the regions you can see."
     ],
-    "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code` ASC",
+    "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code`",
     "columns": [
       "region_code",
       "open_incidents"
@@ -249,7 +239,7 @@ SELECT region_code, count(*) AS n FROM telco_netmon_febar_catalog.netmon_noc.ope
 
 _3 row(s)_
 
-**Membership switched**: capturing user removed from `noc_national` and added to `noc_region_nsw` (SCIM PATCH on the workspace groups). The app reported region scope ['NSW'] after 282 s (UC membership propagation + the app's 5-minute scope cache).
+**Membership switched**: capturing user removed from `noc_national` and added to `noc_region_nsw` (SCIM PATCH on the workspace groups). The app reported region scope ['NSW'] after 501 s (UC membership propagation + the app's 5-minute scope cache).
 
 ```sql
 SELECT is_member('noc_national') AS in_noc_national, is_member('noc_region_nsw') AS in_noc_region_nsw
@@ -267,7 +257,7 @@ _1 row(s)_
 {
   "request": "GET /api/me",
   "http_status": 200,
-  "latency_ms": 1074,
+  "latency_ms": 1049,
   "body": {
     "user": "louis.chen@databricks.com",
     "name": "Louis Chen",
@@ -288,7 +278,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents",
   "http_status": 200,
-  "latency_ms": 1074,
+  "latency_ms": 1086,
   "body": {
     "n": 9,
     "regions": [
@@ -313,7 +303,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents/RCA-27ed3e8af852d33a  (a VIC incident)",
   "http_status": 404,
-  "latency_ms": 1175,
+  "latency_ms": 1035,
   "body": {
     "error": "no open incident RCA-27ed3e8af852d33a in your regions"
   }
@@ -324,7 +314,7 @@ _1 row(s)_
 {
   "request": "GET /api/regions/VIC/topology",
   "http_status": 403,
-  "latency_ms": 1048,
+  "latency_ms": 1074,
   "body": {
     "error": "region VIC is not in your NOC scope ['NSW']"
   }
@@ -335,7 +325,7 @@ _1 row(s)_
 {
   "request": "GET /api/kpis",
   "http_status": 200,
-  "latency_ms": 2624,
+  "latency_ms": 2808,
   "body": {
     "operational": [
       {
@@ -344,17 +334,7 @@ _1 row(s)_
         "mttd_s": 160.7,
         "pct_detected_within_5min": 100.0
       }
-    ],
-    "scorecard": {
-      "available": true,
-      "n_incidents": 26,
-      "impact_detected_pct": 100.0,
-      "impact_median_ttd_s": 141.4,
-      "impact_p90_ttd_s": 430.4,
-      "impact_within_5min_pct": 88.5,
-      "root_localised_pct": 100.0,
-      "localised_within_5min_pct": 88.5
-    }
+    ]
   }
 }
 ```
@@ -363,12 +343,13 @@ _1 row(s)_
 {
   "request": "POST /api/genie/ask {How many open incidents are there per region?}",
   "http_status": 200,
-  "latency_ms": 14920,
+  "latency_ms": 20451,
   "body": {
     "text": [
-      "In the visible results, **NSW** has **9 open incidents**. Based on the returned data, **NSW** is the highest-count region in the regions you can see."
+      "Would you like to see the number of open incidents broken down by region and status instead?",
+      "In the visible results, region **NSW** has **9** open incidents. Based on the data shown, **NSW** is the highest region in the result set with **9** open incidents."
     ],
-    "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code`",
+    "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code` ASC",
     "columns": [
       "region_code",
       "open_incidents"
@@ -397,7 +378,7 @@ _1 row(s)_
 
 ## Restored
 
-Membership restored (back in `noc_national`, out of `noc_region_nsw`); visible to UC after 292 s:
+Membership restored (back in `noc_national`, out of `noc_region_nsw`); visible to UC after 268 s:
 
 ```sql
 SELECT is_member('noc_national') AS in_noc_national, is_member('noc_region_nsw') AS in_noc_region_nsw
@@ -415,10 +396,10 @@ _1 row(s)_
 {
   "request": "POST /api/genie/ask {List the IMSI and MSISDN of the subscribers on SITE-NSW-00105}",
   "http_status": 200,
-  "latency_ms": 10273,
+  "latency_ms": 10381,
   "body": {
     "text": [
-      "I can\u2019t provide IMSI or MSISDN because this space has no per-subscriber data, and those identifiers are not in the available tables. The closest available data is aggregate impact such as affected subscriber estimates or impacted cells for incidents involving that site."
+      "I can\u2019t provide IMSI or MSISDN data because this space has no per-subscriber identifiers or customer records. It only contains network operations data such as incidents, topology, alarms, KPI health, and estimated aggregate subscriber impact."
     ],
     "sql": null,
     "columns": [],
@@ -433,10 +414,9 @@ _1 row(s)_
   groups (docs/pipeline.md). Unity Catalog cannot grant to them; the row filter tests their membership with
   `is_member()`, which is what changes the regional view above. With account groups nothing in the app changes.
 - **Grant-level denial is not visible with this user.** The capturing user owns the catalog, so after the switch it
-  still reads tables a real `noc_region_nsw` member has no grant on: the evaluation scorecard (`/api/kpis` ->
-  `scorecard`) stays available above, where a regional member would get `PERMISSION_DENIED` (the app shows "national
-  NOC only"; unit-tested in `tests/test_app_service.py::test_kpis_scorecard_is_national_only`). Regional roles' grants
-  are `netmon_noc` only (`governance/sql/03_grants_regional.sql`).
+  could still read base tables a real `noc_region_nsw` member has no grant on. The app and Genie only read
+  `netmon_noc` views, where the row filter (not ownership) decides, so the regional view above is what a regional
+  member gets; regional roles' grants are `netmon_noc` only (`governance/sql/03_grants_regional.sql`).
 - **No second human user / persona login.** The persona service principals (`netmon-noc-nsw-analyst`, ...) cannot be
   used interactively here (no OAuth secret creation for this session, as in step 2), and the Apps proxy forwards a
   user token only for interactive users, so the regional view is shown by changing the capturing user's membership.

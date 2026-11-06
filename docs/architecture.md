@@ -15,7 +15,7 @@ flowchart LR
   subgraph L2["2 Unity Catalog (governance)"]
     GOV["netmon_gov: region_filter · mask_imsi · mask_msisdn"]
     NOCV["netmon_noc views (region-filtered):<br/>open_incidents · element_status · incident_ai_summary ·<br/>customer_sms_drafts · incident_detection_times · gold_* · silver_*"]
-    EVAL["netmon_eval (ground truth, scoring only)"]
+    EVAL["netmon_eval (ground truth: offline evaluation and final verification only; read by nothing below)"]
   end
   subgraph L3["3 ML (RCA ranker)"]
     SC["job banksia-rca-score-live<br/>rca_ranker@champion (v5)"] --> LS["netmon_rca.rca_live_scores"]
@@ -47,7 +47,6 @@ flowchart LR
   NOCV -- "SQL warehouse, on-behalf-of user" --> APP
   APP -- "Genie Conversation API,<br/>on-behalf-of user" --> GEN_SPACE
   NOCV --> GEN_SPACE
-  EVAL -- "eval_ttd_summary (labelled scorecard)" --> GEN_SPACE
   LS -.->|"same features, on-demand re-score"| EP
 ```
 
@@ -87,6 +86,6 @@ generator ─► /Volumes/…/netmon_raw/landing/stream/{kpis,alarms}/date=…/b
 | app → SQL warehouse (region scope, inventory, detection timing, KPIs) | the signed-in user (on-behalf-of token, scope `sql`) |
 | app → Genie, Genie → SQL | the signed-in user (scope `dashboards.genie`) |
 
-Ground truth (`netmon_eval`) feeds no operational table, the ranker's features, the assistant's context, the app, or
-the Genie space's operational views. The one exception is the Genie space's labelled scorecard table
-`netmon_eval.eval_ttd_summary`, which the app also shows as "evaluation" and which only the national role can read.
+Ground truth (`netmon_eval`) feeds no operational table, none of the ranker's features, nothing in the assistant's
+context, nothing the app reads and nothing in the Genie space (`tests/test_no_ground_truth_surface.py`). It is used only
+for offline evaluation (steps 2–4) and for the final-verification section of the end-to-end traces.

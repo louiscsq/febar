@@ -1,6 +1,6 @@
 # App API responses (incident view)
 
-Captured 2026-11-06 12:28 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
+Captured 2026-11-06 13:51 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
 
 What the operator's browser receives from `https://banksia-noc-topology-7474648429104135.aws.databricksapps.com` for the demo incident `RCA-c7276c3238a27971` (SITE-NSW-00105, site power
 outage), captured as the signed-in national NOC user. The page (`app/static/`) renders exactly these payloads.
@@ -11,7 +11,7 @@ outage), captured as the signed-in national NOC user. The page (`app/static/`) r
 {
   "request": "GET /api/me",
   "http_status": 200,
-  "latency_ms": 1165,
+  "latency_ms": 2713,
   "body": {
     "user": "louis.chen@databricks.com",
     "name": "Louis Chen",
@@ -37,7 +37,7 @@ outage), captured as the signed-in national NOC user. The page (`app/static/`) r
 {
   "request": "GET /api/incidents?region=NSW",
   "http_status": 200,
-  "latency_ms": 1025,
+  "latency_ms": 1096,
   "body": {
     "incidents": [
       {
@@ -161,7 +161,7 @@ Detection time and time to detect, impacted counts, the ranker's top-3 with scor
 {
   "request": "GET /api/incidents/RCA-c7276c3238a27971",
   "http_status": 200,
-  "latency_ms": 2649,
+  "latency_ms": 1231,
   "body": {
     "incident_id": "RCA-c7276c3238a27971",
     "region_code": "NSW",
@@ -298,7 +298,7 @@ Detection time and time to detect, impacted counts, the ranker's top-3 with scor
       "draft_sha256": "69bb4b6cfb851b899d55b5c8f5ff44a582a8a244ab3d09ef9b9022524ded7242",
       "decision": "rejected",
       "reviewed_by": "louis.chen@databricks.com",
-      "reviewed_at": "2026-11-06T12:11:38.117726+00:00",
+      "reviewed_at": "2026-11-06T12:28:57.500149+00:00",
       "sent": false,
       "note": "Draft only: this system never sends messages."
     }
@@ -312,7 +312,7 @@ Detection time and time to detect, impacted counts, the ranker's top-3 with scor
 {
   "request": "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971  (trimmed to the highlighted elements)",
   "http_status": 200,
-  "latency_ms": 1531,
+  "latency_ms": 1556,
   "body": {
     "region": "NSW",
     "incident_id": "RCA-c7276c3238a27971",
@@ -640,7 +640,7 @@ All drawn nodes of that view (healthy siblings collapsed into `+N` nodes), with 
 {
   "request": "GET /api/regions/NSW/topology  (counts only)",
   "http_status": 200,
-  "latency_ms": 1581,
+  "latency_ms": 1680,
   "body": {
     "view": "region",
     "n_elements_in_region": 814,
@@ -714,7 +714,7 @@ All drawn nodes of that view (healthy siblings collapsed into `+N` nodes), with 
 {
   "request": "GET /api/kpis",
   "http_status": 200,
-  "latency_ms": 2621,
+  "latency_ms": 4232,
   "body": {
     "operational": [
       {
@@ -735,17 +735,7 @@ All drawn nodes of that view (healthy siblings collapsed into `+N` nodes), with 
         "mttd_s": 168.5,
         "pct_detected_within_5min": 100.0
       }
-    ],
-    "scorecard": {
-      "available": true,
-      "n_incidents": 26,
-      "impact_detected_pct": 100.0,
-      "impact_median_ttd_s": 141.4,
-      "impact_p90_ttd_s": 430.4,
-      "impact_within_5min_pct": 88.5,
-      "root_localised_pct": 100.0,
-      "localised_within_5min_pct": 88.5
-    }
+    ]
   }
 }
 ```
@@ -756,16 +746,16 @@ All drawn nodes of that view (healthy siblings collapsed into `+N` nodes), with 
 {
   "request": "POST /api/genie/ask {question: 'Which cell sites are down right now?'}",
   "http_status": 200,
-  "latency_ms": 15207,
+  "latency_ms": 14443,
   "body": {
-    "conversation_id": "01f1d9dd91131e8fac35f24ea4ac2ffe",
-    "message_id": "01f1d9dd9121137694b4e17405139c1e",
+    "conversation_id": "01f1d9e93385197f82561d2510e4e3b9",
+    "message_id": "01f1d9e933a81b1ba668f341b46e5ec0",
     "status": "COMPLETED",
     "text": [
-      "There are **3 cell sites** currently **down** in the regions you can see.\n\n- **North Queensland site 6** (**NQL**) \u2014 **3 impacted cells** out of **3** descendant cells\n- **Sydney & NSW site 9** (**NSW**) \u2014 **6 impacted cells** out of **6** descendant cells\n- **Sydney & NSW site 105** (**NSW**) \u2014 **3 impacted cells** out of **3** descendant cells\n\nThe largest current site outage in this result is **Sydney & NSW site 9**, with **6 impacted cells**."
+      "There are **3 cell sites** currently marked as **down** in the regions you can see. They are **North Queensland site 6** (NQL, **3 impacted cells**), **Sydney & NSW site 9** (NSW, **6 impacted cells**), and **Sydney & NSW site 105** (NSW, **3 impacted cells**). NSW has **2 of the 3** down sites, and the largest impact shown is **Sydney & NSW site 9** with **6 impacted cells**."
     ],
     "sql": "SELECT `s`.`element_id`, `n`.`name`, `s`.`region_code`, `s`.`n_desc_cells`, `s`.`n_impacted_cells`, `s`.`open_incident_id`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`element_status` AS `s`\nJOIN `telco_netmon_febar_catalog`.`netmon_noc`.`silver_topology_nodes` AS `n`\n  ON `n`.`element_id` = `s`.`element_id`\nWHERE `s`.`element_type` = 'SITE'\n  AND `s`.`state` = 'down'\n  AND `s`.`element_id` IS NOT NULL\n  AND `s`.`region_code` IS NOT NULL\nORDER BY `s`.`region_code`, `s`.`element_id`",
-    "description": "You want to see a list of all cell sites that are currently down in the regions you can access.",
+    "description": "You want to see a list of all cell sites that are currently down in the regions you can access. The list includes each site's unique identifier, name, region, the number of cells it contains, how many of those cells are impacted, and the ID of any open incident related to the site. The results are organized by region and site ID for easy reference.",
     "columns": [
       "element_id",
       "name",

@@ -1,6 +1,6 @@
 # End-to-end trace: BH-VIC-0005 slow backhaul degradation (Melbourne)
 
-Captured 2026-11-06 12:25 UTC from workspace profile `febar` by `scripts/trace_end_to_end.py --incident RCA-27ed3e8af852d33a`. Every block below is the real output of that hop; nothing is hand-edited.
+Captured 2026-11-06 13:47 UTC from workspace profile `febar` by `scripts/trace_end_to_end.py --incident RCA-27ed3e8af852d33a`. Every block below is the real output of that hop; nothing is hand-edited.
 
 **The fault.** Incident `RCA-27ed3e8af852d33a` in `VIC`, live feed (`source_run = 'stream'`). The root-cause ranker's
 suspect 1 is `BH-VIC-0005` (BACKHAUL_LINK). The trace starts from the first customer-impact detection on that
@@ -208,7 +208,7 @@ _5 row(s)_
       "n_case_candidates": 19.0
     }
   },
-  "latency_ms": 504,
+  "latency_ms": 528,
   "response_top3": [
     {
       "element_id": "BH-VIC-0005",
@@ -308,7 +308,7 @@ identity and on-behalf-of token to the app). Incident panel (`GET /api/incidents
 ```json
 {
   "http_status": 200,
-  "latency_ms": 2889,
+  "latency_ms": 3559,
   "body": {
     "incident_id": "RCA-27ed3e8af852d33a",
     "region_code": "VIC",
@@ -453,7 +453,7 @@ Topology for the incident (`GET /api/regions/VIC/topology?incident_id=RCA-27ed3e
 ```json
 {
   "http_status": 200,
-  "latency_ms": 1654,
+  "latency_ms": 1613,
   "body (trimmed to the highlighted elements)": {
     "region": "VIC",
     "incident_id": "RCA-27ed3e8af852d33a",
@@ -563,17 +563,16 @@ Question: *For the open incident whose top suspect is BH-VIC-0005: what is the f
 ```json
 {
   "http_status": 200,
-  "latency_ms": 19433,
+  "latency_ms": 25507,
   "answer_text": [
-    "For open incident **RCA-27ed3e8af852d33a**, the failing element is **BH-VIC-0005** and the element type is **BACKHAUL_LINK**. Detection took **203.6 seconds** (**3.4 minutes**), which is **within 5 minutes**, and the estimated affected subscribers count is **550**."
+    "For open incident **RCA-27ed3e8af852d33a**, the failing element is **BH-VIC-0005**, named **satellite backhaul BH-VIC-0005**, with element type **BACKHAUL_LINK**. The detection time was **203.6 seconds** (**3.4 minutes**), **detected within 5 minutes = true**, and the estimated affected subscribers count is **550**.",
+    "Would you like to see similar details for all incidents in the same region as BH-VIC-0005?"
   ],
   "columns": [
     "incident_id",
-    "region_code",
-    "failing_element",
+    "failing_element_id",
     "failing_element_type",
-    "first_impact_signal_ts",
-    "first_detection_ts",
+    "failing_element_name",
     "time_to_detect_s",
     "time_to_detect_min",
     "detected_within_5min",
@@ -582,25 +581,31 @@ Question: *For the open incident whose top suspect is BH-VIC-0005: what is the f
   "rows": [
     [
       "RCA-27ed3e8af852d33a",
-      "VIC",
       "BH-VIC-0005",
       "BACKHAUL_LINK",
-      "2026-10-08T22:48:00.000Z",
-      "2026-10-08T22:51:23.599Z",
+      "satellite backhaul BH-VIC-0005",
       "203.6",
       "3.4",
       "true",
       "550"
     ]
   ],
-  "conversation_id": "01f1d9dd3d5410bbba19a9c408e62a9e"
+  "conversation_id": "01f1d9e8bae41619917599b984081dd6"
 }
 ```
 
 SQL Genie generated and ran:
 
 ```sql
-SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`suspect_1_id` AS `failing_element`, `o`.`suspect_1_type` AS `failing_element_type`, `t`.`first_impact_signal_ts`, `t`.`first_detection_ts`, `t`.`time_to_detect_s`, ROUND(try_divide(`t`.`time_to_detect_s`,60), 1) AS `time_to_detect_min`, `t`.`detected_within_5min`, `a`.`est_affected_subscribers` FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o` JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times` AS `t` ON `o`.`incident_id` = `t`.`incident_id` JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a` ON `o`.`incident_id` = `a`.`incident_id` WHERE `o`.`suspect_1_id` = 'BH-VIC-0005'
+SELECT `o`.`incident_id`, `o`.`suspect_1_id` AS `failing_element_id`, `o`.`suspect_1_type` AS `failing_element_type`, `t`.`name` AS `failing_element_name`, `d`.`time_to_detect_s`, ROUND(try_divide(`d`.`time_to_detect_s`,60), 1) AS `time_to_detect_min`, `d`.`detected_within_5min`, `a`.`est_affected_subscribers`
+FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
+LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times` AS `d`
+  ON `o`.`incident_id` = `d`.`incident_id`
+LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a`
+  ON `o`.`incident_id` = `a`.`incident_id`
+LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`silver_topology_nodes` AS `t`
+  ON `o`.`suspect_1_id` = `t`.`element_id`
+WHERE `o`.`suspect_1_id` = 'BH-VIC-0005'
 ```
 
 ## 10. Unity Catalog lineage linking the tables
@@ -627,16 +632,16 @@ SELECT source_table_full_name AS source, target_table_full_name AS target, entit
 | telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | PIPELINE | 2026-11-06T09:45:49.141Z | 24 |
 | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | PIPELINE | 2026-10-08T17:33:58.190Z | 4 |
 | telco_netmon_febar_catalog.netmon_silver.silver_kpis | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | PIPELINE | 2026-11-06T09:45:40.154Z | 1028 |
-| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | NULL | 2026-11-06T12:11:04.636Z | 35 |
-| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | JOB | 2026-11-06T11:54:25.003Z | 2 |
-| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | NULL | 2026-11-06T12:07:51.475Z | 59 |
-| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | JOB | 2026-11-06T11:54:26.306Z | 2 |
-| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T11:54:29.412Z | 2 |
-| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T12:11:48.160Z | 53 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T12:11:48.160Z | 53 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T11:54:29.412Z | 2 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | NULL | 2026-11-06T12:12:22.106Z | 109 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | JOB | 2026-11-06T11:54:23.534Z | 2 |
+| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | NULL | 2026-11-06T13:25:51.732Z | 40 |
+| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | JOB | 2026-11-06T13:18:43.706Z | 3 |
+| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | NULL | 2026-11-06T13:36:20.017Z | 84 |
+| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | JOB | 2026-11-06T13:18:44.903Z | 3 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T13:36:38.893Z | 76 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T13:18:47.755Z | 3 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T13:36:38.893Z | 76 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T13:18:47.755Z | 3 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | NULL | 2026-11-06T13:36:32.730Z | 150 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | JOB | 2026-11-06T13:18:42.363Z | 3 |
 | telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_rca.lb_element_status | PIPELINE | 2026-11-05T15:05:21.413Z | 1 |
 | telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_rca.lb_open_incidents | PIPELINE | 2026-11-05T15:05:20.243Z | 1 |
 | telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | telco_netmon_febar_catalog.netmon_silver.silver_kpis | PIPELINE | 2026-11-06T09:45:22.241Z | 619 |
@@ -675,10 +680,11 @@ _2 row(s)_
 
 Job IDs: `282645727011052` = `banksia-genai-assistant`, `508373316044745` = `banksia-rca-score-live`.
 
-## 11. Check against the generator's ground truth (evaluation only)
+## 11. FINAL VERIFICATION against the generator's ground truth (not part of the operational path)
 
-Not used by anything above: the app, Genie's operational views, the ranker's features and the assistant never read
-`netmon_eval`. Shown here only to confirm the trace followed a real fault:
+Everything above is operational: the app, the Genie space, the ranker's features and the assistant never read
+`netmon_eval`, and no number above comes from it (enforced by `tests/test_no_ground_truth_surface.py`). This section
+alone reads ground truth, after the fact, to confirm the trace followed a real fault:
 
 ```sql
 SELECT incident_id, event_class, fault_type, root_element_ids, impact_start_ts, impact_end_ts,
@@ -694,4 +700,4 @@ SELECT incident_id, event_class, fault_type, root_element_ids, impact_start_ts, 
 
 _1 row(s)_
 
-Ground-truth time to detect = first detection available (22:51:23) - true impact start (22:42:53) = **511 s** (5-minute SLA: missed), against the operational time to detect of 204 s shown by the app and Genie, which can only start at the first anomaly visible in the telemetry (a lower bound when a fault ramps up slowly before any KPI rule fires). The incident is `is_censored` when the live run ended before the fault cleared; censored incidents are excluded from the scored KPIs (`eval_ttd_summary`), which is why this open incident is not in that scorecard.
+Ground-truth time to detect = first detection available (22:51:23) - true impact start (22:42:53) = **511 s** (5-minute SLA: missed), against the operational time to detect of 204 s shown by the app and Genie, which can only start at the first anomaly visible in the telemetry (a lower bound when a fault ramps up slowly before any KPI rule fires). The incident is `is_censored` when the live run ended before the fault cleared; censored incidents are excluded from the scored KPIs (`eval_ttd_summary`, an offline evaluation table), which is why this open incident is not in them.

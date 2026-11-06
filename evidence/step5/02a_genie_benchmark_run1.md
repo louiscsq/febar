@@ -1,5 +1,8 @@
 # Genie benchmark: NOC space (run 1, before the SMS-draft instruction fix)
 
+> **History, not current.** This run predates (1) the SMS-draft instruction fix and (2) the removal of the ground-truth scorecard table `netmon_eval.eval_ttd_summary` from the Genie space (PR #7 review). Two of its questions read that table; the current space and benchmark use `netmon_noc` views only. See `02_genie_benchmark.md` for the final run.
+
+
 Captured 2026-11-06 10:37 UTC from workspace profile `febar` by `scripts/genie_benchmark.py` (Genie eval-run API, run `01f1d9cd5ba617dc9dc18316ef8e55fc`, space `01f1d9cd2ee0117c82252259a6bfd81f`).
 
 **Score: 17 / 18 GOOD (94 %)**, 0 needs review, 1 bad. Graded by Genie against the expected SQL's result (run by the API as the capturing user, who is in `noc_national`, so all regions are visible). The questions and expected SQL are in `src/netmon_pipeline/genie_space.py` (`BENCHMARKS`); 4 of 18 are close paraphrases of a trusted example SQL, the rest are not.

@@ -1,8 +1,8 @@
 # Genie benchmark: NOC space
 
-Captured 2026-11-06 12:23 UTC from workspace profile `febar` by `scripts/genie_benchmark.py` (Genie eval-run API, run `01f1d9dc313014dcac487136abecaf35`, space `01f1d9cd2ee0117c82252259a6bfd81f`).
+Captured 2026-11-06 13:42 UTC from workspace profile `febar` by `scripts/genie_benchmark.py` (Genie eval-run API, run `01f1d9e73f2111449404520d1b4f1f78`, space `01f1d9cd2ee0117c82252259a6bfd81f`).
 
-**Score: 17 / 18 GOOD (94 %)**, 0 needs review, 1 bad. Graded by Genie against the expected SQL's result (run by the API as the capturing user, who is in `noc_national`, so all regions are visible). The questions and expected SQL are in `src/netmon_pipeline/genie_space.py` (`BENCHMARKS`); 4 of 18 are close paraphrases of a trusted example SQL, the rest are not.
+**Score: 16 / 18 GOOD (89 %)**, 1 needs review, 1 bad. Graded by Genie against the expected SQL's result (run by the API as the capturing user, who is in `noc_national`, so all regions are visible). The questions and expected SQL are in `src/netmon_pipeline/genie_space.py` (`BENCHMARKS`); 4 of 18 are close paraphrases of a trusted example SQL, the rest are not.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Captured 2026-11-06 12:23 UTC from workspace profile `febar` by `scripts/genie_b
 | How many open incidents are there per region? | GOOD |  |
 | What is the most likely failing element of incident RCA-c7276c3238a27971? | GOOD |  |
 | List the top-3 root-cause suspects with scores for the incident whose top suspect is SITE-NSW-00105 | GOOD |  |
-| What is the average time to detect across open incidents in seconds? | GOOD |  |
+| What is the average time to detect across open incidents in seconds? | NEEDS_REVIEW | LLM_JUDGE_FORMATTING_ERROR |
 | What percentage of open incidents were detected within 5 minutes? | GOOD |  |
 | Which incident took the longest to detect? | GOOD |  |
 | How many estimated subscribers are affected in NSW? | GOOD |  |
@@ -22,8 +22,8 @@ Captured 2026-11-06 12:23 UTC from workspace profile `febar` by `scripts/genie_b
 | Which backhaul links are the top suspect of an open incident? | GOOD |  |
 | What fault does the AI assistant suspect for the North Queensland incident? | GOOD |  |
 | How many SMS drafts are waiting for approval? | GOOD |  |
-| What is the scored share of faults detected within 5 minutes on the live feed? | GOOD |  |
-| What is the scored median time to detect per fault type on the live feed? | GOOD |  |
+| What is the average time to detect per region, in seconds? | GOOD |  |
+| What is the average time to detect for backhaul incidents? | GOOD |  |
 | How many customer-impact detections did the live feed produce per signal source? | GOOD |  |
 | Which element types does the aggregation router AGG-NSW-04 serve directly? | BAD | RESULT_MISSING_COLUMNS, LLM_JUDGE_MISSING_OR_INCORRECT_AGGREGATION |
 
@@ -44,9 +44,8 @@ SELECT count(*) AS open_incidents FROM telco_netmon_febar_catalog.netmon_noc.ope
 Genie's SQL:
 
 ```sql
-SELECT COUNT(*) AS `open_incidents`
+SELECT COUNT(*) AS `open_incident_count`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`
-WHERE `status` = 'open'
 ```
 
 Expected result:
@@ -59,7 +58,7 @@ _1 row(s)_
 
 Genie's result:
 
-| open_incidents |
+| open_incident_count |
 |---|
 | 17 |
 
@@ -82,7 +81,7 @@ SELECT `region_code`, COUNT(*) AS `open_incidents`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`
 WHERE `region_code` IS NOT NULL
 GROUP BY `region_code`
-ORDER BY `open_incidents` DESC, `region_code` ASC
+ORDER BY `open_incidents` DESC, `region_code`
 ```
 
 Expected result:
@@ -118,7 +117,7 @@ SELECT suspect_1_id, suspect_1_type, suspect_1_score FROM telco_netmon_febar_cat
 Genie's SQL:
 
 ```sql
-SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`suspect_1_id` AS `most_likely_failing_element_id`, `o`.`suspect_1_type` AS `most_likely_failing_element_type`, `o`.`suspect_1_score` AS `root_cause_score`, `t`.`name` AS `element_name`, `t`.`region` AS `element_region`, `t`.`state` AS `element_state`, `t`.`technology` AS `technology` FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o` LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`silver_topology_nodes` AS `t` ON `o`.`suspect_1_id` = `t`.`element_id` WHERE `o`.`incident_id` = 'RCA-c7276c3238a27971'
+SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`suspect_1_id` AS `most_likely_failing_element_id`, `o`.`suspect_1_type` AS `most_likely_failing_element_type`, `t`.`name` AS `most_likely_failing_element_name`, `o`.`suspect_1_score` AS `root_cause_score` FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o` LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`silver_topology_nodes` AS `t` ON `o`.`suspect_1_id` = `t`.`element_id` WHERE `o`.`incident_id` = 'RCA-c7276c3238a27971' AND `o`.`suspect_1_id` IS NOT NULL AND `o`.`suspect_1_type` IS NOT NULL;
 ```
 
 Expected result:
@@ -131,9 +130,9 @@ _1 row(s)_
 
 Genie's result:
 
-| incident_id | region_code | most_likely_failing_element_id | most_likely_failing_element_type | root_cause_score | element_name | element_region | element_state | technology |
-|---|---|---|---|---|---|---|---|---|
-| RCA-c7276c3238a27971 | NSW | SITE-NSW-00105 | SITE | 1.0 | Sydney & NSW site 105 | Sydney & NSW | NSW | 4G |
+| incident_id | region_code | most_likely_failing_element_id | most_likely_failing_element_type | most_likely_failing_element_name | root_cause_score |
+|---|---|---|---|---|---|
+| RCA-c7276c3238a27971 | NSW | SITE-NSW-00105 | SITE | Sydney & NSW site 105 | 1.0 |
 
 _1 row(s)_
 
@@ -150,10 +149,9 @@ SELECT incident_id, suspect_1_id, suspect_1_score, suspect_2_id, suspect_2_score
 Genie's SQL:
 
 ```sql
-SELECT `incident_id`, `region_code`, `detected_ts`, `suspect_1_id`, ROUND(`suspect_1_score`, 2) AS `suspect_1_score`, `suspect_2_id`, ROUND(`suspect_2_score`, 2) AS `suspect_2_score`, `suspect_3_id`, ROUND(`suspect_3_score`, 2) AS `suspect_3_score`
+SELECT `incident_id`, `region_code`, `detected_ts`, `suspect_1_id`, ROUND(`suspect_1_score`, 2) AS `suspect_1_score`, `suspect_2_id`, ROUND(`suspect_2_score`, 2) AS `suspect_2_score`, `suspect_3_id`, ROUND(`suspect_3_score`, 2) AS `suspect_3_score`, `n_impacted_cells`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`
 WHERE `suspect_1_id` = 'SITE-NSW-00105'
-ORDER BY `detected_ts` DESC
 ```
 
 Expected result:
@@ -166,15 +164,15 @@ _1 row(s)_
 
 Genie's result:
 
-| incident_id | region_code | detected_ts | suspect_1_id | suspect_1_score | suspect_2_id | suspect_2_score | suspect_3_id | suspect_3_score |
-|---|---|---|---|---|---|---|---|---|
-| RCA-c7276c3238a27971 | NSW | 2026-10-09T00:10:00.000Z | SITE-NSW-00105 | 1.0 | AGG-NSW-04 | 0.0 | AMF-NSW-01 | 0.0 |
+| incident_id | region_code | detected_ts | suspect_1_id | suspect_1_score | suspect_2_id | suspect_2_score | suspect_3_id | suspect_3_score | n_impacted_cells |
+|---|---|---|---|---|---|---|---|---|---|
+| RCA-c7276c3238a27971 | NSW | 2026-10-09T00:10:00.000Z | SITE-NSW-00105 | 1.0 | AGG-NSW-04 | 0.0 | AMF-NSW-01 | 0.0 | 3 |
 
 _1 row(s)_
 
 ### What is the average time to detect across open incidents in seconds?
 
-Genie assessment: **GOOD**
+Genie assessment: **NEEDS_REVIEW** (LLM_JUDGE_FORMATTING_ERROR)
 
 Expected SQL:
 
@@ -185,8 +183,9 @@ SELECT round(avg(time_to_detect_s), 1) AS mttd_s FROM telco_netmon_febar_catalog
 Genie's SQL:
 
 ```sql
-SELECT ROUND(AVG(`time_to_detect_s`), 1) AS `avg_time_to_detect_s`
+SELECT AVG(`time_to_detect_s`) AS `avg_time_to_detect_s`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times`
+WHERE `time_to_detect_s` IS NOT NULL
 ```
 
 Expected result:
@@ -201,7 +200,7 @@ Genie's result:
 
 | avg_time_to_detect_s |
 |---|
-| 165.8 |
+| 165.82941 |
 
 _1 row(s)_
 
@@ -251,7 +250,7 @@ SELECT incident_id, time_to_detect_s FROM telco_netmon_febar_catalog.netmon_noc.
 Genie's SQL:
 
 ```sql
-WITH ranked AS (
+WITH ranked_incidents AS (
   SELECT
     `incident_id`,
     `region_code`,
@@ -261,7 +260,7 @@ WITH ranked AS (
     `time_to_detect_s`,
     ROUND(try_divide(`time_to_detect_s`,60), 1) AS `time_to_detect_min`,
     `detected_within_5min`,
-    RANK() OVER (ORDER BY `time_to_detect_s` DESC, `incident_id` ASC) AS `rnk`
+    RANK() OVER (ORDER BY `time_to_detect_s` DESC) AS `rnk`
   FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times`
   WHERE `time_to_detect_s` IS NOT NULL
 )
@@ -274,9 +273,9 @@ SELECT
   `time_to_detect_s`,
   `time_to_detect_min`,
   `detected_within_5min`
-FROM ranked
+FROM ranked_incidents
 WHERE `rnk` <= 1
-ORDER BY `time_to_detect_s` DESC, `incident_id` ASC;
+ORDER BY `time_to_detect_s` DESC, `incident_id`
 ```
 
 Expected result:
@@ -310,7 +309,7 @@ Genie's SQL:
 ```sql
 SELECT SUM(`a`.`est_affected_subscribers`) AS `est_affected_subscribers`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a`
-JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
+INNER JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
   ON `a`.`incident_id` = `o`.`incident_id`
 WHERE `a`.`region_code` = 'NSW'
 ```
@@ -344,29 +343,29 @@ SELECT region_code, sum(est_affected_subscribers) AS est_affected_subscribers FR
 Genie's SQL:
 
 ```sql
-WITH `regional_totals` AS (
+WITH `region_impacts` AS (
   SELECT
-    `a`.`region_code` AS `region_code`,
+    `a`.`region_code`,
     SUM(`a`.`est_affected_subscribers`) AS `est_affected_subscribers`
-  FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a`
-  INNER JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
-    ON `a`.`incident_id` = `o`.`incident_id`
+  FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
+  INNER JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a`
+    ON `o`.`incident_id` = `a`.`incident_id`
   WHERE `a`.`region_code` IS NOT NULL
-    AND `a`.`est_affected_subscribers` IS NOT NULL
   GROUP BY `a`.`region_code`
-), `ranked_regions` AS (
+),
+`ranked_regions` AS (
   SELECT
     `region_code`,
     `est_affected_subscribers`,
-    RANK() OVER (ORDER BY `est_affected_subscribers` DESC) AS `region_rank`
-  FROM `regional_totals`
+    RANK() OVER (ORDER BY `est_affected_subscribers` DESC) AS `rnk`
+  FROM `region_impacts`
 )
 SELECT
   `region_code`,
   `est_affected_subscribers`
 FROM `ranked_regions`
-WHERE `region_rank` = 1
-ORDER BY `region_code`
+WHERE `rnk` <= 1
+ORDER BY `est_affected_subscribers` DESC, `region_code`
 ```
 
 Expected result:
@@ -403,7 +402,7 @@ FROM `telco_netmon_febar_catalog`.`netmon_noc`.`element_status`
 WHERE `state` = 'down'
   AND `element_type` IS NOT NULL
 GROUP BY `element_type`
-ORDER BY `down_elements` DESC, `element_type`
+ORDER BY `down_elements` DESC, `element_type` ASC
 ```
 
 Expected result:
@@ -488,11 +487,10 @@ Genie's SQL:
 ```sql
 SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`detected_ts`, `o`.`suspect_1_id` AS `backhaul_link_id`, `t`.`name` AS `backhaul_link_name`, `o`.`suspect_1_score`, `o`.`n_impacted_cells`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
-LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`silver_topology_nodes` AS `t`
+JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`silver_topology_nodes` AS `t`
   ON `o`.`suspect_1_id` = `t`.`element_id`
 WHERE `o`.`suspect_1_type` = 'BACKHAUL_LINK'
   AND `o`.`detected_ts` IS NOT NULL
-  AND `o`.`suspect_1_id` IS NOT NULL
 ORDER BY `o`.`detected_ts` DESC
 ```
 
@@ -533,13 +531,12 @@ SELECT incident_id, likely_root_cause, fault_hypothesis FROM telco_netmon_febar_
 Genie's SQL:
 
 ```sql
-SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`suspect_1_id`, `o`.`suspect_1_type`, `a`.`fault_hypothesis`, `a`.`likely_root_cause`, `a`.`confidence`, `a`.`summary`
-FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
-JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a`
+SELECT `a`.`incident_id`, `a`.`region_code`, `a`.`fault_hypothesis`, `a`.`likely_root_cause`, `a`.`confidence`, `a`.`summary`
+FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a`
+JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o`
   ON `o`.`incident_id` = `a`.`incident_id`
-WHERE `o`.`region_code` = 'NQL'
-  AND `o`.`status` = 'open'
-  AND `o`.`detected_ts` IS NOT NULL
+WHERE `a`.`region_code` IS NOT NULL
+  AND `a`.`region_code` = 'NQL'
 ORDER BY `o`.`detected_ts` DESC
 LIMIT 1
 ```
@@ -554,9 +551,9 @@ _1 row(s)_
 
 Genie's result:
 
-| incident_id | region_code | suspect_1_id | suspect_1_type | fault_hypothesis | likely_root_cause | confidence | summary |
-|---|---|---|---|---|---|---|---|
-| RCA-d28473ab1bd7b846 | NQL | AGG-NQL-02 | AGG_ROUTER | LONG_HAUL_FIBRE_CUT | AGG-NQL-02 | high | The strongest match is AGG-NQL-02: it has critical LOS and NE_UNREACHABLE alarm… |
+| incident_id | region_code | fault_hypothesis | likely_root_cause | confidence | summary |
+|---|---|---|---|---|---|
+| RCA-d28473ab1bd7b846 | NQL | LONG_HAUL_FIBRE_CUT | AGG-NQL-02 | high | The strongest match is AGG-NQL-02: it has critical LOS and NE_UNREACHABLE alarm… |
 
 _1 row(s)_
 
@@ -575,8 +572,7 @@ Genie's SQL:
 ```sql
 SELECT COUNT(*) AS `sms_drafts_waiting_for_approval`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary`
-WHERE `sms_draft_status` IS NOT NULL
-  AND `sms_draft_status` = 'draft'
+WHERE `sms_draft_status` = 'draft'
 ```
 
 Expected result:
@@ -595,86 +591,77 @@ Genie's result:
 
 _1 row(s)_
 
-### What is the scored share of faults detected within 5 minutes on the live feed?
+### What is the average time to detect per region, in seconds?
 
 Genie assessment: **GOOD**
 
 Expected SQL:
 
 ```sql
-SELECT impact_within_5min_pct FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'
+SELECT region_code, round(avg(time_to_detect_s), 1) AS mttd_s FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times GROUP BY region_code ORDER BY region_code
 ```
 
 Genie's SQL:
 
 ```sql
-SELECT `impact_within_5min_pct`
-FROM `telco_netmon_febar_catalog`.`netmon_eval`.`eval_ttd_summary`
-WHERE `source_run` = 'stream'
-  AND `event_class` = 'fault'
-  AND `fault_type` = 'ALL'
+SELECT `region_code`, COUNT(*) AS `n_incidents`, ROUND(AVG(`time_to_detect_s`), 1) AS `avg_time_to_detect_s`
+FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times`
+WHERE `region_code` IS NOT NULL
+GROUP BY `region_code`
+ORDER BY `avg_time_to_detect_s` DESC
 ```
 
 Expected result:
 
-| impact_within_5min_pct |
-|---|
-| 88.5 |
+| region_code | mttd_s |
+|---|---|
+| NQL | 193.5 |
+| NSW | 160.7 |
+| VIC | 168.5 |
 
-_1 row(s)_
+_3 row(s)_
 
 Genie's result:
 
-| impact_within_5min_pct |
-|---|
-| 88.5 |
+| region_code | n_incidents | avg_time_to_detect_s |
+|---|---|---|
+| NQL | 1 | 193.5 |
+| VIC | 7 | 168.5 |
+| NSW | 9 | 160.7 |
 
-_1 row(s)_
+_3 row(s)_
 
-### What is the scored median time to detect per fault type on the live feed?
+### What is the average time to detect for backhaul incidents?
 
 Genie assessment: **GOOD**
 
 Expected SQL:
 
 ```sql
-SELECT fault_type, impact_median_ttd_s FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type <> 'ALL' ORDER BY fault_type
+SELECT round(avg(d.time_to_detect_s), 1) AS mttd_s FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times d JOIN telco_netmon_febar_catalog.netmon_noc.open_incidents o ON o.incident_id = d.incident_id WHERE o.suspect_1_type = 'BACKHAUL_LINK'
 ```
 
 Genie's SQL:
 
 ```sql
-SELECT `fault_type`, `impact_median_ttd_s`
-FROM `telco_netmon_febar_catalog`.`netmon_eval`.`eval_ttd_summary`
-WHERE `source_run` = 'stream'
-  AND `event_class` = 'fault'
-  AND `fault_type` IS NOT NULL
-  AND `impact_median_ttd_s` IS NOT NULL
-  AND `fault_type` <> 'ALL'
-ORDER BY `fault_type`
+SELECT count(*) AS `n_incidents`, round(avg(`incident_detection_times`.`time_to_detect_s`), 1) AS `avg_time_to_detect_s`, round(try_divide(avg(`incident_detection_times`.`time_to_detect_s`),60), 1) AS `avg_time_to_detect_min` FROM `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times` AS `incident_detection_times` INNER JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `incident_ai_summary` ON `incident_detection_times`.`incident_id` = `incident_ai_summary`.`incident_id` WHERE `incident_ai_summary`.`fault_hypothesis` = 'BACKHAUL_DEGRADATION'
 ```
 
 Expected result:
 
-| fault_type | impact_median_ttd_s |
-|---|---|
-| AGG_ROUTER_FAILURE | 23.4 |
-| BACKHAUL_DEGRADATION | 807.9 |
-| CELL_OUTAGE | 132.7 |
-| SITE_POWER_OUTAGE | 235.5 |
+| mttd_s |
+|---|
+| 176.2 |
 
-_4 row(s)_
+_1 row(s)_
 
 Genie's result:
 
-| fault_type | impact_median_ttd_s |
-|---|---|
-| AGG_ROUTER_FAILURE | 23.4 |
-| BACKHAUL_DEGRADATION | 807.9 |
-| CELL_OUTAGE | 132.7 |
-| SITE_POWER_OUTAGE | 235.5 |
+| n_incidents | avg_time_to_detect_s | avg_time_to_detect_min |
+|---|---|---|
+| 5 | 176.2 | 2.9 |
 
-_4 row(s)_
+_1 row(s)_
 
 ### How many customer-impact detections did the live feed produce per signal source?
 
@@ -689,12 +676,12 @@ SELECT signal_source, count(*) AS n_detections FROM telco_netmon_febar_catalog.n
 Genie's SQL:
 
 ```sql
-SELECT `signal_source`, COUNT(*) AS `n_customer_impact_detections`
+SELECT `signal_source`, COUNT(*) AS `detection_count`
 FROM `telco_netmon_febar_catalog`.`netmon_noc`.`gold_impact_detections`
 WHERE `source_run` = 'stream'
   AND `signal_source` IS NOT NULL
 GROUP BY `signal_source`
-ORDER BY `n_customer_impact_detections` DESC, `signal_source` ASC
+ORDER BY `detection_count` DESC, `signal_source` ASC
 ```
 
 Expected result:
@@ -708,7 +695,7 @@ _2 row(s)_
 
 Genie's result:
 
-| signal_source | n_customer_impact_detections |
+| signal_source | detection_count |
 |---|---|
 | kpi | 8262 |
 | alarm | 73 |
