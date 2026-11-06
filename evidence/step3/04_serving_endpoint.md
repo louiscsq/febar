@@ -1,6 +1,6 @@
 # Model Serving endpoint
 
-Captured 2026-11-05 17:35 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
+Captured 2026-11-06 08:03 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
 
 ## Endpoint
 
@@ -15,7 +15,7 @@ Captured 2026-11-05 17:35 UTC from workspace profile `febar` by `scripts/capture
     {
       "name": "rca-ranker",
       "entity_name": "telco_netmon_febar_catalog.netmon_rca.rca_ranker",
-      "entity_version": "4",
+      "entity_version": "5",
       "workload_size": "Small",
       "scale_to_zero_enabled": true,
       "state": "ServedModelStateDeployment.DEPLOYMENT_READY"
@@ -82,9 +82,9 @@ Case `holdout_1m|NSW|20261017T0102|CELL-NSW-00086-4G1` (a fresh-holdout backhaul
       "n_alarms_unreach": 0.0,
       "n_alarms_core": 0.0,
       "alarm_age_min": 0.0,
-      "n_subtree_alarms": 6.0,
+      "n_subtree_alarms": 8.0,
       "n_subtree_service_down_alarms": 0.0,
-      "alarmed_children_fraction": 0.1,
+      "alarmed_children_fraction": 0.2,
       "parent_n_alarms": 0.0,
       "in_maintenance": 0.0,
       "log_case_impacted_cells": 0.6931472,
@@ -139,7 +139,7 @@ Case `holdout_1m|NSW|20261017T0102|CELL-NSW-00086-4G1` (a fresh-holdout backhaul
       "n_alarms_unreach": 0.0,
       "n_alarms_core": 0.0,
       "alarm_age_min": 0.0,
-      "n_subtree_alarms": 16.0,
+      "n_subtree_alarms": 18.0,
       "n_subtree_service_down_alarms": 2.0,
       "alarmed_children_fraction": 0.0,
       "parent_n_alarms": 0.0,
@@ -157,16 +157,16 @@ Case `holdout_1m|NSW|20261017T0102|CELL-NSW-00086-4G1` (a fresh-holdout backhaul
 {
   "predictions": [
     [
-      0.9257085448392555,
-      0.07429145516074451
+      0.9998764669549104,
+      0.00012353304508956145
     ],
     [
       1.0,
       0.0
     ],
     [
-      0.20262664165103195,
-      0.797373358348968
+      0.20588235294117652,
+      0.7941176470588235
     ]
   ]
 }
@@ -181,30 +181,30 @@ The endpoint and the batch scoring in the job give the same calibrated scores (s
   {
     "element_id": "BH-NSW-0037",
     "element_type": "BACKHAUL_LINK",
-    "p_root": 0.7974,
+    "p_root": 0.7941,
     "is_root (ground truth)": true,
-    "batch_score (holdout job)": 0.7974
-  },
-  {
-    "element_id": "AGG-NSW-03",
-    "element_type": "AGG_ROUTER",
-    "p_root": 0.0743,
-    "is_root (ground truth)": false,
-    "batch_score (holdout job)": 0.0743
-  },
-  {
-    "element_id": "SITE-NSW-00086",
-    "element_type": "SITE",
-    "p_root": 0.0743,
-    "is_root (ground truth)": false,
-    "batch_score (holdout job)": 0.0743
+    "batch_score (holdout job)": 0.7941
   },
   {
     "element_id": "CELL-NSW-00086-4G1",
     "element_type": "CELL",
-    "p_root": 0.0002,
+    "p_root": 0.0719,
     "is_root (ground truth)": false,
-    "batch_score (holdout job)": 0.0002
+    "batch_score (holdout job)": 0.0719
+  },
+  {
+    "element_id": "SITE-NSW-00086",
+    "element_type": "SITE",
+    "p_root": 0.0719,
+    "is_root (ground truth)": false,
+    "batch_score (holdout job)": 0.0719
+  },
+  {
+    "element_id": "AGG-NSW-03",
+    "element_type": "AGG_ROUTER",
+    "p_root": 0.0001,
+    "is_root (ground truth)": false,
+    "batch_score (holdout job)": 0.0001
   },
   {
     "element_id": "AMF-NSW-01",
@@ -225,5 +225,5 @@ The endpoint and the batch scoring in the job give the same calibrated scores (s
 
 ## Latency from this laptop (client side, includes internet round trip)
 
-- first call: 335 ms (may include a scale-from-zero start)
-- 20 warm single-record calls: p50 334 ms, max 408 ms
+- first call: 355 ms (may include a scale-from-zero start)
+- 20 warm single-record calls: p50 344 ms, max 610 ms

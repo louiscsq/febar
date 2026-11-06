@@ -27,6 +27,7 @@ dbutils.widgets.text("catalog", "main", "Catalog")
 dbutils.widgets.text("schema", "netmon", "Schema")
 dbutils.widgets.text("volume", "landing", "Volume")
 dbutils.widgets.text("subdir", "stream", "Sub-directory in volume")
+dbutils.widgets.text("run_id", "", "Run id mixed into alarm / change IDs (blank = last part of subdir = source_run)")
 dbutils.widgets.dropdown("scale", "small", ["tiny", "small", "large", "xl"], "Scale preset")
 dbutils.widgets.text("seed", "42", "Random seed")
 dbutils.widgets.text("start", "", "Simulated start (UTC ISO, blank = now)")
@@ -55,7 +56,7 @@ from netmon_datagen.stream import run_stream
 
 w = {k: dbutils.widgets.get(k) for k in [
     "catalog", "schema", "volume", "subdir", "scale", "seed", "start", "step_seconds", "interval_seconds",
-    "max_batches", "fault_rate_multiplier", "dq_scale"]}
+    "max_batches", "fault_rate_multiplier", "dq_scale", "run_id"]}
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{w['catalog']}`.`{w['schema']}`")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS `{w['catalog']}`.`{w['schema']}`.`{w['volume']}`")
@@ -64,6 +65,7 @@ target = f"/Volumes/{w['catalog']}/{w['schema']}/{w['volume']}/{w['subdir']}"
 cfg = GeneratorConfig.for_scale(
     w["scale"],
     seed=int(w["seed"]),
+    run_id=w["run_id"] or w["subdir"].rstrip("/").split("/")[-1],
     dq=DQConfig().scaled(float(w["dq_scale"])),
     faults=FaultConfig(rate_multiplier=float(w["fault_rate_multiplier"])),
 )

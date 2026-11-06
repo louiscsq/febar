@@ -1,6 +1,6 @@
 # Evaluation vs the step-2 localiser: fresh holdout and dev
 
-Captured 2026-11-05 23:47 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
+Captured 2026-11-06 08:08 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
 
 **How it is scored (GT-free first, ground truth after).** Every case of the run is scored by the frozen model
 (`evaluate.case_outputs`: ID / feature columns and the score only). The ranked outputs are then attributed to
@@ -12,13 +12,15 @@ published region-wide `eval_rca_baseline` is shown as a secondary framing.
 - **Top-1 / top-3**: the incident's primary output at the first decision time at least 5 minutes after impact
   start (up to 15 minutes).
 - **Early catch**: every 1-minute decision time, the first one whose top-1 is a valid root with calibrated score
-  >= the validation threshold (0.32). Times are signed `decision_ts - impact_start_ts`: pre-impact
+  >= the validation threshold (0.27). Times are signed `decision_ts - impact_start_ts`: pre-impact
   catches are negative, counted separately and kept in the median.
 
 **Splits.**
 - **Holdout** = `holdout_1m`: a fresh run generated after the design was frozen (new seed 4242 for faults,
   noise and defects, same network, 2026-10-17 … 10-18), through the unchanged step-2 pipeline, evaluated once
-  with the frozen champion v4 (evaluation MLflow run `b678bdd4d2c84591bdc4e1bfec61d5c2`).
+  with the frozen champion v5 (evaluation MLflow run `d58a5f8893df4d37b7835be9877811df`). This is the one
+  re-score after the PR #6 alarm ID fix (corrected holdout, champion retrained on corrected data with the frozen
+  design); the published v4 result and the comparison are in `08_alarm_id_fix.md`.
 - **Dev** = the last two days of `history_1m` (2026-10-14 … 10-15). They were seen while the design was
   iterated, so they are **not** a holdout.
 - **Validation** (2026-10-13) chose the calibration and the threshold.
@@ -38,11 +40,11 @@ SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_
 
 | fault_type | n | model_top1_pct | heuristic_same_cases_top1_pct | model_top3_pct | heuristic_same_cases_top3_pct | step2_region_wide_top1_pct | step2_region_wide_top3_pct |
 |---|---|---|---|---|---|---|---|
-| ALL | 337.0 | 93.2 | 78.3 | 95.3 | 80.7 | 27.9 | 43.9 |
-| CELL_OUTAGE | 187.0 | 95.2 | 94.7 | 96.3 | 94.7 | 7.0 | 21.4 |
+| ALL | 337.0 | 94.7 | 78.3 | 95.5 | 80.7 | 27.9 | 43.9 |
+| CELL_OUTAGE | 187.0 | 95.7 | 94.7 | 96.3 | 94.7 | 7.0 | 21.4 |
 | BACKHAUL_DEGRADATION | 53.0 | 86.8 | 3.8 | 86.8 | 3.8 | 41.5 | 64.2 |
-| AGG_ROUTER_FAILURE | 40.0 | 87.5 | 87.5 | 95.0 | 92.5 | 82.5 | 95.0 |
-| SITE_POWER_OUTAGE | 38.0 | 97.4 | 84.2 | 100.0 | 100.0 | 23.7 | 50.0 |
+| AGG_ROUTER_FAILURE | 40.0 | 95.0 | 87.5 | 97.5 | 92.5 | 82.5 | 95.0 |
+| SITE_POWER_OUTAGE | 38.0 | 100.0 | 84.2 | 100.0 | 100.0 | 23.7 | 50.0 |
 | AMF_OVERLOAD | 17.0 | 100.0 | 100.0 | 100.0 | 100.0 | 100.0 | 100.0 |
 | BUSHFIRE_GRID_OUTAGE | 1.0 | 0.0 | 0.0 | 100.0 | 0.0 | 0.0 | 0.0 |
 | LONG_HAUL_FIBRE_CUT | 1.0 | 100.0 | 100.0 | 100.0 | 100.0 | 0.0 | 0.0 |
@@ -51,7 +53,7 @@ _8 row(s)_
 
 ## HOLDOUT (holdout_1m, untouched): non-oracle companion, any live alert correct at the SLA decision time
 
-No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a valid root? Ground truth supplies only the region, the impact start and the root list. `oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job `banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.
+No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a valid root? Ground truth supplies only the region, the impact start and the root list. `oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job `banksia-rca-any-alert-metric` on the frozen champion v5's scores; nothing retrained.
 
 ```sql
 SELECT fault_type, n, any_alert_correct_pct, matched_top1_pct AS oracle_matched_top1_pct,
@@ -61,11 +63,11 @@ SELECT fault_type, n, any_alert_correct_pct, matched_top1_pct AS oracle_matched_
 
 | fault_type | n | any_alert_correct_pct | oracle_matched_top1_pct | median_region_alerts |
 |---|---|---|---|---|
-| ALL | 337 | 81.0 | 93.2 | 5.0 |
-| CELL_OUTAGE | 187 | 95.2 | 95.2 | 5.0 |
+| ALL | 337 | 82.5 | 94.7 | 5.0 |
+| CELL_OUTAGE | 187 | 95.7 | 95.7 | 5.0 |
 | BACKHAUL_DEGRADATION | 53 | 9.4 | 86.8 | 5.0 |
-| AGG_ROUTER_FAILURE | 40 | 87.5 | 87.5 | 3.0 |
-| SITE_POWER_OUTAGE | 38 | 97.4 | 97.4 | 5.0 |
+| AGG_ROUTER_FAILURE | 40 | 95.0 | 95.0 | 3.0 |
+| SITE_POWER_OUTAGE | 38 | 100.0 | 100.0 | 5.0 |
 | AMF_OVERLOAD | 17 | 100.0 | 100.0 | 1.0 |
 | BUSHFIRE_GRID_OUTAGE | 1 | 0.0 | 0.0 | 5.0 |
 | LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 | 5.0 |
@@ -85,14 +87,14 @@ SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_pre_impa
 
 | fault_type | n | model_localised_pct | model_within_5min_pct | model_pre_impact_n | model_median_signed_s | heuristic_same_cases_within_5min_pct | heuristic_same_cases_median_signed_s | step2_localised_pct | step2_within_5min_pct | step2_median_s |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ALL | 337 | 99.4 | 80.4 | 35 | 106.0 | 76.9 | 116.0 | 100.0 | 65.6 | 76.0 |
-| CELL_OUTAGE | 187 | 99.5 | 94.7 | 0 | 98.5 | 93.6 | 97.0 | 100.0 | 100.0 | 51.0 |
-| BACKHAUL_DEGRADATION | 53 | 98.1 | 0.0 | 0 | 615.0 | 0.0 | 727.5 | 100.0 | 0.0 | 1011.0 |
-| AGG_ROUTER_FAILURE | 40 | 100.0 | 97.5 | 26 | -12.0 | 85.0 | 193.0 | 100.0 | 30.0 | 392.5 |
-| SITE_POWER_OUTAGE | 38 | 100.0 | 97.4 | 0 | 156.0 | 84.2 | 152.5 | 100.0 | 57.9 | 195.0 |
+| ALL | 337 | 99.7 | 80.7 | 42 | 92.5 | 78.3 | 99.0 | 100.0 | 78.6 | 46.0 |
+| CELL_OUTAGE | 187 | 99.5 | 94.7 | 0 | 88.5 | 93.6 | 93.0 | 100.0 | 100.0 | 35.0 |
+| BACKHAUL_DEGRADATION | 53 | 100.0 | 0.0 | 0 | 619.0 | 0.0 | 727.5 | 100.0 | 0.0 | 1011.0 |
+| AGG_ROUTER_FAILURE | 40 | 100.0 | 97.5 | 33 | -13.5 | 97.5 | 42.5 | 100.0 | 100.0 | 2.0 |
+| SITE_POWER_OUTAGE | 38 | 100.0 | 100.0 | 0 | 150.0 | 84.2 | 151.0 | 100.0 | 97.4 | 130.5 |
 | AMF_OVERLOAD | 17 | 100.0 | 100.0 | 9 | -113.0 | 100.0 | 204.0 | 100.0 | 0.0 | 514.0 |
-| BUSHFIRE_GRID_OUTAGE | 1 | 100.0 | 0.0 | 0 | 759.0 | 0.0 | 8019.0 | 100.0 | 0.0 | 8010.0 |
-| LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 | 0 | 236.0 | 100.0 | 176.0 | 100.0 | 0.0 | 416.0 |
+| BUSHFIRE_GRID_OUTAGE | 1 | 100.0 | 0.0 | 0 | 1419.0 | 0.0 | 8019.0 | 100.0 | 0.0 | 8010.0 |
+| LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 | 0 | 116.0 | 100.0 | 116.0 | 100.0 | 100.0 | 69.0 |
 
 _8 row(s)_
 
@@ -133,7 +135,7 @@ SELECT incident_id, impact_start_ts, localisation_s AS model_signed_s, within_5m
 | INC-00196 | 2026-10-17T23:16:16.000Z | 584.0 | false | 764.0 | 944.000000 | false |
 | INC-00199 | 2026-10-17T23:22:25.000Z | 635.0 | false | 755.0 | 1175.000000 | false |
 | INC-00200 | 2026-10-17T23:24:41.000Z | 619.0 | false | 679.0 | 1039.000000 | false |
-| INC-00204 | 2026-10-18T00:06:34.000Z | NULL | false | NULL | 0.000000 | false |
+| INC-00204 | 2026-10-18T00:06:34.000Z | 1646.0 | false | NULL | 0.000000 | false |
 | INC-00209 | 2026-10-18T00:16:03.000Z | 477.0 | false | 537.0 | 957.000000 | false |
 | INC-00214 | 2026-10-18T00:39:56.000Z | 484.0 | false | 604.0 | 1024.000000 | false |
 | INC-00227 | 2026-10-18T01:37:59.000Z | 421.0 | false | 541.0 | 841.000000 | false |
@@ -141,7 +143,7 @@ SELECT incident_id, impact_start_ts, localisation_s AS model_signed_s, within_5m
 | INC-00244 | 2026-10-18T03:13:27.000Z | 633.0 | false | 753.0 | 1113.000000 | false |
 | INC-00247 | 2026-10-18T03:31:13.000Z | 467.0 | false | 767.0 | 947.000000 | false |
 | INC-00255 | 2026-10-18T04:08:54.000Z | 846.0 | false | 966.0 | 1386.000000 | false |
-| INC-00282 | 2026-10-18T12:17:07.000Z | 2693.0 | false | 2693.0 | 2993.000000 | false |
+| INC-00282 | 2026-10-18T12:17:07.000Z | 1013.0 | false | 2693.0 | 2993.000000 | false |
 | INC-00288 | 2026-10-18T13:07:42.000Z | 318.0 | false | 438.0 | 858.000000 | false |
 | INC-00291 | 2026-10-18T13:30:55.000Z | 485.0 | false | 605.0 | 965.000000 | false |
 | INC-00292 | 2026-10-18T13:39:39.000Z | 681.0 | false | 861.0 | 1041.000000 | false |
@@ -173,8 +175,8 @@ SELECT system, n_alerts, fault, censored, planned_suppressed, planned_fp, red_he
 
 | system | n_alerts | fault | censored | planned_suppressed | planned_fp | red_herring | unexplained | fault_precision_pct |
 |---|---|---|---|---|---|---|---|---|
-| rca_model (top-1 >= threshold) | 395 | 353 | 0 | 13 | 0 | 0 | 29 | 92.4 |
-| step2 detections | 14028 | 12600 | 0 | 1119 | 0 | 0 | 309 | 97.6 |
+| rca_model (top-1 >= threshold) | 377 | 353 | 0 | 6 | 0 | 0 | 18 | 95.1 |
+| step2 detections | 14342 | 12885 | 0 | 1148 | 0 | 0 | 309 | 97.7 |
 
 _2 row(s)_
 
@@ -191,8 +193,8 @@ SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_
 
 | fault_type | n | model_top1_pct | heuristic_same_cases_top1_pct | model_top3_pct | heuristic_same_cases_top3_pct | step2_region_wide_top1_pct | step2_region_wide_top3_pct |
 |---|---|---|---|---|---|---|---|
-| ALL | 355.0 | 94.1 | 80.8 | 96.6 | 83.9 | 23.4 | 36.3 |
-| CELL_OUTAGE | 205.0 | 97.1 | 96.6 | 100.0 | 97.6 | 5.4 | 14.6 |
+| ALL | 355.0 | 94.1 | 80.8 | 96.3 | 83.9 | 23.4 | 36.3 |
+| CELL_OUTAGE | 205.0 | 97.1 | 96.6 | 99.5 | 97.6 | 5.4 | 14.6 |
 | BACKHAUL_DEGRADATION | 55.0 | 78.2 | 5.5 | 78.2 | 5.5 | 34.5 | 49.1 |
 | SITE_POWER_OUTAGE | 46.0 | 97.8 | 82.6 | 100.0 | 100.0 | 21.7 | 50.0 |
 | AGG_ROUTER_FAILURE | 30.0 | 93.3 | 96.7 | 100.0 | 100.0 | 83.3 | 100.0 |
@@ -203,7 +205,7 @@ _7 row(s)_
 
 ## DEV (history_1m 10-14 … 10-15, seen during design): non-oracle companion, any live alert correct at the SLA decision time
 
-No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a valid root? Ground truth supplies only the region, the impact start and the root list. `oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job `banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.
+No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a valid root? Ground truth supplies only the region, the impact start and the root list. `oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job `banksia-rca-any-alert-metric` on the frozen champion v5's scores; nothing retrained.
 
 ```sql
 SELECT fault_type, n, any_alert_correct_pct, matched_top1_pct AS oracle_matched_top1_pct,
@@ -236,12 +238,12 @@ SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_pre_impa
 
 | fault_type | n | model_localised_pct | model_within_5min_pct | model_pre_impact_n | model_median_signed_s | heuristic_same_cases_within_5min_pct | heuristic_same_cases_median_signed_s | step2_localised_pct | step2_within_5min_pct | step2_median_s |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ALL | 355 | 99.4 | 83.7 | 35 | 93.0 | 80.6 | 95.0 | 100.0 | 79.2 | 46.0 |
-| CELL_OUTAGE | 205 | 100.0 | 97.6 | 0 | 89.0 | 97.1 | 89.0 | 100.0 | 100.0 | 36.0 |
+| ALL | 355 | 99.4 | 83.7 | 36 | 92.0 | 80.6 | 95.0 | 100.0 | 79.2 | 46.0 |
+| CELL_OUTAGE | 205 | 100.0 | 97.6 | 0 | 88.0 | 97.1 | 89.0 | 100.0 | 100.0 | 36.0 |
 | BACKHAUL_DEGRADATION | 55 | 96.4 | 5.5 | 0 | 618.0 | 0.0 | 734.0 | 100.0 | 0.0 | 1020.0 |
 | SITE_POWER_OUTAGE | 46 | 100.0 | 97.8 | 1 | 114.0 | 82.6 | 135.0 | 100.0 | 97.8 | 145.0 |
 | AGG_ROUTER_FAILURE | 30 | 100.0 | 100.0 | 23 | -11.0 | 100.0 | 34.5 | 100.0 | 100.0 | 11.5 |
-| AMF_OVERLOAD | 18 | 100.0 | 100.0 | 11 | -57.0 | 100.0 | 203.5 | 100.0 | 0.0 | 508.5 |
+| AMF_OVERLOAD | 18 | 100.0 | 100.0 | 12 | -58.5 | 100.0 | 203.5 | 100.0 | 0.0 | 508.5 |
 | LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 | 0 | 168.0 | 100.0 | 168.0 | 100.0 | 100.0 | 228.0 |
 
 _7 row(s)_
@@ -325,7 +327,7 @@ SELECT system, n_alerts, fault, censored, planned_suppressed, planned_fp, red_he
 
 | system | n_alerts | fault | censored | planned_suppressed | planned_fp | red_herring | unexplained | fault_precision_pct |
 |---|---|---|---|---|---|---|---|---|
-| rca_model (top-1 >= threshold) | 442 | 393 | 0 | 21 | 0 | 0 | 28 | 93.3 |
+| rca_model (top-1 >= threshold) | 434 | 390 | 0 | 18 | 0 | 0 | 26 | 93.8 |
 | step2 detections | 12827 | 10558 | 0 | 1839 | 0 | 0 | 430 | 96.1 |
 
 _2 row(s)_
@@ -397,10 +399,7 @@ SELECT fault_type, incident_id, root_element_ids, top_candidates, heuristic_same
 | fault_type | incident_id | root_element_ids | top_candidates | heuristic_same_cases_top | has_output | evaluated_at_s |
 |---|---|---|---|---|---|---|
 | AGG_ROUTER_FAILURE | INC-00007 | AGG-NQL-04 |  |  | false | NULL |
-| AGG_ROUTER_FAILURE | INC-00139 | AGG-VIC-01 | AGG-VIC-04,BH-VIC-0015,CELL-VIC-00017-5G3 | AGG-VIC-04,AGG-VIC-01,BH-VIC-0038 | true | 316.0 |
-| AGG_ROUTER_FAILURE | INC-00147 | AGG-NQL-04 | CELL-NQL-00004-5G3,AGG-NQL-04,CELL-NQL-00002-4G2 | AGG-NQL-04,BH-NQL-0010,BH-NQL-0009 | true | 315.0 |
-| AGG_ROUTER_FAILURE | INC-00370 | AGG-VIC-04 | AGG-VIC-02,AGG-VIC-04,AGG-VIC-01 | AGG-VIC-04,AGG-VIC-02,AGG-VIC-01 | true | 338.0 |
-| AGG_ROUTER_FAILURE | INC-00391 | AGG-WA-03 | AGG-WA-01,AGG-WA-03,AMF-WA-01 | AGG-WA-01,BH-WA-0005,BH-WA-0009 | true | 350.0 |
+| AGG_ROUTER_FAILURE | INC-00391 | AGG-WA-03 | AGG-WA-01,AGG-WA-03,UPF-WA-01 | AGG-WA-01,BH-WA-0005,BH-WA-0009 | true | 350.0 |
 | BACKHAUL_DEGRADATION | INC-00004 | BH-NSW-0016 |  |  | false | NULL |
 | BACKHAUL_DEGRADATION | INC-00006 | BH-NSW-0036 |  |  | false | NULL |
 | BACKHAUL_DEGRADATION | INC-00030 | BH-VIC-0038 |  |  | false | NULL |
@@ -415,9 +414,7 @@ SELECT fault_type, incident_id, root_element_ids, top_candidates, heuristic_same
 | CELL_OUTAGE | INC-00005 | CELL-VIC-00006-5G2 |  |  | false | NULL |
 | CELL_OUTAGE | INC-00008 | CELL-WA-00010-4G2 |  |  | false | NULL |
 | CELL_OUTAGE | INC-00010 | CELL-VIC-00044-5G1 |  |  | false | NULL |
-| CELL_OUTAGE | INC-00140 | CELL-NSW-00022-4G3 | SITE-NSW-00021,CELL-NSW-00022-4G3,BH-NSW-0008 | SITE-NSW-00021,CELL-NSW-00021-4G1,CELL-NSW-00021-4G2 | true | 342.0 |
 | CELL_OUTAGE | INC-00246 | CELL-WA-00035-5G3 | AGG-WA-01,CELL-WA-00035-5G3,BH-WA-0019 | AGG-WA-01,BH-WA-0005,BH-WA-0009 | true | 334.0 |
 | CELL_OUTAGE | INC-00309 | CELL-VIC-00093-4G2 | AGG-VIC-03,BH-VIC-0036,CELL-VIC-00077-5G1 | AGG-VIC-02,AGG-VIC-03,AGG-VIC-01 | true | 359.0 |
-| SITE_POWER_OUTAGE | INC-00097 | SITE-NSW-00086 | SITE-NSW-00087,SITE-NSW-00089,SITE-NSW-00086 | SITE-NSW-00086,SITE-NSW-00089,SITE-NSW-00087 | true | 316.0 |
 
-_23 row(s)_
+_18 row(s)_

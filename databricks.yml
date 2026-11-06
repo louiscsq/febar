@@ -77,7 +77,7 @@ variables:
     default: netmon_genai
   rca_model_version:
     description: UC model version served by the endpoint (the one the `champion` alias points at)
-    default: "4"
+    default: "5"
 
 targets:
   dev:

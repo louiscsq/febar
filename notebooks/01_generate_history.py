@@ -25,6 +25,7 @@ dbutils.widgets.text("catalog", "main", "Catalog")
 dbutils.widgets.text("schema", "netmon", "Schema")
 dbutils.widgets.text("volume", "landing", "Volume")
 dbutils.widgets.text("subdir", "history", "Sub-directory in volume")
+dbutils.widgets.text("run_id", "", "Run id mixed into alarm / change IDs (blank = last part of subdir = source_run)")
 dbutils.widgets.dropdown("scale", "large", ["tiny", "small", "large", "xl"], "Scale preset")
 dbutils.widgets.text("days", "30", "Days of history")
 dbutils.widgets.text("start_date", "", "Start date (YYYY-MM-DD, blank = today - days)")
@@ -54,7 +55,7 @@ from netmon_datagen.config import DQConfig, FaultConfig, GeneratorConfig
 
 w = {k: dbutils.widgets.get(k) for k in [
     "catalog", "schema", "volume", "subdir", "scale", "days", "start_date", "seed", "format", "dq_scale",
-    "fault_rate_multiplier", "step_minutes", "min_per_type", "topology_seed", "overwrite"]}
+    "fault_rate_multiplier", "step_minutes", "min_per_type", "topology_seed", "overwrite", "run_id"]}
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{w['catalog']}`.`{w['schema']}`")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS `{w['catalog']}`.`{w['schema']}`.`{w['volume']}`")
@@ -68,6 +69,8 @@ cfg = GeneratorConfig.for_scale(
     start=w["start_date"] or None,
     seed=int(w["seed"]),
     topology_seed=int(w["topology_seed"]) if w["topology_seed"] else None,
+    # The pipeline's source_run is the landing sub-directory: IDs are scoped to it, so runs never collide.
+    run_id=w["run_id"] or w["subdir"].rstrip("/").split("/")[-1],
     step_minutes=int(w["step_minutes"]),
     fmt=w["format"],
     dq=DQConfig().scaled(float(w["dq_scale"])),

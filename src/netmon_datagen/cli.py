@@ -18,6 +18,9 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fault-rate-multiplier", type=float, default=1.0)
     p.add_argument("--no-faults", action="store_true", help="disable faults and red herrings (clean baseline)")
     p.add_argument("--no-red-herrings", action="store_true")
+    p.add_argument("--run-id", default=None,
+                   help="run identity mixed into alarm / change IDs (default: derived from the seeds and the window); "
+                        "use the landing sub-directory name, i.e. the pipeline's source_run")
     p.add_argument("--min-per-type", type=int, default=1,
                    help="batch: guarantee at least N incidents of every fault type (0 = pure Poisson rates)")
 
@@ -25,7 +28,8 @@ def _common(p: argparse.ArgumentParser) -> None:
 def _config(a: argparse.Namespace, **extra) -> GeneratorConfig:
     faults = FaultConfig(enabled=not a.no_faults, rate_multiplier=a.fault_rate_multiplier,
                          red_herrings=not a.no_red_herrings, min_per_type=a.min_per_type)
-    return GeneratorConfig.for_scale(a.scale, seed=a.seed, topology_seed=a.topology_seed, dq=DQConfig().scaled(a.dq_scale), faults=faults, **extra)
+    return GeneratorConfig.for_scale(a.scale, seed=a.seed, topology_seed=a.topology_seed, run_id=a.run_id,
+                                     dq=DQConfig().scaled(a.dq_scale), faults=faults, **extra)
 
 
 def main(argv: list[str] | None = None) -> int:

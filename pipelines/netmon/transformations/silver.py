@@ -23,13 +23,20 @@ RECORD_ID_RE = '"record_id":"([^"]+)"'
 PII_REDACT = r"regexp_replace(regexp_replace({c}, '00101[0-9]{{10}}', '00101**********'), '[+]999[0-9]{{9}}', '+999*********')"
 
 
+def append_stream(table: str):
+    """Streaming read of an append-only pipeline table. `skipChangeCommits` ignores commits that only delete
+    rows, so a documented one-off correction (deleting a replaced run's superseded rows, see
+    notebooks/12_replace_run_feeds.py) does not break the stream; appends are read exactly as before."""
+    return spark.readStream.option("skipChangeCommits", "true").table(table)
+
+
 def ts(col: str):
     return F.expr(f'try_to_timestamp({col}, "{rules.TS_FORMAT}")')
 
 
 def typed(feed: str, ts_cols: list[str], dedupe: bool = True):
     """Bronze stream minus corrupt lines, timestamps parsed, duplicates dropped on record_id."""
-    df = spark.readStream.table(f"{S.bronze}.bronze_{feed}").where("_corrupt_record IS NULL")
+    df = append_stream(f"{S.bronze}.bronze_{feed}").where("_corrupt_record IS NULL")
     for c in ts_cols:
         df = df.withColumnRenamed(c, f"{c}_raw").withColumn(c, ts(f"{c}_raw"))
     if dedupe:
@@ -274,7 +281,7 @@ def quarantine_flows(feed: str) -> None:
 
     @dp.append_flow(target=f"{S.silver}.silver_quarantine", name=f"quarantine_{feed}_corrupt")
     def _corrupt():
-        return spark.readStream.table(f"{S.bronze}.bronze_{feed}").where("_corrupt_record IS NOT NULL").selectExpr(
+        return append_stream(f"{S.bronze}.bronze_{feed}").where("_corrupt_record IS NOT NULL").selectExpr(
             # A truncated line usually still starts with its record_id; keep it so defects can be traced.
             f"'{feed}' AS feed", f"nullif(regexp_extract(_corrupt_record, '{RECORD_ID_RE}', 1), '') AS record_id",
             "array('parseable_record') AS failed_rules",

@@ -381,6 +381,28 @@ honest because it adds the measured wall-clock pipeline latency to the simulated
   later than that is admitted to silver (bounded state) and counted by `eval_dq_capture`
   (`n_single_copy_in_silver`). Exactly-once over unbounded time would need unbounded state or a MERGE-based
   silver.
+- **Dedupe is global across runs.** One silver table and one dedupe state serve every generator run, so
+  `record_id` must be unique across runs, not just within one (`docs/data_model.md`, "IDs across runs"). State is
+  evicted only when a later micro-batch advances the watermark: after an idle gap, the first batch is still
+  checked against the previous batch's keys, however old. That is how `holdout_1m` lost 5,417 alarm IDs to
+  `history_1m` and `history_1m` lost 90 to `history` (four weeks apart) while incident alarm IDs repeated between
+  runs (fixed in PR #6; `evidence/step3/08_alarm_id_fix.md`).
+- **Replacing a run's feed.** Bronze feeds and `silver_alarms` are read with `skipChangeCommits`: appends are read
+  as before, and a commit that only deletes rows does not break the streams. That is what made the PR #6
+  correction possible without a full refresh (which would have reset the append-only health windows and
+  recomputed the live run's wall-clock latency): `banksia-netmon-replace-run-feeds` swaps the regenerated
+  alarm / DQ-log / change-calendar files in (new names), deletes the superseded rows in bronze, silver, quarantine
+  and the alarm detections, then runs an incremental update. Deletes are not propagated by the pipeline itself;
+  the job deletes in every affected streaming table. The change calendar's derived tables are materialized views
+  recomputed from bronze, so they need no delete. A final `check` task (`netmon_pipeline.replace_check`) fails the
+  job unless no superseded row, pre-fix change ID or duplicate maintenance window remains
+  (`evidence/step3/09_replace_check.md`).
+- **In-maintenance join fan-out.** `impact_signals` flags a detection as in maintenance by joining the change
+  calendar on its site or router. A detection inside two overlapping windows (site and router, or two router
+  changes) is written once per window, with identical content. 0.03–0.6 % of the 1-minute runs' detection
+  rows repeat this way (`09_replace_check.md`). Downstream counts that use `count(*)` over detections can be
+  slightly inflated; a distinct-window aggregation before the join would fix it. It predates PR #6 and was not
+  changed there (step-2 tables and the frozen step-3/4 inputs would move).
 - **Backfill ordering.** The event-time watermarks assume the history arrives roughly in emission order.
   Bronze allows 20,000 files per micro-batch, so a `small` history is ingested in one batch; a much
   larger backfill split over several batches could see some 15-minute history rows fall behind the

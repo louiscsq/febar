@@ -125,7 +125,9 @@ published region-wide `eval_rca_baseline` is shown as a secondary framing.
 **Splits.**
 - **Holdout** = `holdout_1m`: a fresh run generated after the design was frozen (new seed 4242 for faults,
   noise and defects, same network, 2026-10-17 … 10-18), through the unchanged step-2 pipeline, evaluated once
-  with the frozen champion v{h['model_version']} (evaluation MLflow run `{h['mlflow_run_id']}`).
+  with the frozen champion v{h['model_version']} (evaluation MLflow run `{h['mlflow_run_id']}`). This is the one
+  re-score after the PR #6 alarm ID fix (corrected holdout, champion retrained on corrected data with the frozen
+  design); the published v4 result and the comparison are in `08_alarm_id_fix.md`.
 - **Dev** = the last two days of `history_1m` (2026-10-14 … 10-15). They were seen while the design was
   iterated, so they are **not** a holdout.
 - **Validation** (2026-10-13) chose the calibration and the threshold.
@@ -150,7 +152,7 @@ Scored incidents only (customer-impacting, uncensored faults); n = incidents."""
                 "valid root? Ground truth supplies only the region, the impact start and the root list. "
                 "`oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), "
                 "on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job "
-                "`banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.")
+                f"`banksia-rca-any-alert-metric` on the frozen champion v{h['model_version']}'s scores; nothing retrained.")
         d.query(f"{label}: early catch (signed times), model vs heuristic on the same cases vs step-2 localisation",
                 f"""
             SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_pre_impact_n,
@@ -351,6 +353,170 @@ asserts both call sites.""")
     d.write()
 
 
+# PR #6: run-unique alarm IDs. Per-run alarm counts, bronze vs silver. `netmon_eval.alarm_counts_pr5` holds this query's
+# result captured before the fix (CTAS on main 58004a7); `*_pr5` tables are snapshots of the published results.
+ALARM_COUNTS_SQL = """
+WITH b AS (SELECT _source_run run, count(*) bronze_rows, count(DISTINCT record_id) bronze_distinct_ids FROM telco_netmon_febar_catalog.netmon_bronze.bronze_alarms GROUP BY 1),
+bid AS (SELECT DISTINCT _source_run run, record_id FROM telco_netmon_febar_catalog.netmon_bronze.bronze_alarms WHERE record_id IS NOT NULL),
+s AS (SELECT source_run run, count(*) silver_rows, count(DISTINCT record_id) silver_distinct_ids FROM telco_netmon_febar_catalog.netmon_silver.silver_alarms GROUP BY 1),
+sid AS (SELECT DISTINCT source_run run, record_id FROM telco_netmon_febar_catalog.netmon_silver.silver_alarms),
+q AS (SELECT DISTINCT _source_run run, record_id FROM telco_netmon_febar_catalog.netmon_silver.silver_quarantine WHERE feed = 'alarms' AND record_id IS NOT NULL),
+qn AS (SELECT _source_run run, count(*) quarantined_rows FROM telco_netmon_febar_catalog.netmon_silver.silver_quarantine WHERE feed = 'alarms' GROUP BY 1),
+dup AS (SELECT _source_run run, count(*) injected_duplicates FROM telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections WHERE feed = 'alarms' AND defect_type = 'duplicate' GROUP BY 1),
+miss AS (SELECT m.run, m.record_id, EXISTS (SELECT 1 FROM sid o WHERE o.record_id = m.record_id AND o.run <> m.run) AS in_other_run
+         FROM (SELECT * FROM bid LEFT ANTI JOIN sid USING (run, record_id) LEFT ANTI JOIN q USING (run, record_id)) m),
+mc AS (SELECT run, count(*) missing_ids, count_if(in_other_run) missing_ids_held_by_other_run FROM miss GROUP BY 1)
+SELECT b.run, b.bronze_rows, b.bronze_distinct_ids, coalesce(dup.injected_duplicates, 0) injected_duplicates,
+       coalesce(qn.quarantined_rows, 0) quarantined_rows, s.silver_rows, s.silver_distinct_ids,
+       b.bronze_rows - s.silver_rows - coalesce(qn.quarantined_rows, 0) AS removed_by_dedupe,
+       coalesce(mc.missing_ids, 0) distinct_ids_missing_from_silver, coalesce(mc.missing_ids_held_by_other_run, 0) missing_ids_held_by_other_run
+FROM b LEFT JOIN s USING (run) LEFT JOIN qn USING (run) LEFT JOIN dup USING (run) LEFT JOIN mc USING (run)
+"""
+
+
+def _old_new(key: str, cols: list[str], old: str, new: str, order: str) -> str:
+    sel = ", ".join(f"o.{c} AS old_{c}, n.{c} AS new_{c}" for c in cols)
+    return (f"SELECT coalesce(n.{key}, o.{key}) AS {key}, {sel} FROM {old} o FULL OUTER JOIN {new} n "
+            f"ON n.{key} = o.{key} ORDER BY {order}")
+
+
+def alarm_fix(r: Runner, run: dict) -> None:
+    _, old_tr = r.sql(f"SELECT model_version, mlflow_run_id, threshold FROM {R}.rca_training_runs_pr5")
+    _, old_ho = r.sql(f"SELECT model_version, mlflow_run_id FROM {R}.rca_holdout_runs_pr5")
+    _, new_ho = r.sql(f"SELECT model_version, mlflow_run_id FROM {R}.rca_holdout_runs")
+    d = Doc(r, "08_alarm_id_fix.md", "PR #6: run-unique alarm IDs, re-ingest, retrain and one holdout re-score", f"""
+**Defect** (found in step 4, `evidence/step4/09_holdout_alarm_gap.md`): incident alarm IDs hashed only the per-run
+incident ID (`INC-00001`, ...), so a later batch run reused an earlier run's alarm IDs and silver's cross-run dedupe
+on `record_id` dropped them. **Fix**: alarm and change IDs hash a run key (`docs/data_model.md`, "IDs across runs").
+`history_1m` and `holdout_1m` were regenerated with the same seeds and windows (`run_id` = run name). The
+regeneration was verified to differ from the ingested files **only in IDs** (KPIs, sessions, topology and incident
+ground truth byte-identical; alarms, DQ log and change calendar identical without `record_id` / `alarm_id` /
+`change_id`), and the three changed feeds were swapped in by `banksia-netmon-replace-run-feeds`
+(`notebooks/12_replace_run_feeds.py`; no full refresh, step-2 `history` / `stream` untouched).
+
+**Retraining decision.** The training data was affected: `history_1m` had lost 90 alarm IDs, 89 of them on
+2026-10-10, the first **train** day (to the step-2 `history` run's IDs). The contract says: if training data was
+affected, retrain. The model was retrained once with the **frozen design** (same code, features, hyperparameters,
+split dates and threshold rule; job `banksia-rca-train` with its defaults): old champion v{old_tr[0][0]} (MLflow run
+`{old_tr[0][1]}`, threshold {old_tr[0][2]}) -> new champion v{run['model_version']} (MLflow run
+`{run['mlflow_run_id']}`, threshold {run['threshold']}). The holdout was then re-scored **once** with the same
+evaluation code (`banksia-rca-evaluate-holdout`, then `banksia-rca-any-alert-metric`): old evaluation v{old_ho[0][0]}
+run `{old_ho[0][1]}`, new evaluation v{new_ho[0][0]} run `{new_ho[0][1]}`. Old numbers are the `*_pr5` snapshots
+taken before anything was changed. Both the model and the data changed between old and new, so the holdout
+difference is not attributable to either alone; the dev and validation rows show the model change on unchanged data
+(dev days lost no alarms).""")
+    d.query("Alarms per run BEFORE the fix (snapshot netmon_eval.alarm_counts_pr5)",
+            f"SELECT * FROM {E}.alarm_counts_pr5 ORDER BY run",
+            "`removed_by_dedupe` = bronze rows - silver rows - quarantined rows. It should equal `injected_duplicates`. "
+            "`missing_ids_held_by_other_run` = distinct IDs of the run absent from silver (and not quarantined) whose "
+            "ID is in silver under another run.")
+    d.query("Alarms per run AFTER the fix (same query, live)", ALARM_COUNTS_SQL + " ORDER BY run",
+            "Every run: `removed_by_dedupe` = `injected_duplicates`, nothing missing. Only the intended DQ duplicates "
+            "are removed. (Quarantine counts rise slightly: rows that were dropped by the dedupe before their "
+            "expectations ran now reach the quarantine.)")
+    d.query("Before vs after, side by side", f"""
+        SELECT n.run, o.silver_rows AS silver_before, n.silver_rows AS silver_after, n.silver_rows - o.silver_rows AS gained,
+               o.removed_by_dedupe AS dedupe_removed_before, n.removed_by_dedupe AS dedupe_removed_after,
+               n.injected_duplicates, o.distinct_ids_missing_from_silver AS missing_before,
+               n.distinct_ids_missing_from_silver AS missing_after
+        FROM ({ALARM_COUNTS_SQL}) n JOIN {E}.alarm_counts_pr5 o USING (run) ORDER BY n.run""")
+    acc = ["n", "model_top1_pct", "heuristic_same_cases_top1_pct", "model_top3_pct", "baseline_top1_pct"]
+    for split, label in (("holdout", "HOLDOUT (holdout_1m)"), ("dev", "DEV (history_1m 10-14 … 10-15)"),
+                         ("val", "VALIDATION (history_1m 10-13)")):
+        d.query(f"{label}: top-1 / top-3 old vs new", _old_new(
+            "fault_type", acc, f"{R}.rca_eval_{split}_accuracy_pr5", f"{R}.rca_eval_{split}_accuracy",
+            "fault_type = 'ALL' DESC, new_n DESC"),
+            "`baseline_top1_pct` = step 2's region-wide `eval_rca_baseline` on the same incidents.")
+        if split != "val":
+            d.query(f"{label}: non-oracle any-alert metric old vs new", _old_new(
+                "fault_type", ["n", "any_alert_correct_pct", "matched_top1_pct", "median_region_alerts"],
+                f"{R}.rca_eval_{split}_any_alert_summary_pr5", f"{R}.rca_eval_{split}_any_alert_summary",
+                "fault_type = 'ALL' DESC, new_n DESC"))
+        d.query(f"{label}: early catch old vs new (signed seconds; step-2 localisation on the same incidents)",
+                _old_new("fault_type", ["n", "model_within_5min_pct", "model_median_signed_s",
+                                        "heuristic_same_cases_within_5min_pct", "step2_within_5min_pct",
+                                        "step2_median_s"],
+                         f"{R}.rca_eval_{split}_early_catch_summary_pr5", f"{R}.rca_eval_{split}_early_catch_summary",
+                         "fault_type = 'ALL' DESC, new_n DESC"))
+        d.query(f"{label}: alert-level fault precision old vs new", _old_new(
+            "system", ["n_alerts", "fault", "unexplained", "fault_precision_pct"],
+            f"{R}.rca_eval_{split}_alert_precision_pr5", f"{R}.rca_eval_{split}_alert_precision", "system"))
+    d.query("Step 2 (rule-based) on the holdout run, old vs new: time to detect / localise", _old_new(
+        "event_class", ["n_incidents", "impact_within_5min_pct", "root_localised_pct", "localised_within_5min_pct",
+                        "localisation_median_ttd_s"],
+        f"(SELECT * FROM {E}.eval_ttd_summary_pr5 WHERE source_run = 'holdout_1m' AND fault_type = 'ALL')",
+        f"(SELECT * FROM {E}.eval_ttd_summary WHERE source_run = 'holdout_1m' AND fault_type = 'ALL')", "1"))
+    d.query("Step 2 region-wide RCA baseline per run, old vs new", _old_new(
+        "source_run", ["n", "hit_at_1_pct", "hit_at_3_pct"],
+        f"(SELECT source_run, count(*) AS n, round(100 * avg(CAST(hit_at_1 AS INT)), 1) AS hit_at_1_pct, "
+        f"round(100 * avg(CAST(hit_at_3 AS INT)), 1) AS hit_at_3_pct FROM {E}.eval_rca_baseline_pr5 GROUP BY 1)",
+        f"(SELECT source_run, count(*) AS n, round(100 * avg(CAST(hit_at_1 AS INT)), 1) AS hit_at_1_pct, "
+        f"round(100 * avg(CAST(hit_at_3 AS INT)), 1) AS hit_at_3_pct FROM {E}.eval_rca_baseline GROUP BY 1)", "1"),
+            "`history` and `stream` are untouched and must be equal old vs new.")
+    d.write()
+
+
+SWAP_RUN_ID = 812068105574215  # banksia-netmon-replace-run-feeds, stage=swap (the one replacement run)
+REPLACED_RUNS = ["history_1m", "holdout_1m"]
+
+
+def replace_check_doc(r: Runner, w) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from netmon_pipeline import replace_check
+
+    def task_output(run_id: int, key: str) -> dict:
+        run = w.jobs.get_run(run_id)
+        t = next(t for t in run.tasks if t.task_key == key)
+        return json.loads(w.jobs.get_run_output(t.run_id).notebook_output.result)
+
+    d = Doc(r, "09_replace_check.md", "PR #6: replacement check (change calendar, superseded rows, duplicates)", """
+The replacement swapped three feeds of `history_1m` and `holdout_1m`: alarms, the DQ log and the change calendar
+(`maintenance_windows`, whose `change_id` hashes the run key). Every table derived from the calendar is a
+materialized view recomputed from bronze (`silver_maintenance_windows`, then `gold_element_impact_5m` and the eval
+views); no streaming table stores calendar rows. Streaming detections carry only the `in_maintenance` flag, and the
+regenerated windows are identical to the old ones except `change_id` (verified file by file before the swap), so
+the flag cannot change. Below: what the swap deleted, the counts now, and every check of
+`netmon_pipeline.replace_check` (also the last task of `banksia-netmon-replace-run-feeds`, which fails on any
+violation).""")
+    swap = task_output(SWAP_RUN_ID, "replace")
+    rows = [[run, t.split(".")[-1].strip("`"), n] for run, dd in swap["deleted"].items() for t, n in dd.items()]
+    d.text(f"BEFORE: rows deleted by the swap (job run {SWAP_RUN_ID}, notebook output)",
+           "Superseded rows = every row ingested from a replaced file. Bronze maintenance before the swap held "
+           "exactly these rows for the two runs (one calendar file each).\n\n" + md_table(["run", "table", "deleted_rows"], rows))
+    d.text("BEFORE: files verified identical except IDs", md_table(
+        ["run", "unchanged_files (byte-identical)", "changed_files (identical without IDs)"],
+        [[k, v["unchanged_files"], v["changed_files"]] for k, v in swap["report"].items()]))
+    rl = ", ".join(f"'{x}'" for x in REPLACED_RUNS)
+    d.query("AFTER: change calendar per run, bronze", f"""
+        SELECT _source_run AS run, count(*) AS rows, count_if(_source_file RLIKE '-r2[.]json$') AS rows_from_new_files,
+               count(DISTINCT change_id) AS change_ids, count(DISTINCT element_id, planned_start_ts, planned_end_ts) AS windows
+        FROM {CAT}.netmon_bronze.bronze_maintenance_windows GROUP BY 1 ORDER BY 1""")
+    d.query("AFTER: change calendar per run, silver_maintenance_windows (materialized view)", f"""
+        SELECT source_run AS run, count(*) AS rows, count(DISTINCT change_id) AS change_ids,
+               count(DISTINCT element_id, planned_start_ts, planned_end_ts) AS windows
+        FROM {CAT}.netmon_silver.silver_maintenance_windows GROUP BY 1 ORDER BY 1""",
+            "rows = change_ids = windows: no duplicate window. `history` was not replaced.")
+    _, inc = r.sql(f"SELECT DISTINCT incident_id FROM {E}.eval_gt_incidents WHERE fault_type = 'PLANNED_MAINTENANCE' "
+                   f"AND source_run IN ({rl})")
+    legacy = [replace_check.legacy_change_id(x[0]) for x in inc]
+    res = []
+    for name, stmt in replace_check.checks(CAT, REPLACED_RUNS, "r2", legacy).items():
+        _, rr = r.sql(stmt)
+        got = {x[0]: int(x[1]) for x in rr}
+        res.append([name, *[got.get(run, 0) for run in REPLACED_RUNS]])
+    d.text("AFTER: replacement checks (violations; all must be 0)",
+           f"`legacy_change_ids` looks for the {len(legacy)} pre-fix change IDs (`opaque_id(\"CHG\", incident_id)`, "
+           "computed from the ground-truth planned-maintenance incidents of both runs: 130 windows, but incident IDs repeat "
+           "between runs, which is the original defect) in bronze and silver.\n\n"
+           + md_table(["check", *REPLACED_RUNS], res))
+    d.query("Repeated detection rows (informational, pre-existing)", replace_check.fanout_summary_sql(CAT, REPLACED_RUNS),
+            "Repeated `detection_id`s are not a replacement artefact: `fanout_unexplained_gold_impact_detections` = 0 "
+            "above means every repeated detection matches exactly that many change windows (e.g. its site's and its "
+            "router's overlapping windows), because the in-maintenance flag is a join. The KPI rows (never touched "
+            "by the replacement, written 2026-11-05) repeat the same way. Recorded as a known limit.")
+    d.write()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", default="febar")
@@ -364,7 +530,8 @@ def main() -> None:
     run = latest_run(r)
     steps = {"training": lambda: training(r, w, run), "evaluation": lambda: evaluation(r, run),
              "registry": lambda: registry(r, w), "serving": lambda: serving(r, w, run),
-             "lakebase": lambda: lakebase(r, w), "live": lambda: live(r), "notes": lambda: pipeline_notes(r)}
+             "lakebase": lambda: lakebase(r, w), "live": lambda: live(r), "notes": lambda: pipeline_notes(r),
+             "alarm_fix": lambda: alarm_fix(r, run), "replace_check": lambda: replace_check_doc(r, w)}
     for k, f in steps.items():
         if a.only and k not in a.only.split(","):
             continue

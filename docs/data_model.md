@@ -18,6 +18,7 @@ is synthetic. Identifiers use reserved test ranges, vendors are fictional, and o
 - [Maintenance calendar](#maintenance-calendar): `maintenance_windows`
 - [Ground truth](#ground-truth): `ground_truth/incidents`, `ground_truth/dq_injections`
 - [Fault taxonomy and propagation](#fault-taxonomy-and-propagation)
+- [IDs across runs](#ids-across-runs)
 - [Data-quality defects](#data-quality-defects)
 - [Volumes and performance](#volumes-and-performance)
 - [Design rationale](#design-rationale)
@@ -207,7 +208,7 @@ null in the feed is an injected DQ defect.
 | column | type | description |
 |---|---|---|
 | `record_id` | string | `<alarm_id>-R` / `<alarm_id>-C` |
-| `alarm_id` | string | opaque (hash) id, the same on RAISE and CLEAR. It carries no incident linkage |
+| `alarm_id` | string | opaque (hash) id, the same on RAISE and CLEAR. It carries no incident linkage, and it is unique across runs (it hashes the run key, see [IDs across runs](#ids-across-runs)) |
 | `event_type` | string | `RAISE` / `CLEAR` |
 | `element_id`, `element_type` | string | FK → topology |
 | `alarm_code` | string | see catalogue below |
@@ -244,7 +245,7 @@ simulated hour there is a 15 % chance of a 10–50-minute episode of RAISE/CLEAR
 
 | column | type | description |
 |---|---|---|
-| `record_id` | string | session id |
+| `record_id` | string | session id `S-<yyyymmddHHMM>-<seq>` (start minute + sequence within that minute) |
 | `imsi` | string | `00101` + 10 digits. MCC 001 / MNC 01 is the ITU test network, never allocated to an operator |
 | `msisdn` | string | `+999` + 9 digits. E.164 country code 999 is unassigned |
 | `cell_id` | string | serving cell |
@@ -269,7 +270,7 @@ with session length. Faults therefore show up in this feed as bursts of `SETUP_F
 
 | column | description |
 |---|---|
-| `change_id` | opaque id |
+| `change_id` | opaque id (hashes the run key) |
 | `element_id`, `element_type` | element under change (router or site) |
 | `planned_start_ts`, `planned_end_ts` | approved 4-hour window, opening between 00:00 and 01:30 **local** time (stored as UTC) |
 | `change_type` | `software_upgrade` (routers) / `hardware_swap` (sites) |
@@ -292,7 +293,7 @@ see `is_censored` below.
 
 | column | type | description |
 |---|---|---|
-| `incident_id` | string | `INC-00001` (batch) / `INC-<yyyymmddHH>-00001` (stream) / `FLAP-00001` |
+| `incident_id` | string | `INC-00001` (batch) / `INC-<yyyymmddHH>-00001` (stream) / `FLAP-00001`. A per-run counter: unique only together with the run (`source_run`), which is how every consumer keys it |
 | `event_class` | string | `fault`, `planned`, `red_herring` |
 | `fault_type` | string | see taxonomy |
 | `root_element_id`, `root_element_type` | string | the true root cause. For geographic clusters, the epicentre (first element hit) |
@@ -423,6 +424,36 @@ RNG stream, seeded by `(seed, component, time chunk)`. Running with `--no-faults
 the exact baseline, and the diff between the two runs is the fault impact. The propagation tests rely
 on this: descendants of a failed router change, and non-descendants are bit-identical.
 
+## IDs across runs
+
+The pipeline deduplicates on `record_id` across **all** runs (one silver table, one dedupe state), so an ID that
+repeats between runs is a dropped record. Every generated ID is therefore either run-scoped or a time-qualified
+natural key:
+
+| ID | form | unique across runs because |
+|---|---|---|
+| `alarm_id` (incident alarms) | `ALM-hash(run_key, incident_id, n)` | hashes the run key (incident IDs restart at `INC-00001` in every batch run) |
+| `alarm_id` (background, flapping) | `ALM-hash(run_key, seed, kind, hour, …)` | hashes the run key |
+| alarm `record_id` | `<alarm_id>-R` / `-C` | follows `alarm_id` |
+| `change_id` | `CHG-hash(run_key, incident_id)` | hashes the run key |
+| KPI `record_id` | `K-<cell_id>-<yyyymmddHHMM>` | natural key of a measurement: one record per cell per reporting period |
+| session `record_id` | `S-<yyyymmddHHMM>-<seq>` | time-qualified: runs over different minutes never share one |
+| `incident_id` | `INC-00001` … | not used as a record key; ground truth is keyed by (`source_run`, `incident_id`) everywhere |
+
+The **run key** is `GeneratorConfig.run_id` when set (the jobs pass the landing sub-directory, i.e. the pipeline's
+`source_run`; CLI `--run-id`), else a digest of every other config field (scale, seeds, window, faults, DQ rates,
+format, …) plus the mode and window start, so two runs that differ in any parameter never share IDs. Same run, same
+key, same bytes.
+Event-time ties are broken by the ID *without* the run key, so a different run id changes only the IDs: event order
+and DQ defect assignment stay the same. KPI and session IDs are time-qualified on purpose: two runs over the same
+simulated minutes would also collide in the append-only, event-time-watermarked health and session windows, so
+runs must cover disjoint time anyway (as `history`, `stream`, `history_1m` and `holdout_1m` do).
+
+Until PR #6, incident alarm and change IDs hashed only `incident_id`, so a later batch run reused an earlier run's
+alarm IDs and silver dropped them (`evidence/step4/09_holdout_alarm_gap.md`). `history_1m` and `holdout_1m` were
+regenerated with run-scoped IDs and their alarm feeds replaced (`notebooks/12_replace_run_feeds.py`); the step-2
+`history` and `stream` runs lost nothing and keep their original IDs.
+
 ## Data-quality defects
 
 Defects are applied to `kpis`, `alarms` and `sessions` after generation. Each record gets at most one
@@ -499,8 +530,8 @@ is far too much to generate on a single driver, and it adds nothing to a demo. T
   arrival, at-least-once duplicates, late data and corrupt lines. These defects are realistic, so the
   bronze → silver expectations have something to catch. Each defect is logged, so their precision and
   recall can be measured.
-- **Determinism and isolation.** Same seed, same bytes: tested for both batch and streaming when
-  `--start` is set. Independent RNG streams per component make counterfactual runs possible.
+- **Determinism and isolation.** Same seed (and run id), same bytes: tested for both batch and streaming when
+  `--start` is set. Alarm and change IDs are unique across runs (`tests/test_run_unique_ids.py`). Independent RNG streams per component make counterfactual runs possible.
 - **Minimal dependencies.** The package needs only numpy, pandas and pyarrow, and runs on any Python
   ≥ 3.10 driver, including serverless notebooks. It needs no Spark, so the generator is unit-testable
   locally in seconds.

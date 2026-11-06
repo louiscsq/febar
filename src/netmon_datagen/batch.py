@@ -45,11 +45,13 @@ def generate_history(cfg: GeneratorConfig, out_dir: str | Path, log=print) -> di
         f"{(topo.nodes.element_type == 'SITE').sum()} window={ws}..{we} fmt={fmt} -> {out}")
 
     eng.write_topology(out, fmt)
-    incidents = schedule_incidents(topo, ws, we, cfg.faults, rng_for(cfg.seed, "faults"), id_prefix="INC")
+    run_key = cfg.run_key("batch", ws)
+    incidents = schedule_incidents(topo, ws, we, cfg.faults, rng_for(cfg.seed, "faults"), id_prefix="INC",
+                                   run_key=run_key)
     incidents += flapping_incidents(eng.flappers, topo, ws, we)
     inc_df = incidents_frame(incidents, topo)
     write_frame(inc_df, out / "ground_truth" / "incidents" / f"part-00000.{fmt}", fmt)
-    write_frame(maintenance_frame(incidents), out / "maintenance_windows" / f"part-00000.{fmt}", fmt)
+    write_frame(maintenance_frame(incidents, run_key), out / "maintenance_windows" / f"part-00000.{fmt}", fmt)
 
     # Incident alarm lifecycles are bucketed by the day of their RAISE.
     inc_alarms: dict[int, list[dict]] = {}
@@ -64,7 +66,7 @@ def generate_history(cfg: GeneratorConfig, out_dir: str | Path, log=print) -> di
     for d in range(cfg.days):
         day0 = ws + np.timedelta64(d, "D")
         rows = [r for h in range(24) for r in
-                background_alarms(topo, day0 + np.timedelta64(h, "h"), cfg.seed, eng.flappers)]
+                background_alarms(topo, day0 + np.timedelta64(h, "h"), cfg.seed, eng.flappers, run_key)]
         logs = eng.alarms(rows + inc_alarms.get(d, []), key=str(day0))
         for c in range(24 // CHUNK_HOURS):
             c0 = day0 + np.timedelta64(c * CHUNK_HOURS, "h")
@@ -85,7 +87,7 @@ def generate_history(cfg: GeneratorConfig, out_dir: str | Path, log=print) -> di
         write_partitioned(df, out, feed, fmt, stem="part-final")
 
     manifest = {
-        "generator": "netmon-datagen", "mode": "batch", "config": config_dict(cfg),
+        "generator": "netmon-datagen", "mode": "batch", "config": config_dict(cfg), "run_key": run_key,
         "window_start": str(ws) + "Z", "window_end": str(we) + "Z",
         "counts": {
             "topology_nodes": len(topo.nodes), "topology_edges": len(topo.edges), "cells": topo.n_cells,

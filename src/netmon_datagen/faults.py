@@ -215,6 +215,11 @@ def opaque_id(prefix: str, *parts: object) -> str:
     return f"{prefix}-{h}"
 
 
+def incident_alarm_id(run_key: str, incident_id: str, n: int) -> str:
+    """Alarm ID of an incident's n-th alarm. `run_key` keeps it unique across runs (incident IDs repeat per run)."""
+    return opaque_id("ALM", run_key, incident_id, n)
+
+
 def _allowed_fraction(ws: np.datetime64, we: np.datetime64, hours: tuple[float, float] | None, tz: str) -> float:
     if hours is None:
         return 1.0
@@ -410,8 +415,11 @@ def _build_impact(spec: FaultSpec, root: str, start: np.datetime64, dur_min: flo
 
 def schedule_incidents(topo: Topology, ws: np.datetime64, we: np.datetime64, cfg: FaultConfig,
                        rng: np.random.Generator, existing: list[Incident] | None = None,
-                       id_prefix: str = "INC", bounds: tuple | None = None) -> list[Incident]:
+                       id_prefix: str = "INC", bounds: tuple | None = None, run_key: str = "") -> list[Incident]:
     """Draw incidents starting in [ws, we).
+
+    Incident IDs (`{id_prefix}-00001`, ...) are per-run counters, keyed by (source_run, incident_id) downstream.
+    Their alarm IDs also hash `run_key`, so alarms of different runs never share an ID.
 
     Every accepted incident's full `extent()` (propagation delays, recovery and all of its alarms) lies
     inside `bounds` = (lo, hi), default (ws, we); `hi=None` means unbounded (streaming). Candidates that
@@ -485,7 +493,8 @@ def schedule_incidents(topo: Topology, ws: np.datetime64, we: np.datetime64, cfg
     for n, inc in enumerate(out, 1):
         inc.incident_id = f"{id_prefix}-{n:05d}"
         for a in inc.alarms:
-            a["alarm_id"] = opaque_id("ALM", inc.incident_id, a["_n"])
+            a["alarm_id"] = incident_alarm_id(run_key, inc.incident_id, a["_n"])
+            a["_order"] = opaque_id("ALM", inc.incident_id, a["_n"])  # run-independent tie-break (expand_events)
     return out
 
 
@@ -679,10 +688,10 @@ def incidents_frame(incidents: list[Incident], topo: Topology) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
-def maintenance_frame(incidents: list[Incident]) -> pd.DataFrame:
+def maintenance_frame(incidents: list[Incident], run_key: str = "") -> pd.DataFrame:
     """The change-management calendar a NOC would have (operational data, not ground truth)."""
     rows = [{
-        "change_id": opaque_id("CHG", inc.incident_id),
+        "change_id": opaque_id("CHG", run_key, inc.incident_id),
         "element_id": inc.root_element_id,
         "element_type": inc.root_element_type,
         "planned_start_ts": to_iso(np.array([inc.planned_window[0]]))[0],

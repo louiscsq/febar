@@ -1,6 +1,6 @@
 # Request / response logging and gateway usage tracking
 
-Captured 2026-11-06 03:22 UTC from workspace profile `febar` by `scripts/capture_evidence_step4.py`.
+Captured 2026-11-06 08:12 UTC from workspace profile `febar` by `scripts/capture_evidence_step4.py`.
 
 `netmon_genai.noc_assistant_request_log` holds every LLM request and response of the assistant (job runs, evaluation
 runs): the request JSON as sent (system prompt + context), the raw response text, status (`ok`, `blocked` by a
@@ -20,9 +20,9 @@ SELECT purpose, status, count(*) AS n, round(avg(latency_ms)) AS avg_latency_ms,
 
 | purpose | status | n | avg_latency_ms | avg_prompt_tokens | avg_completion_tokens | first | last |
 |---|---|---|---|---|---|---|---|
-| noc_summary | blocked | 8 | 638.0 | NULL | NULL | 2026-11-06T01:01:09.057071+00:00 | 2026-11-06T02:02:18.979551+00:00 |
-| noc_summary | ok | 1061 | 5168.0 | 4220.0 | 723.0 | 2026-11-06T00:49:06.648333+00:00 | 2026-11-06T03:06:55.147977+00:00 |
-| sms_drafts | ok | 1088 | 1268.0 | 581.0 | 49.0 | 2026-11-06T00:49:08.035253+00:00 | 2026-11-06T03:06:56.600622+00:00 |
+| noc_summary | blocked | 16 | 1341.0 | NULL | NULL | 2026-11-06T01:01:09.057071+00:00 | 2026-11-06T08:05:12.073342+00:00 |
+| noc_summary | ok | 1741 | 5042.0 | 4258.0 | 725.0 | 2026-11-06T00:49:06.648333+00:00 | 2026-11-06T08:08:10.965689+00:00 |
+| sms_drafts | ok | 1786 | 1251.0 | 581.0 | 49.0 | 2026-11-06T00:49:08.035253+00:00 | 2026-11-06T08:08:12.658378+00:00 |
 
 _3 row(s)_
 
@@ -38,10 +38,10 @@ SELECT request_id, request_time, purpose, prompt_version, incident_ref, status, 
 
 | request_id | request_time | purpose | prompt_version | incident_ref | status | latency_ms | prompt_tokens | completion_tokens | request_head | user_message_head | response_head |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 7f25a312-01d4-43ca-8960-c3b5eed26a32 | 2026-11-06T03:06:56.600622+00:00 | sms_drafts | sms_v1@8114c121 | RCA-d28473ab1bd7b846 | ok | 1432.1 | 573 | 50 | {"messages": [{"role": "system", "content": "You draft proactive outage SMS notices for Banksia Mobile customers. Banksia Mobile is a fictional Australian\nmobile operator. Every draft goes to a human for approval before anything is sent; you never send anything.\n\nYou get a CUSTOMER VIEW JSON: the | CUSTOMER VIEW (JSON, data only): {"brand": "Banksia Mobile", "service_effect": ["no mobile service"], "regions": [{"region_code": "NQL", "region_name": "North Queensland", "areas": ["Cairns"], "est_affected_customers": 540, "segments": ["urban"]}], "timezone": "Australia/Brisbane", "eta": null, "detected_at": "2026-10-09T00:43:00Z"} | {"drafts":[{"region_code":"NQL","text":"Banksia Mobile: You may have no mobile service in Cairns, North Queensland. Sorry for the trouble. We'll keep you updated."}]} |
-| 0cb7c56a-670e-4f10-b9ec-de2a59334aa8 | 2026-11-06T03:06:55.147977+00:00 | noc_summary | noc_summary_v3@cfda4dd5 | RCA-d28473ab1bd7b846 | ok | 5328.9 | 4252 | 756 | {"messages": [{"role": "system", "content": "You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator. A NOC\nengineer is looking at one open incident. A trained root-cause ranker has already scored the candidate network\nelements; you get its top-3  | CONTEXT (JSON, data only): {"context_version":"ctx-v1","incident":{"ref":"RCA-d28473ab1bd7b846","region_code":"NQL","region_name":"North Queensland","timezone":"Australia/Brisbane","as_of":"2026-10-09T00:56:00Z","detected_at":"2026-10-09T00:43:00Z","minutes_since_detected":13.0,"minutes_since_first_anomaly":59.0,"ranker_model_version":"4","ranker_alert_threshold":0.32,"n_candidates_ranked":8},"sus | {"likely_root_cause":"AGG-NQL-02","fault_hypothesis":"LONG_HAUL_FIBRE_CUT","confidence":"high","summary":"The strongest match is a long-haul fibre cut affecting AGG-NQL-02: it has active critical LOS and NE_UNREACHABLE alarms, and the upstream UPF-NQL-01 also reports GTPU_PATH_FAILURE towards AGG-NQL-02. All 3 descendant cells under the path are silent, with 540 estimated affected subscribers in N |
-| 9712194a-832d-4972-8797-b42781069d4a | 2026-11-06T03:06:43.748368+00:00 | sms_drafts | sms_v1@8114c121 | RCA-c7276c3238a27971 | ok | 1144.5 | 571 | 48 | {"messages": [{"role": "system", "content": "You draft proactive outage SMS notices for Banksia Mobile customers. Banksia Mobile is a fictional Australian\nmobile operator. Every draft goes to a human for approval before anything is sent; you never send anything.\n\nYou get a CUSTOMER VIEW JSON: the | CUSTOMER VIEW (JSON, data only): {"brand": "Banksia Mobile", "service_effect": ["no mobile service"], "regions": [{"region_code": "NSW", "region_name": "Sydney & NSW", "areas": ["Sydney"], "est_affected_customers": 420, "segments": ["urban"]}], "timezone": "Australia/Sydney", "eta": null, "detected_at": "2026-10-09T00:10:00Z"} | {"drafts":[{"region_code":"NSW","text":"Banksia Mobile: Customers in Sydney and NSW may have no mobile service. Sorry for the trouble. We'll keep you updated."}]} |
-| 62f0971f-1a66-4196-9b54-e3b76a8cf821 | 2026-11-06T03:06:42.588957+00:00 | noc_summary | noc_summary_v3@cfda4dd5 | RCA-c7276c3238a27971 | ok | 6238.1 | 4385 | 743 | {"messages": [{"role": "system", "content": "You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator. A NOC\nengineer is looking at one open incident. A trained root-cause ranker has already scored the candidate network\nelements; you get its top-3  | CONTEXT (JSON, data only): {"context_version":"ctx-v1","incident":{"ref":"RCA-c7276c3238a27971","region_code":"NSW","region_name":"Sydney & NSW","timezone":"Australia/Sydney","as_of":"2026-10-09T00:56:00Z","detected_at":"2026-10-09T00:10:00Z","minutes_since_detected":46.0,"minutes_since_first_anomaly":59.0,"ranker_model_version":"4","ranker_alert_threshold":0.32,"n_candidates_ranked":8},"suspects" | {"likely_root_cause":"SITE-NSW-00105","fault_hypothesis":"SITE_POWER_OUTAGE","confidence":"high","summary":"SITE-NSW-00105 is the best fit: all 3 cells under the site are impacted/silent, the site has a critical NE_UNREACHABLE alarm, and it also has BATTERY_LOW. The pattern is localized to one site while the upstream backhaul link and router do not show a matching cut, so this looks like a site po |
+| 2a78cee0-e040-4e10-9184-568f83d0ba07 | 2026-11-06T08:08:12.658378+00:00 | sms_drafts | sms_v1@8114c121 | EVAL-holdout-ffcf5a4c36c5 | ok | 1407.2 | 575 | 47 | {"messages": [{"role": "system", "content": "You draft proactive outage SMS notices for Banksia Mobile customers. Banksia Mobile is a fictional Australian\nmobile operator. Every draft goes to a human for approval before anything is sent; you never send anything.\n\nYou get a CUSTOMER VIEW JSON: the | CUSTOMER VIEW (JSON, data only): {"brand": "Banksia Mobile", "service_effect": ["no mobile service"], "regions": [{"region_code": "VIC", "region_name": "Melbourne & Victoria", "areas": ["Geelong"], "est_affected_customers": 190, "segments": ["rural"]}], "timezone": "Australia/Melbourne", "eta": null, "detected_at": "2026-10-18T11:19:00Z"} | {"drafts":[{"region_code":"VIC","text":"Banksia Mobile: Customers in Geelong and Melbourne & Victoria may have no mobile service. Sorry. We'll update you."}]} |
+| f048121d-ebc4-4bb1-9285-a68b158b9753 | 2026-11-06T08:08:11.758263+00:00 | sms_drafts | sms_v1@8114c121 | EVAL-holdout-fac760d8d94c | ok | 1456.6 | 575 | 48 | {"messages": [{"role": "system", "content": "You draft proactive outage SMS notices for Banksia Mobile customers. Banksia Mobile is a fictional Australian\nmobile operator. Every draft goes to a human for approval before anything is sent; you never send anything.\n\nYou get a CUSTOMER VIEW JSON: the | CUSTOMER VIEW (JSON, data only): {"brand": "Banksia Mobile", "service_effect": ["no mobile service"], "regions": [{"region_code": "WA", "region_name": "Perth & South West WA", "areas": ["Perth"], "est_affected_customers": 770, "segments": ["urban"]}], "timezone": "Australia/Perth", "eta": null, "detected_at": "2026-10-17T04:47:00Z"} | {"drafts":[{"region_code":"WA","text":"Banksia Mobile: You may have no mobile service in Perth and South West WA. Sorry for the disruption. We'll update you."}]} |
+| 6a85d969-cb45-4696-8701-7dd3eb2b858f | 2026-11-06T08:08:11.664823+00:00 | sms_drafts | sms_v1@8114c121 | EVAL-holdout-fb9b8c4ee572 | ok | 1293.4 | 576 | 50 | {"messages": [{"role": "system", "content": "You draft proactive outage SMS notices for Banksia Mobile customers. Banksia Mobile is a fictional Australian\nmobile operator. Every draft goes to a human for approval before anything is sent; you never send anything.\n\nYou get a CUSTOMER VIEW JSON: the | CUSTOMER VIEW (JSON, data only): {"brand": "Banksia Mobile", "service_effect": ["no mobile service"], "regions": [{"region_code": "VIC", "region_name": "Melbourne & Victoria", "areas": ["Bendigo"], "est_affected_customers": 240, "segments": ["rural"]}], "timezone": "Australia/Melbourne", "eta": null, "detected_at": "2026-10-17T22:02:00Z"} | {"drafts":[{"region_code":"VIC","text":"Banksia Mobile: Customers in Bendigo and Melbourne & Victoria may have no mobile service. Sorry for the trouble. We'll update you."}]} |
+| 811e8d6a-29c9-4410-b376-86bad39ea2aa | 2026-11-06T08:08:11.215454+00:00 | sms_drafts | sms_v1@8114c121 | EVAL-holdout-facc1463f506 | ok | 1041.2 | 576 | 51 | {"messages": [{"role": "system", "content": "You draft proactive outage SMS notices for Banksia Mobile customers. Banksia Mobile is a fictional Australian\nmobile operator. Every draft goes to a human for approval before anything is sent; you never send anything.\n\nYou get a CUSTOMER VIEW JSON: the | CUSTOMER VIEW (JSON, data only): {"brand": "Banksia Mobile", "service_effect": ["intermittent mobile service"], "regions": [{"region_code": "VIC", "region_name": "Melbourne & Victoria", "areas": ["Geelong"], "est_affected_customers": 220, "segments": ["urban"]}], "timezone": "Australia/Melbourne", "eta": null, "detected_at": "2026-10-18T11:50:00Z"} | {"drafts":[{"region_code":"VIC","text":"Banksia Mobile: Some customers in Geelong and Melbourne & Victoria may have intermittent mobile service. Sorry for the trouble. We'll update you."}]} |
 
 _4 row(s)_
 
@@ -54,11 +54,11 @@ SELECT request_id, request_time, purpose, incident_ref, status, substr(error, 1,
 
 | request_id | request_time | purpose | incident_ref | status | error_head |
 |---|---|---|---|---|---|
-| 779cb9eb-6cfd-4b34-b6a8-34e433fe7c71 | 2026-11-06T02:02:18.979551+00:00 | noc_summary | EVAL-holdout-942a9d877c13 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
-| 6556b03c-a1db-4ffa-bf55-bd164ce346f4 | 2026-11-06T02:01:52.687909+00:00 | noc_summary | EVAL-holdout-824dcb7a81e7 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
-| 0bf2fd50-5907-4d8d-b3ec-e1d3d2b7d537 | 2026-11-06T02:00:32.147372+00:00 | noc_summary | EVAL-holdout-522964659161 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
-| 109a3315-486c-4a2e-84b6-5b2e0d85faba | 2026-11-06T01:59:27.999713+00:00 | noc_summary | EVAL-holdout-26d6533378d2 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
-| fb356e3e-5e87-44f0-b36a-558b2d1d19fe | 2026-11-06T01:58:59.099094+00:00 | noc_summary | EVAL-holdout-19647fc7e802 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
+| 567b20df-25b7-415a-8aaf-d87f6e3dc8fe | 2026-11-06T08:05:12.073342+00:00 | noc_summary | EVAL-holdout-942a9d877c13 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
+| cd2ec9a1-6faa-4fff-b3eb-10b8df3361ec | 2026-11-06T08:04:43.984026+00:00 | noc_summary | EVAL-holdout-824dcb7a81e7 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
+| e4166dd0-989f-465b-ad03-f7a08840d5dc | 2026-11-06T08:04:37.518110+00:00 | noc_summary | EVAL-holdout-79fd28f327e3 | blocked | {"usage":{"prompt_tokens":1001,"total_tokens":1008},"output_guardrail":[{"flagged":true,"categories":{"violent-crimes":false,"non-violent-crimes":false,"sex-crimes":false,"child-exploitation":false,"specialized-advice":true,"privacy":false,"intellectual-property":false,"indiscriminate-weapons":true, |
+| 83f1a3cd-5e56-4217-a7c3-fc309877742a | 2026-11-06T08:03:23.178448+00:00 | noc_summary | EVAL-holdout-522964659161 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
+| c99a783c-5456-461d-8352-b42c735d2e2a | 2026-11-06T08:01:44.133864+00:00 | noc_summary | EVAL-holdout-19647fc7e802 | blocked | {"usage":{"prompt_tokens":0,"total_tokens":0},"input_guardrail":[{"flagged":false,"categories":null,"category_scores":null,"pii_detection":true,"anonymized_input":[{"role":"system","content":"You are the Banksia Mobile NOC assistant. Banksia Mobile is a fictional Australian mobile network operator.  |
 
 _5 row(s)_
 
@@ -76,7 +76,7 @@ SELECT to_date(u.request_time) AS day, count(*) AS requests, sum(CAST(u.status_c
 | day | requests | ok_200 | input_tokens | output_tokens |
 |---|---|---|---|---|
 | 2026-11-05 | 34 | 17 | 23078 | 545 |
-| 2026-11-06 | 3534 | 3495 | 8409682 | 1258534 |
+| 2026-11-06 | 4281 | 4240 | 10212630 | 1545087 |
 
 _2 row(s)_
 
@@ -93,12 +93,12 @@ SELECT u.databricks_request_id, u.client_request_id, u.request_time, u.status_co
 
 | databricks_request_id | client_request_id | request_time | status_code | input_token_count | output_token_count | request_streaming |
 |---|---|---|---|---|---|---|
-| acef8705-e6ec-412b-8cf3-bf67bab798b4 | acef8705-e6ec-412b-8cf3-bf67bab798b4 | 2026-11-06T03:05:56.007Z | 200 | 586 | 54 | false |
-| a86ec177-c2f2-4282-beb9-6e15c26e270e | a86ec177-c2f2-4282-beb9-6e15c26e270e | 2026-11-06T03:05:51.932Z | 200 | 3974 | 690 | false |
-| 6bd23ecf-eb3d-4ea3-967a-21cdeeae3849 | 6bd23ecf-eb3d-4ea3-967a-21cdeeae3849 | 2026-11-06T03:05:43.977Z | 200 | 585 | 50 | false |
-| 1658b665-d22d-42dc-971a-26f8fe25eff0 | 1658b665-d22d-42dc-971a-26f8fe25eff0 | 2026-11-06T03:05:40.844Z | 200 | 4109 | 626 | false |
-| a35d0eed-5fea-4820-b81c-3a0cd5ce52a6 | a35d0eed-5fea-4820-b81c-3a0cd5ce52a6 | 2026-11-06T03:05:33.744Z | 200 | 590 | 49 | false |
-| f0ef129d-8039-4957-a409-c1d0fb0a2936 | f0ef129d-8039-4957-a409-c1d0fb0a2936 | 2026-11-06T03:05:26.937Z | 200 | 4172 | 745 | false |
+| 8040b216-0633-49f0-b6a3-5e03500b6675 | 8040b216-0633-49f0-b6a3-5e03500b6675 | 2026-11-06T07:55:46.906Z | 200 | 593 | 49 | false |
+| 270b8d93-7b94-407d-9124-130a2bd94710 | 270b8d93-7b94-407d-9124-130a2bd94710 | 2026-11-06T07:55:44.533Z | 200 | 593 | 49 | false |
+| 9fe9b355-d7dd-4c66-90cd-6e66dd1635ea | 9fe9b355-d7dd-4c66-90cd-6e66dd1635ea | 2026-11-06T07:55:43.618Z | 200 | 576 | 49 | false |
+| 17662d66-2cfe-46df-82ca-ce22dff36ff0 | 17662d66-2cfe-46df-82ca-ce22dff36ff0 | 2026-11-06T07:55:42.306Z | 200 | 4291 | 700 | false |
+| 99239d18-5690-4823-b62c-d6360e36a3c1 | 99239d18-5690-4823-b62c-d6360e36a3c1 | 2026-11-06T07:55:40.099Z | 200 | 4241 | 698 | false |
+| 9c2087ff-6eaa-4658-aa20-8dedc3d5836f | 9c2087ff-6eaa-4658-aa20-8dedc3d5836f | 2026-11-06T07:55:39.185Z | 200 | 577 | 48 | false |
 
 _6 row(s)_
 
@@ -117,14 +117,14 @@ SELECT l.request_id AS client_request_id, u.databricks_request_id, l.request_tim
 
 | client_request_id | databricks_request_id | logged_at | request_time | purpose | status | logged_prompt_tokens | gateway_input_tokens | logged_completion_tokens | gateway_output_tokens |
 |---|---|---|---|---|---|---|---|---|---|
-| acef8705-e6ec-412b-8cf3-bf67bab798b4 | acef8705-e6ec-412b-8cf3-bf67bab798b4 | 2026-11-06T03:05:58.061545+00:00 | 2026-11-06T03:05:56.007Z | sms_drafts | ok | 586 | 586 | 54 | 54 |
-| a86ec177-c2f2-4282-beb9-6e15c26e270e | a86ec177-c2f2-4282-beb9-6e15c26e270e | 2026-11-06T03:05:55.971784+00:00 | 2026-11-06T03:05:51.932Z | noc_summary | ok | 3974 | 3974 | 690 | 690 |
-| 6bd23ecf-eb3d-4ea3-967a-21cdeeae3849 | 6bd23ecf-eb3d-4ea3-967a-21cdeeae3849 | 2026-11-06T03:05:45.679487+00:00 | 2026-11-06T03:05:43.977Z | sms_drafts | ok | 585 | 585 | 50 | 50 |
-| 1658b665-d22d-42dc-971a-26f8fe25eff0 | 1658b665-d22d-42dc-971a-26f8fe25eff0 | 2026-11-06T03:05:43.928747+00:00 | 2026-11-06T03:05:40.844Z | noc_summary | ok | 4109 | 4109 | 626 | 626 |
-| a35d0eed-5fea-4820-b81c-3a0cd5ce52a6 | a35d0eed-5fea-4820-b81c-3a0cd5ce52a6 | 2026-11-06T03:05:35.159266+00:00 | 2026-11-06T03:05:33.744Z | sms_drafts | ok | 590 | 590 | 49 | 49 |
-| f0ef129d-8039-4957-a409-c1d0fb0a2936 | f0ef129d-8039-4957-a409-c1d0fb0a2936 | 2026-11-06T03:05:33.698629+00:00 | 2026-11-06T03:05:26.937Z | noc_summary | ok | 4172 | 4172 | 745 | 745 |
-| 60df0cc7-4972-4006-b27d-19f60d9768d0 | 60df0cc7-4972-4006-b27d-19f60d9768d0 | 2026-11-06T03:05:21.431798+00:00 | 2026-11-06T03:05:19.965Z | sms_drafts | ok | 571 | 571 | 46 | 46 |
-| 18b27b29-f25c-4f4c-b450-d5cf907eafa2 | 18b27b29-f25c-4f4c-b450-d5cf907eafa2 | 2026-11-06T03:05:19.883446+00:00 | 2026-11-06T03:05:13.693Z | noc_summary | ok | 4320 | 4320 | 725 | 725 |
+| 8040b216-0633-49f0-b6a3-5e03500b6675 | 8040b216-0633-49f0-b6a3-5e03500b6675 | 2026-11-06T07:55:47.996128+00:00 | 2026-11-06T07:55:46.906Z | sms_drafts | ok | 593 | 593 | 49 | 49 |
+| 270b8d93-7b94-407d-9124-130a2bd94710 | 270b8d93-7b94-407d-9124-130a2bd94710 | 2026-11-06T07:55:45.938993+00:00 | 2026-11-06T07:55:44.533Z | sms_drafts | ok | 593 | 593 | 49 | 49 |
+| 9fe9b355-d7dd-4c66-90cd-6e66dd1635ea | 9fe9b355-d7dd-4c66-90cd-6e66dd1635ea | 2026-11-06T07:55:44.856745+00:00 | 2026-11-06T07:55:43.618Z | sms_drafts | ok | 576 | 576 | 49 | 49 |
+| 17662d66-2cfe-46df-82ca-ce22dff36ff0 | 17662d66-2cfe-46df-82ca-ce22dff36ff0 | 2026-11-06T07:55:46.584016+00:00 | 2026-11-06T07:55:42.306Z | noc_summary | ok | 4291 | 4291 | 700 | 700 |
+| 99239d18-5690-4823-b62c-d6360e36a3c1 | 99239d18-5690-4823-b62c-d6360e36a3c1 | 2026-11-06T07:55:43.359702+00:00 | 2026-11-06T07:55:40.099Z | noc_summary | ok | 4241 | 4241 | 698 | 698 |
+| 9c2087ff-6eaa-4658-aa20-8dedc3d5836f | 9c2087ff-6eaa-4658-aa20-8dedc3d5836f | 2026-11-06T07:55:40.294943+00:00 | 2026-11-06T07:55:39.185Z | sms_drafts | ok | 577 | 577 | 48 | 48 |
+| d2b57184-9dfe-461f-afe9-2cbb4b9612fe | d2b57184-9dfe-461f-afe9-2cbb4b9612fe | 2026-11-06T07:55:44.282178+00:00 | 2026-11-06T07:55:38.647Z | noc_summary | ok | 5149 | 5149 | 819 | 819 |
+| 600a2893-dc99-499b-9f1c-4119764d4cfa | 600a2893-dc99-499b-9f1c-4119764d4cfa | 2026-11-06T07:55:38.826535+00:00 | 2026-11-06T07:55:37.814Z | sms_drafts | ok | 591 | 591 | 50 | 50 |
 
 _8 row(s)_
 
@@ -142,7 +142,7 @@ SELECT l.response_id IS NOT NULL AS logged_with_client_id_fix, count(*) AS log_r
 
 | logged_with_client_id_fix | log_rows | joined_usage_rows |
 |---|---|---|
-| false | 2123 | 0 |
-| true | 34 | 24 |
+| false | 2131 | 2 |
+| true | 1412 | 769 |
 
 _2 row(s)_
