@@ -60,8 +60,10 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
         f"step={step_seconds}s interval={interval_seconds}s -> {out}")
 
     eng.write_topology(out, "json")
+    run_key = cfg.run_key(f"stream/step={step_seconds}s", t0)
     write_json_manifest(out / "_manifest.json", {"generator": "netmon-datagen", "mode": "stream",
-                                                 "config": config_dict(cfg), "start": str(t0) + "Z",
+                                                 "config": config_dict(cfg), "run_key": run_key,
+                                                 "start": str(t0) + "Z",
                                                  "step_seconds": step_seconds})
     flaps = flapping_incidents(eng.flappers, topo, t0, t0, prefix="FLAP")
     for f in flaps:  # chronic, open-ended condition: no end time yet
@@ -89,13 +91,14 @@ def run_stream(cfg: GeneratorConfig, out_dir: str | Path, *, step_seconds: int =
             # Nothing may start (or alarm) before the stream does; there is no upper bound while running.
             new = schedule_incidents(topo, max(h, t0), h + HOUR, cfg.faults,
                                      rng_for(cfg.seed, "stream-faults", str(h)), existing=active,
-                                     id_prefix=f"INC-{stamp(h)[:11].replace('T', '')}", bounds=(t0, None))
+                                     id_prefix=f"INC-{stamp(h)[:11].replace('T', '')}", bounds=(t0, None),
+                                     run_key=run_key)
             active += new
             tracker.add(new)
-            mw = maintenance_frame(new)
+            mw = maintenance_frame(new, run_key)
             if len(mw):
                 write_frame(mw, out / "maintenance_windows" / f"{name}.json", "json")
-            rows = background_alarms(topo, h, cfg.seed, eng.flappers) + [a for inc in new for a in inc.alarms]
+            rows = background_alarms(topo, h, cfg.seed, eng.flappers, run_key) + [a for inc in new for a in inc.alarms]
             logs += eng.alarms(rows, key=str(h), not_before=t0)
 
         logs += eng.period(np.array([t], dtype="datetime64[s]"), step_seconds / 60, active, key=str(t))

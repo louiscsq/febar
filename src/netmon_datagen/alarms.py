@@ -66,8 +66,8 @@ def flapping_incidents(flappers: list[tuple[str, str]], topo: Topology, ws, we, 
 
 
 def background_alarms(topo: Topology, hour_start: np.datetime64, seed: int,
-                      flappers: list[tuple[str, str]]) -> list[dict]:
-    """Noise alarms whose RAISE falls in [hour_start, hour_start + 1h)."""
+                      flappers: list[tuple[str, str]], run_key: str = "") -> list[dict]:
+    """Noise alarms whose RAISE falls in [hour_start, hour_start + 1h). IDs hash `run_key` (see GeneratorConfig)."""
     h0 = np.datetime64(hour_start, "s")
     stamp = str(h0)
     rng = rng_for(seed, "bg-alarms", stamp)
@@ -87,7 +87,8 @@ def background_alarms(topo: Topology, hour_start: np.datetime64, seed: int,
             t = h0 + np.timedelta64(int(offs[k]), "s")
             rows.append(dict(element_id=str(el[k]), alarm_code=str(codes[k]), severity=str(sev[k]), raise_ts=t,
                              clear_ts=None if uncleared[k] else t + np.timedelta64(int(dur[k]), "s"),
-                             text="Threshold crossed", alarm_id=opaque_id("ALM", seed, "bg", stamp, etype, k)))
+                             text="Threshold crossed", alarm_id=opaque_id("ALM", run_key, seed, "bg", stamp, etype, k),
+                             _order=opaque_id("ALM", seed, "bg", stamp, etype, k)))
     frng = rng_for(seed, "flaps", stamp)
     for eid, code in flappers:
         if frng.random() >= 0.15:
@@ -99,7 +100,8 @@ def background_alarms(topo: Topology, hour_start: np.datetime64, seed: int,
             up = t + np.timedelta64(int(frng.uniform(20, 180)), "s")
             rows.append(dict(element_id=eid, alarm_code=code, severity="MAJOR", raise_ts=t, clear_ts=up,
                              text="Intermittent link state change",
-                             alarm_id=opaque_id("ALM", seed, "flap", stamp, eid, k)))
+                             alarm_id=opaque_id("ALM", run_key, seed, "flap", stamp, eid, k),
+                             _order=opaque_id("ALM", seed, "flap", stamp, eid, k)))
             t = up + np.timedelta64(int(frng.uniform(60, 480)), "s")
             k += 1
     return rows
@@ -111,6 +113,7 @@ def expand_events(alarm_rows: list[dict], topo: Topology, rng: np.random.Generat
         return pd.DataFrame(columns=[c for c in ALARM_COLUMNS if c != "emitted_ts"] + ["_event_time", "_emit_delay_s"])
     raise_part = pd.DataFrame({
         "alarm_id": [a["alarm_id"] for a in alarm_rows],
+        "_order": [a["_order"] for a in alarm_rows],
         "event_type": "RAISE",
         "element_id": [a["element_id"] for a in alarm_rows],
         "alarm_code": [a["alarm_code"] for a in alarm_rows],
@@ -121,6 +124,7 @@ def expand_events(alarm_rows: list[dict], topo: Topology, rng: np.random.Generat
     cl = [a for a in alarm_rows if a["clear_ts"] is not None]
     clear_part = pd.DataFrame({
         "alarm_id": [a["alarm_id"] for a in cl],
+        "_order": [a["_order"] for a in cl],
         "event_type": "CLEAR",
         "element_id": [a["element_id"] for a in cl],
         "alarm_code": [a["alarm_code"] for a in cl],
@@ -135,6 +139,9 @@ def expand_events(alarm_rows: list[dict], topo: Topology, rng: np.random.Generat
     ev["source_system"] = "oss-fm"
     ev["event_ts"] = to_iso(ev["_event_time"].to_numpy())
     ev["_emit_delay_s"] = rng.uniform(1, 20, len(ev))
-    ev = ev.sort_values(["_event_time", "record_id"], kind="stable").reset_index(drop=True)
+    # Ties in event time are broken by a run-independent key (the ID without the run key), so the run id changes
+    # only the IDs: event order, and with it which records receive DQ defects, is the same for every run id.
+    ev["_order"] = ev["_order"] + np.where(ev["event_type"] == "RAISE", "-R", "-C")
+    ev = ev.sort_values(["_event_time", "_order"], kind="stable").reset_index(drop=True)
     return ev[[c for c in ALARM_COLUMNS if c != "emitted_ts"] + ["_event_time", "_emit_delay_s"]]
 

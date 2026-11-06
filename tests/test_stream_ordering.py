@@ -17,7 +17,7 @@ import pytest
 from conftest import count_bad_json_lines, read_table, tiny_cfg
 from netmon_datagen.config import DQConfig, FaultConfig
 from netmon_datagen.engine import FEEDS
-from netmon_datagen.faults import opaque_id
+from netmon_datagen.faults import incident_alarm_id
 from netmon_datagen.stream import run_stream
 
 # 05:00 UTC = 16:00 in Sydney (AEDT) and 15:00 in Townsville: the run crosses the local busy hour.
@@ -72,9 +72,10 @@ def test_ground_truth_never_lands_before_its_telemetry(run):
     alarms = read_table(out, "alarms")
     alarms["emitted"] = pd.to_datetime(alarms.emitted_ts, utc=True)
 
+    run_key = json.loads((out / "_manifest.json").read_text())["run_key"]
     checked = 0
     for _, r in done.iterrows():
-        ids = {opaque_id("ALM", r.incident_id, n) + s for n in range(r.n_alarms) for s in ("-R", "-C")}
+        ids = {incident_alarm_id(run_key, r.incident_id, n) + s for n in range(r.n_alarms) for s in ("-R", "-C")}
         last = [alarms.loc[alarms.record_id.isin(ids), "emitted"].max()]
         if r.is_customer_impacting:
             k = kpis[kpis.cell.isin(r.affected_cell_ids) & (kpis.t < r.impact_end_ts)

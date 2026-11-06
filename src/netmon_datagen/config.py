@@ -116,10 +116,24 @@ class GeneratorConfig:
     fmt: str = "parquet"  # parquet | json
     dq: DQConfig = field(default_factory=DQConfig)
     faults: FaultConfig = field(default_factory=FaultConfig)
+    # Run identity mixed into every event ID that would otherwise repeat between runs (alarm and change IDs are
+    # derived from per-run incident counters `INC-00001`, ...). Jobs pass the landing sub-directory, which is the
+    # pipeline's `source_run`. None = derived from the seeds and the window (`run_key`).
+    run_id: str | None = None
 
     @property
     def network_seed(self) -> int:
         return self.seed if self.topology_seed is None else self.topology_seed
+
+    def run_key(self, mode: str, window_start: object) -> str:
+        """Run-scoped salt for generated IDs: `run_id`, or the seeds, mode and window when no run id is given.
+
+        Same config (same run) -> same key -> bit-identical output; two runs that differ in run id, seed or window
+        get disjoint alarm / change IDs, so the pipeline's cross-run dedupe on `record_id` never drops one run's
+        records as redeliveries of another's."""
+        if self.run_id:
+            return self.run_id
+        return f"{mode}/seed={self.seed}/net={self.network_seed}/start={window_start}/days={self.days}/step={self.step_minutes}"
 
     def with_(self, **kwargs) -> GeneratorConfig:
         return replace(self, **kwargs)
