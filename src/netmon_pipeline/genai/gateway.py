@@ -9,8 +9,11 @@ See docs/genai_assistant.md, "Governance".
 Configured features:
 
 - **inference table**: every request / response is logged to `<catalog>.<genai schema>.<prefix>_payload`;
-- **guardrails** (input and output): safety filter, PII detection with BLOCK (where the workspace supports them;
-  the deterministic checks in `guards` run regardless);
+- **guardrails**: PII detection with BLOCK on input and output; the safety filter on the output. The input safety
+  filter is off by default (`input_safety=False`): on this workspace it flagged benign NOC prompts (telemetry +
+  runbook text) as "violent-crimes" on every try (3 / 3 identical requests blocked, the verdict flipping with harmless
+  wording changes), which would block most summaries. Prompt injection in the input is handled by the
+  deterministic `guards.sanitize_free_text`; PII by the gateway and `guards.assert_no_pii`;
 - **rate limits**: per endpoint and per user (calls / minute), so a runaway job cannot exhaust the quota;
 - **usage tracking**: token counts per request in `system.serving.endpoint_usage`.
 """
@@ -32,6 +35,7 @@ class GatewaySpec:
     schema: str
     table_prefix: str = TABLE_PREFIX
     guardrails: bool = True
+    input_safety: bool = False  # see the module docstring: false positives on NOC telemetry prompts
     endpoint_calls_per_min: int = ENDPOINT_CALLS_PER_MIN
     user_calls_per_min: int = USER_CALLS_PER_MIN
 
@@ -53,7 +57,7 @@ def desired_config(spec: GatewaySpec) -> dict:
     }
     if spec.guardrails:
         cfg["guardrails"] = {
-            "input": {"safety": True, "pii": {"behavior": "BLOCK"}},
+            "input": {"safety": spec.input_safety, "pii": {"behavior": "BLOCK"}},
             "output": {"safety": True, "pii": {"behavior": "BLOCK"}},
         }
     return cfg
