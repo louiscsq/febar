@@ -163,6 +163,9 @@ def test_assistant_validates_repairs_and_keeps_drafts_unsent(scored):  # noqa: F
     sent = json.dumps(ws.api_client.bodies)
     assert "001010" not in sent and "INC-1" not in sent
     assert ws.api_client.bodies[0]["response_format"]["json_schema"]["strict"] is True
+    # every call carries its own client_request_id (the join key to the gateway's usage rows), unique per call
+    ids = [b["client_request_id"] for b in ws.api_client.bodies]
+    assert len(set(ids)) == 3 and all(ids)
     assert res.prompt_tokens == 300 and res.prompt_versions["noc_summary"].startswith("noc_summary_v3@")
 
 

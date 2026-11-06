@@ -39,7 +39,7 @@ LATEST_DDL = (
     "sms_draft_status STRING, n_sms_drafts BIGINT, generated_by STRING, noc_prompt_version STRING, "
     "assistant_endpoint STRING, refreshed_at TIMESTAMP")
 REQUEST_LOG_DDL = (
-    "request_id STRING, request_time STRING, endpoint STRING, purpose STRING, prompt_version STRING, incident_ref STRING, "
+    "request_id STRING, response_id STRING, request_time STRING, endpoint STRING, purpose STRING, prompt_version STRING, incident_ref STRING, "
     "status STRING, error STRING, latency_ms DOUBLE, attempts BIGINT, prompt_tokens BIGINT, completion_tokens BIGINT, "
     "request_sha256 STRING, request STRING, response STRING")
 
@@ -97,7 +97,8 @@ def write_request_log(spark, log: RequestLog, table: str) -> int:
     from netmon_pipeline.rca.live import conform
 
     df = conform(pd.DataFrame(log.rows), REQUEST_LOG_DDL)
-    spark.createDataFrame(df, schema=REQUEST_LOG_DDL).write.mode("append").saveAsTable(table)
+    spark.createDataFrame(df, schema=REQUEST_LOG_DDL).write.mode("append").option("mergeSchema", "true") \
+        .saveAsTable(table)
     spark.sql(f"COMMENT ON TABLE {table} IS 'Every LLM request / response of the NOC assistant (request JSON, "
               "response text, status incl. gateway guardrail blocks, latency, tokens). Stands in for the AI Gateway "
               "inference table, which fails to enable on this workspace (docs/genai_assistant.md).'")

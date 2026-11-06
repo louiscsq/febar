@@ -1,6 +1,6 @@
 # Step 4 evidence: Gen AI NOC assistant, customer SMS drafts, AI Gateway
 
-All files are text, captured on 2026-11-06 (UTC) from workspace profile `febar` from the final code (prompts
+All files are text (no MLflow store or trace files are committed: traces live in the workspace experiment `/Shared/banksia_netmon/noc_assistant`, referenced by run ID), captured on 2026-11-06 (UTC) from workspace profile `febar` from the final code (prompts
 `noc_summary_v3`, `sms_v1`, context `ctx-v1`): `scripts/capture_evidence_step4.py` (01, 02, 03, 04, 05, 07, 08, 09),
 `scripts/genai_early_example.py` (03b) and `scripts/genai_guardrail_tests.py` (06). The last two call the live
 endpoint. System tables on this workspace are account-wide, so every system-table query is filtered to this
@@ -29,14 +29,14 @@ Lakebase: 17 / 17 open incidents have a summary, PK read p50 2.8 ms.
 | file | content |
 |---|---|
 | [`01_gateway_config.md`](01_gateway_config.md) | live AI Gateway config of `databricks-gpt-5-4-mini` (no secrets), what the code requests, per-feature status, the inference-table failure (error + request ID) and the input-safety false positive |
-| [`02_inference_log.md`](02_inference_log.md) | request / response log (in place of the inference table): volume by purpose / status, sample rows (request and response heads), guardrail-block rows; gateway usage tracking (`system.serving.endpoint_usage`) by day and sample rows |
+| [`02_inference_log.md`](02_inference_log.md) | request / response log (in place of the inference table): volume by purpose / status, sample rows (request and response heads), guardrail-block rows; gateway usage tracking (`system.serving.endpoint_usage`) by day and sample rows; the log joined to usage rows on `client_request_id` (calls since fix round 1; earlier usage rows have it NULL) |
 | [`03_worked_examples.md`](03_worked_examples.md) | full examples from the final dev run, each with context → validated NOC summary → guard report → SMS drafts: slow backhaul degradation, an `uncertain` answer, site power outage, aggregation router failure, cell outage; plus one live open incident (no ground truth) |
 | [`03b_early_and_ambiguous_examples.md`](03b_early_and_ambiguous_examples.md) | below the alert threshold (dev): a slow backhaul 2 min before the SLA moment, where the assistant picks the link (#2) from its alarms; a cluster with no fault behind it, where it answers `uncertain` |
 | [`04_evaluation.md`](04_evaluation.md) | MLflow GenAI evaluation, **dev and holdout separately**: overall metrics, by fault type, every case where the assistant departs from the ranker; MLflow run IDs and prompt versions |
 | [`05_outputs_and_lakebase.md`](05_outputs_and_lakebase.md) | `netmon_genai` tables, `incident_ai_summaries` and `customer_notice_drafts` (all `status = draft`, 0 approved, 0 sent), `incident_ai_latest`, the synced table, the psycopg read-back (rows from Postgres) and its latency |
 | [`06_guardrail_tests.md`](06_guardrail_tests.md) | live: prompt injection in alarm text (sanitiser on, and bypassed on purpose); PII leak attempts (redaction, AI Gateway input PII block, pre-send block, phone numbers asked into an SMS) |
 | [`07_latency_cost.md`](07_latency_cost.md) | latency p50 / p95 and tokens per incident (dev, holdout), per call type; billing query for the endpoint (rows not yet posted at capture); gateway token totals |
-| [`08_jobs_and_runs.md`](08_jobs_and_runs.md) | deployed jobs, their latest runs (incl. the table-triggered assistant run that skipped 17 unchanged incidents) and the trigger config |
+| [`08_jobs_and_runs.md`](08_jobs_and_runs.md) | deployed jobs, their latest runs and the trigger config; each assistant run's own output (open / processed / skipped_unchanged / llm_calls / tokens), incl. the table-triggered run `147398191171624`: 17 open, 0 processed, 17 skipped, 0 LLM calls |
 | [`09_holdout_alarm_gap.md`](09_holdout_alarm_gap.md) | the holdout finding: bronze vs silver alarm counts, alarm-ID collisions with earlier runs, assistant vs ranker stratified by whether the context has an active alarm (`NULL` fault type = all types) |
 
 ## What was run (final)

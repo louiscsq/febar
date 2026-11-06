@@ -95,7 +95,8 @@ def inference_log(r: Runner, wsid: str) -> None:
 runs): the request JSON as sent (system prompt + context), the raw response text, status (`ok`, `blocked` by a
 gateway guardrail, `error`), latency, attempts and tokens. It stands in for the AI Gateway inference table, which
 cannot be enabled on this workspace (`01_gateway_config.md`). The gateway's own usage tracking
-(`system.serving.endpoint_usage`) records each request's tokens independently.""")
+(`system.serving.endpoint_usage`) records each request's tokens independently; the two join on `client_request_id`
+for calls made since fix round 1 (see the join below).""")
     d.query("Request log: volume by purpose and status", f"""
         SELECT purpose, status, count(*) AS n, round(avg(latency_ms)) AS avg_latency_ms,
                round(avg(prompt_tokens)) AS avg_prompt_tokens, round(avg(completion_tokens)) AS avg_completion_tokens,
@@ -123,9 +124,26 @@ cannot be enabled on this workspace (`01_gateway_config.md`). The gateway's own 
         FROM system.serving.endpoint_usage u JOIN system.serving.served_entities e
           ON u.served_entity_id = e.served_entity_id AND e.workspace_id = u.workspace_id
         WHERE u.workspace_id = '{wsid}' AND e.endpoint_name = '{EP}' AND u.request_time >= '2026-11-05'
-        ORDER BY u.request_time DESC LIMIT 6""",
-            "`client_request_id` is the `X-Request-Id` the assistant sends, so a gateway usage row can be joined to "
-            "its request-log row.")
+        ORDER BY u.request_time DESC LIMIT 6""")
+    d.query("Request log joined to gateway usage rows on client_request_id", f"""
+        SELECT l.request_id AS client_request_id, u.databricks_request_id, l.request_time AS logged_at, u.request_time,
+               l.purpose, l.status, l.prompt_tokens AS logged_prompt_tokens, u.input_token_count AS gateway_input_tokens,
+               l.completion_tokens AS logged_completion_tokens, u.output_token_count AS gateway_output_tokens
+        FROM {G}.noc_assistant_request_log l
+        JOIN system.serving.endpoint_usage u ON u.client_request_id = l.request_id AND u.workspace_id = '{wsid}'
+        ORDER BY u.request_time DESC LIMIT 8""",
+            "Since fix round 1 the assistant sends `client_request_id` in the request body (`llm.chat_json`); the "
+            "gateway's usage tracking records it, so each usage row joins its request-log row on it, and the token "
+            "counts match. Earlier calls sent the id only as an `X-Request-Id` header, which usage tracking does not "
+            "record: their usage rows have `client_request_id` NULL and can only be correlated by time and token "
+            "counts. `system.serving.endpoint_usage` lands with a lag of about 1–2 hours.")
+    d.query("Join coverage: request-log rows with and without a matching usage row", f"""
+        SELECT l.response_id IS NOT NULL AS logged_with_client_id_fix, count(*) AS log_rows,
+               count(u.client_request_id) AS joined_usage_rows
+        FROM {G}.noc_assistant_request_log l
+        LEFT JOIN system.serving.endpoint_usage u ON u.client_request_id = l.request_id AND u.workspace_id = '{wsid}'
+        GROUP BY 1 ORDER BY 1""",
+            "`response_id` is only logged since the fix, so it separates the two generations of rows.")
     d.write()
 
 
@@ -334,6 +352,32 @@ the evidence. The assistant job has a table-update trigger on `netmon_rca.open_i
                          json.dumps(trig) if trig else ""])
     d.parts.append(md_table(["job", "job_id", "run_id", "start_utc", "state", "result", "minutes", "params", "trigger"],
                             rows, max_cell=200))
+    # what each assistant run did (its notebook exit value): processed vs skipped-unchanged incidents, LLM calls
+    out_rows = []
+    for j in w.jobs.list(name="banksia-genai-assistant"):
+        for run in w.jobs.list_runs(job_id=j.job_id, limit=6):
+            full = w.jobs.get_run(run.run_id)
+            res = None
+            for t in full.tasks or []:
+                try:
+                    res = json.loads(w.jobs.get_run_output(t.run_id).notebook_output.result or "null")
+                except Exception:  # noqa: BLE001
+                    res = None
+            if not res:
+                continue
+            out_rows.append([run.run_id, str(run.trigger.value if run.trigger else ""),
+                             datetime.fromtimestamp(run.start_time / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M"),
+                             res.get("open"), res.get("processed"), res.get("skipped_unchanged"), res.get("llm_calls"),
+                             res.get("sms_drafts"), res.get("prompt_tokens"), res.get("completion_tokens"),
+                             res.get("minutes"), json.dumps(res.get("synced") or {})])
+    d.text("banksia-genai-assistant: run outputs (notebook exit value)", """
+Each run's own report (`dbutils.notebook.exit`): open incidents, incidents summarised (new, re-ranked or new prompt),
+incidents skipped as unchanged, LLM calls made, SMS drafts written, tokens, minutes of notebook time, Lakebase sync
+update started. A `TABLE` trigger is the table-update trigger on `netmon_rca.open_incidents` firing after a
+`banksia-rca-score-live` MERGE.""")
+    d.parts.append(md_table(["run_id", "trigger", "start_utc", "open", "processed", "skipped_unchanged", "llm_calls",
+                             "sms_drafts", "prompt_tokens", "completion_tokens", "minutes", "lakebase_sync_update"],
+                            out_rows, max_cell=120))
     d.write()
 
 

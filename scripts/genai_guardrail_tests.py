@@ -75,6 +75,10 @@ def main() -> None:
     ap.add_argument("--incident", default="")
     a = ap.parse_args()
     ws = WorkspaceClient(profile=a.profile)
+    import mlflow  # traces go to the workspace experiment, never to a local store
+
+    mlflow.set_tracking_uri(f"databricks://{a.profile}")
+    mlflow.set_experiment("/Shared/banksia_netmon/noc_assistant")
     sql = service.warehouse_sql(ws, a.warehouse)
     q = sources.Queries(a.catalog)
     inc = sql(f"SELECT * FROM {a.catalog}.netmon_rca.open_incidents ORDER BY suspect_1_type, incident_id")

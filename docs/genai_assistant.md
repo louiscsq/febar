@@ -199,7 +199,7 @@ token is stored anywhere.
 
 | AI Gateway feature | setting | status |
 |---|---|---|
-| usage tracking | on | per-request tokens in `system.serving.endpoint_usage`; `client_request_id` = the assistant's `X-Request-Id` |
+| usage tracking | on | per-request tokens in `system.serving.endpoint_usage`; joins the request log on `client_request_id`, which the assistant sends in the request body |
 | rate limits | 600 calls / min per endpoint, 300 per user | on (the evaluation runs 8 parallel workers and was never throttled) |
 | PII guardrail, input | BLOCK | on: a prompt carrying an MSISDN / IMSI is blocked (`06_guardrail_tests.md` 2b) |
 | PII guardrail, output | BLOCK | on |
@@ -233,11 +233,13 @@ fallback rate.
 
 ### Request / response logging (in place of the inference table)
 
-`llm.RequestLog` appends one row per call to `netmon_genai.noc_assistant_request_log`: request ID (also sent as
-`X-Request-Id`, so it joins the gateway's usage rows), time, endpoint, purpose, prompt version, incident reference,
-status (`ok` / `blocked` / `error` / `invalid_json`), error (the gateway's guardrail verdict when blocked), latency,
-attempts, tokens, the request JSON's SHA-256, the full request and the raw response. Sample rows:
-`evidence/step4/02_inference_log.md`.
+`llm.RequestLog` appends one row per call to `netmon_genai.noc_assistant_request_log`: `request_id` (our
+`client_request_id`, sent in the request body, so the gateway's usage row joins on it; calls made before fix round 1
+sent it only as a header, which usage tracking does not record, so those usage rows have it NULL and can only be
+matched by time and token counts), `response_id` (the model's id), time, endpoint, purpose, prompt version, incident
+reference, status (`ok` / `blocked` / `error` / `invalid_json`), error (the gateway's guardrail verdict when
+blocked), latency, attempts, tokens, the request JSON's SHA-256, the full request and the raw response. Sample rows
+and the join: `evidence/step4/02_inference_log.md`.
 
 ### MLflow Tracing
 
@@ -330,7 +332,7 @@ Every number below is from `evidence/step4/04_evaluation.md` (final runs: prompt
 
 Live: the 17 open incidents of step 3's live run all have a v3 summary and an SMS draft in UC and in Lakebase
 (`05_outputs_and_lakebase.md`). The trigger was exercised: a `banksia-rca-score-live` MERGE fired
-`banksia-genai-assistant`, which found all 17 unchanged and made **no** LLM call (0.3 min of notebook time, 1.0 min job run; `08_jobs_and_runs.md`).
+`banksia-genai-assistant`, which found all 17 unchanged and made **no** LLM call (run `147398191171624`: processed 0, skipped_unchanged 17, llm_calls 0, 0.3 min of notebook time; the run's own output is in `08_jobs_and_runs.md`).
 
 ## Latency and cost
 

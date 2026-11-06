@@ -42,6 +42,10 @@ def main() -> None:
     ap.add_argument("--warehouse", required=True)
     a = ap.parse_args()
     ws = WorkspaceClient(profile=a.profile)
+    import mlflow  # traces go to the workspace experiment, never to a local store
+
+    mlflow.set_tracking_uri(f"databricks://{a.profile}")
+    mlflow.set_experiment("/Shared/banksia_netmon/noc_assistant")
     sql = service.warehouse_sql(ws, a.warehouse)
     q = sources.Queries(CAT)
     # dev slow-backhaul incidents the ranker got right at the SLA moment (ground truth used for selection only)

@@ -158,3 +158,18 @@ def test_resolve_path_and_known_elements(scored):
     with pytest.raises(KeyError):
         C.resolve_path(ctx, "suspects[0].signals.made_up")
     assert {"BH-1", "AGG-1", "SITE-1", "SITE-2"} <= C.known_elements(ctx)
+
+
+def test_alarm_with_event_time_after_as_of_is_excluded_even_if_passed_directly(scored):
+    """The builder bounds alarms itself: a RAISE whose event_ts is after as_of (e.g. clock skew stamping it in the
+    future while its evidence_ts is in the past) must not reach the context, whatever the caller's SQL filtered."""
+    case = _case(scored)
+    base = C.build_context(_inputs(case))
+    as_of = T0 + pd.Timedelta(minutes=AS_OF_MIN)
+    future = pd.DataFrame([{"alarm_id": "A-FUT", "event_type": "RAISE", "element_id": "BH-1", "alarm_code": "LINK_DOWN",
+                            "severity": "CRITICAL", "event_ts": as_of + pd.Timedelta(minutes=2),
+                            "evidence_ts": as_of - pd.Timedelta(minutes=1), "is_service_down": True,
+                            "additional_text": "future"}])
+    ctx = C.build_context(_inputs(case, alarms=pd.concat([_alarms(), future], ignore_index=True)))
+    assert ctx == base
+    assert "LINK_DOWN" not in C.to_json(ctx) and ctx["alarm_summary"]["n_alarms_in_scope"] == 1

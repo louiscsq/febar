@@ -1,6 +1,6 @@
 # Deployed jobs and their latest runs
 
-Captured 2026-11-06 02:27 UTC from workspace profile `febar` by `scripts/capture_evidence_step4.py`.
+Captured 2026-11-06 02:59 UTC from workspace profile `febar` by `scripts/capture_evidence_step4.py`.
 
 Jobs deployed by the bundle (`resources/genai.jobs.yml`, `resources/rca.jobs.yml`) and the latest runs that produced
 the evidence. The assistant job has a table-update trigger on `netmon_rca.open_incidents`.
@@ -24,3 +24,18 @@ the evidence. The assistant job has a table-update trigger on `netmon_rca.open_i
 | banksia-rca-any-alert-metric | 163263809805642 | 995856391141929 | 2026-11-05 23:43 | TERMINATED | SUCCESS | 2.2 | {} |  |
 
 _15 row(s)_
+
+## banksia-genai-assistant: run outputs (notebook exit value)
+
+Each run's own report (`dbutils.notebook.exit`): open incidents, incidents summarised (new, re-ranked or new prompt),
+incidents skipped as unchanged, LLM calls made, SMS drafts written, tokens, minutes of notebook time, Lakebase sync
+update started. A `TABLE` trigger is the table-update trigger on `netmon_rca.open_incidents` firing after a
+`banksia-rca-score-live` MERGE.
+
+| run_id | trigger | start_utc | open | processed | skipped_unchanged | llm_calls | sms_drafts | prompt_tokens | completion_tokens | minutes | lakebase_sync_update |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 649456465212279 | ONE_TIME | 2026-11-06 01:58 | 17 | 17 | 0 | 34 | 17 | 83173 | 13205 | 3.7 | {"telco_netmon_febar_catalog.netmon_genai.lb_incident_ai_latest": "1cd12833-9adb-4c8a-950a-c394dea5c4ed"} |
+| 147398191171624 | TABLE | 2026-11-06 01:05 | 17 | 0 | 17 | 0 | 0 | 0 | 0 | 0.3 | {"telco_netmon_febar_catalog.netmon_genai.lb_incident_ai_latest": "603530c6-17f9-45e7-bd5d-180293bd26a4"} |
+| 902997043028885 | ONE_TIME | 2026-11-06 00:48 | 17 | 17 | 0 | 34 | 17 | 80181 | 12602 | 3.7 | {} |
+
+_3 row(s)_

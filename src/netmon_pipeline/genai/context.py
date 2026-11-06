@@ -220,7 +220,9 @@ def _suspects(inp: IncidentRef, rows: pd.DataFrame, tree: _Tree, impacted: set[s
 
 def _alarms(alarms: pd.DataFrame, focus: set[str], tree: _Tree, as_of: pd.Timestamp) -> tuple[list[dict], dict]:
     a = _frame(alarms, ALARM_COLUMNS)
-    a = a[a["evidence_ts"].notna() & (a["evidence_ts"] <= as_of)]
+    # visible at as_of: arrived by then AND happened by then (a record stamped in the future, e.g. clock skew or a
+    # caller passing an unfiltered frame, never counts), raised within the look-back window
+    a = a[a["evidence_ts"].notna() & (a["evidence_ts"] <= as_of) & a["event_ts"].notna() & (a["event_ts"] <= as_of)]
     raises = a[(a["event_type"] == "RAISE") & (a["event_ts"] >= as_of - pd.Timedelta(minutes=ALARM_LOOKBACK_MIN))]
     clears = set(a.loc[a["event_type"] == "CLEAR", "alarm_id"])
     raises = raises[raises["element_id"].isin(focus)].drop_duplicates("alarm_id")

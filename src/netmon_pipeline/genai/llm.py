@@ -7,7 +7,7 @@ PII guardrails, rate limits and usage tracking. A request the gateway blocks com
 returned as `status="blocked"`, never retried.
 
 Every call is an MLflow trace span (`span_type=LLM`) and appends one row to `RequestLog` (request, response,
-status, tokens, latency), written by the jobs to `netmon_genai.noc_assistant_request_log`: the request /
+status, tokens, latency), keyed by the `client_request_id` sent in the body, written by the jobs to `netmon_genai.noc_assistant_request_log`: the request /
 response record that the gateway inference table would hold (it cannot be enabled on this workspace; see
 `gateway.apply`).
 """
@@ -49,6 +49,7 @@ class LlmResult:
     latency_ms: float
     error: str | None = None
     attempts: int = 1
+    response_id: str | None = None  # the model's own id (chatcmpl-...); request_id is our client_request_id
 
 
 @dataclass
@@ -59,7 +60,7 @@ class RequestLog:
 
     def add(self, res: LlmResult, request: dict, prompt_version: str, incident_ref: str | None) -> None:
         self.rows.append({
-            "request_id": res.request_id, "request_time": datetime.now(timezone.utc).isoformat(),
+            "request_id": res.request_id, "response_id": res.response_id, "request_time": datetime.now(timezone.utc).isoformat(),
             "endpoint": res.endpoint, "purpose": res.purpose, "prompt_version": prompt_version,
             "incident_ref": incident_ref, "status": res.status, "error": res.error,
             "latency_ms": round(res.latency_ms, 1), "attempts": res.attempts,
@@ -86,10 +87,12 @@ def _text(content) -> str:
 def chat_json(ws, endpoint: str, messages: list[dict], schema: dict, schema_name: str, purpose: str,
               max_tokens: int = 1500, retries: int = 3, log: RequestLog | None = None, prompt_version: str = "",
               incident_ref: str | None = None) -> LlmResult:
-    body = {"messages": messages, "max_tokens": max_tokens,
+    rid = str(uuid.uuid4())
+    # `client_request_id` in the body is what the gateway's usage tracking records (system.serving.endpoint_usage), so
+    # a usage row joins its request-log row on it; a header alone is not recorded.
+    body = {"messages": messages, "max_tokens": max_tokens, "client_request_id": rid,
             "response_format": {"type": "json_schema",
                                 "json_schema": {"name": schema_name, "schema": schema, "strict": True}}}
-    rid = str(uuid.uuid4())
     t0 = time.perf_counter()
     err, attempt = None, 0
     out = None
@@ -121,8 +124,8 @@ def chat_json(ws, endpoint: str, messages: list[dict], schema: dict, schema_name
             content, status, perr = json.loads(text), "ok", None
         except (json.JSONDecodeError, TypeError) as e:
             content, status, perr = None, "invalid_json", str(e)
-        res = LlmResult(out.get("id") or rid, endpoint, purpose, status, content, text, usage.get("prompt_tokens"),
-                        usage.get("completion_tokens"), latency, perr, attempt)
+        res = LlmResult(rid, endpoint, purpose, status, content, text, usage.get("prompt_tokens"),
+                        usage.get("completion_tokens"), latency, perr, attempt, response_id=out.get("id"))
     if mlflow is not None:
         span = mlflow.get_current_active_span()
         if span is not None:
