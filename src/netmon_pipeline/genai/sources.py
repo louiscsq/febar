@@ -20,7 +20,7 @@ def _q(s: str) -> str:
 
 
 def _in(values) -> str:
-    vals = sorted(set(values))
+    vals = sorted({v for v in values if isinstance(v, str) and v})
     return "(" + ", ".join(_q(v) for v in vals) + ")" if vals else "(NULL)"
 
 
@@ -83,7 +83,7 @@ def load_inputs(sql: SqlFn, q: Queries, ref: C.IncidentRef, run: str, case_rows:
     as_of = pd.Timestamp(ref.as_of)
     focus = {s[0] for s in ref.suspects}
     par = dict(zip(topo["element_id"], topo["parent_id"], strict=False))
-    focus |= {par.get(e) for e in list(focus)} - {None}
+    focus |= {p for p in (par.get(e) for e in list(focus)) if isinstance(p, str) and p}
     focus |= set(topo.loc[topo["parent_id"].isin([s[0] for s in ref.suspects]), "element_id"])
     return C.ContextInputs(
         incident=ref, case_rows=case_rows, topology=topo,

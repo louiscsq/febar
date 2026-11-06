@@ -25,7 +25,7 @@ from netmon_pipeline.genai import context as C
 from netmon_pipeline.genai import gateway, guards, llm
 from netmon_pipeline.genai.schema import NocSummary, SmsDrafts, strict_json_schema
 
-NOC_PROMPT = "noc_summary_v1"
+NOC_PROMPT = "noc_summary_v2"
 SMS_PROMPT = "sms_v1"
 NOC_SCHEMA = strict_json_schema(NocSummary)
 SMS_SCHEMA = strict_json_schema(SmsDrafts)
