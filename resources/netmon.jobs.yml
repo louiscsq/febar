@@ -102,3 +102,35 @@ resources:
           notebook_task:
             notebook_path: ../governance/apply_governance.py
             base_parameters: {<<: *gov_params, stage: policies}
+
+    # One-off correction after the run-unique alarm ID fix (PR #6, notebooks/12_replace_run_feeds.py): swap the
+    # regenerated alarm / DQ-log / change-calendar files of the given runs from the staging volume into landing,
+    # delete the superseded rows, then ingest the new files with a normal incremental pipeline update.
+    # stage=verify only checks that the regeneration differs from the ingested run in IDs alone.
+    netmon_replace_run_feeds:
+      name: banksia-netmon-replace-run-feeds
+      max_concurrent_runs: 1
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: runs, default: "${var.rca_train_run},${var.rca_holdout_run}"}
+        - {name: staging_volume, default: staging}
+        - {name: revision, default: r2}
+        - {name: stage, default: verify}
+      environments: *envs
+      tasks:
+        - task_key: replace
+          environment_key: netmon
+          timeout_seconds: 5400
+          notebook_task:
+            notebook_path: ../notebooks/12_replace_run_feeds.py
+            base_parameters:
+              raw_schema: ${resources.schemas.netmon_raw.name}
+              landing_volume: ${resources.volumes.landing.name}
+              bronze_schema: ${resources.schemas.netmon_bronze.name}
+              silver_schema: ${resources.schemas.netmon_silver.name}
+              gold_schema: ${resources.schemas.netmon_gold.name}
+              eval_schema: ${resources.schemas.netmon_eval.name}
+        - task_key: pipeline
+          depends_on: [{task_key: replace}]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.netmon_pipeline.id}
