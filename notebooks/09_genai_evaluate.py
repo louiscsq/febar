@@ -24,6 +24,7 @@ dbutils.widgets.text("limit", "0")
 dbutils.widgets.dropdown("judges", "true", ["true", "false"])
 dbutils.widgets.text("max_workers", "8")
 dbutils.widgets.dropdown("force", "false", ["true", "false"])
+dbutils.widgets.text("force_reason", "", "Required with force=true on the holdout: why it is re-run (recorded)")
 dbutils.widgets.text("experiment", "/Shared/banksia_netmon/noc_assistant")
 
 # COMMAND ----------
@@ -47,12 +48,15 @@ from netmon_pipeline.genai.store import write_request_log
 
 spark.conf.set("spark.sql.session.timeZone", "UTC")
 w = {k: dbutils.widgets.get(k) for k in ["catalog", "genai_schema", "eval_schema", "split", "limit", "judges",
-                                          "max_workers", "force", "experiment"]}
+                                          "max_workers", "force", "force_reason", "experiment"]}
 CAT, SPLIT = w["catalog"], w["split"]
 G, E = f"`{CAT}`.`{w['genai_schema']}`", f"`{CAT}`.`{w['eval_schema']}`"
 res_table = f"{G}.genai_eval_results_{SPLIT}"
-if SPLIT == "holdout" and w["force"] != "true" and spark.catalog.tableExists(res_table.replace("`", "")):
+REPEAT = SPLIT == "holdout" and spark.catalog.tableExists(res_table.replace("`", ""))
+if REPEAT and w["force"] != "true":
     raise RuntimeError("holdout already evaluated once; set force=true only to reproduce, never to tune")
+if REPEAT and not w["force_reason"].strip():
+    raise RuntimeError("force=true on an evaluated holdout needs force_reason (recorded on the MLflow run)")
 
 ctx_df = spark.sql(f"SELECT * FROM {G}.genai_eval_contexts WHERE split = '{SPLIT}' ORDER BY eval_id").toPandas()
 lab_df = spark.sql(f"SELECT * FROM {E}.genai_eval_labels WHERE split = '{SPLIT}'").toPandas()
@@ -72,7 +76,8 @@ t0 = time.time()
 with mlflow.start_run(run_name=f"genai_eval_{SPLIT}") as run:
     versions = {"noc_summary": assistant.prompt(assistant.NOC_PROMPT)[1], "sms": assistant.prompt(assistant.SMS_PROMPT)[1]}
     mlflow.set_tags({"split": SPLIT, "assistant_endpoint": gateway.ASSISTANT_ENDPOINT,
-                     "judge_endpoint": gateway.JUDGE_ENDPOINT if w["judges"] == "true" else "none", **versions})
+                     "judge_endpoint": gateway.JUDGE_ENDPOINT if w["judges"] == "true" else "none", **versions,
+                     **({"holdout_rerun_reason": w["force_reason"].strip()[:500]} if REPEAT else {})})
     rows, metrics, result = evaluation.run(cases, ws, f"genai_eval_{SPLIT}",
                                            judge_endpoint=gateway.JUDGE_ENDPOINT if w["judges"] == "true" else None,
                                            max_workers=int(w["max_workers"]), log=log)
@@ -95,7 +100,8 @@ print(json.dumps(metrics, indent=1, default=str))
 # COMMAND ----------
 
 meta = {"mlflow_run_id": run_id, "split": SPLIT, "assistant_endpoint": gateway.ASSISTANT_ENDPOINT,
-        "noc_prompt_version": versions["noc_summary"], "sms_prompt_version": versions["sms"]}
+        "noc_prompt_version": versions["noc_summary"], "sms_prompt_version": versions["sms"],
+        "rerun_reason": w["force_reason"].strip() if REPEAT else ""}
 
 
 def save(df: pd.DataFrame, fq: str, comment: str) -> None:

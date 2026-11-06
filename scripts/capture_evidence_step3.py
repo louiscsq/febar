@@ -351,6 +351,109 @@ asserts both call sites.""")
     d.write()
 
 
+# PR #6: run-unique alarm IDs. Per-run alarm counts, bronze vs silver. `netmon_eval.alarm_counts_pr5` holds this query's
+# result captured before the fix (CTAS on main 58004a7); `*_pr5` tables are snapshots of the published results.
+ALARM_COUNTS_SQL = """
+WITH b AS (SELECT _source_run run, count(*) bronze_rows, count(DISTINCT record_id) bronze_distinct_ids FROM telco_netmon_febar_catalog.netmon_bronze.bronze_alarms GROUP BY 1),
+bid AS (SELECT DISTINCT _source_run run, record_id FROM telco_netmon_febar_catalog.netmon_bronze.bronze_alarms WHERE record_id IS NOT NULL),
+s AS (SELECT source_run run, count(*) silver_rows, count(DISTINCT record_id) silver_distinct_ids FROM telco_netmon_febar_catalog.netmon_silver.silver_alarms GROUP BY 1),
+sid AS (SELECT DISTINCT source_run run, record_id FROM telco_netmon_febar_catalog.netmon_silver.silver_alarms),
+q AS (SELECT DISTINCT _source_run run, record_id FROM telco_netmon_febar_catalog.netmon_silver.silver_quarantine WHERE feed = 'alarms' AND record_id IS NOT NULL),
+qn AS (SELECT _source_run run, count(*) quarantined_rows FROM telco_netmon_febar_catalog.netmon_silver.silver_quarantine WHERE feed = 'alarms' GROUP BY 1),
+dup AS (SELECT _source_run run, count(*) injected_duplicates FROM telco_netmon_febar_catalog.netmon_eval.bronze_gt_dq_injections WHERE feed = 'alarms' AND defect_type = 'duplicate' GROUP BY 1),
+miss AS (SELECT m.run, m.record_id, EXISTS (SELECT 1 FROM sid o WHERE o.record_id = m.record_id AND o.run <> m.run) AS in_other_run
+         FROM (SELECT * FROM bid LEFT ANTI JOIN sid USING (run, record_id) LEFT ANTI JOIN q USING (run, record_id)) m),
+mc AS (SELECT run, count(*) missing_ids, count_if(in_other_run) missing_ids_held_by_other_run FROM miss GROUP BY 1)
+SELECT b.run, b.bronze_rows, b.bronze_distinct_ids, coalesce(dup.injected_duplicates, 0) injected_duplicates,
+       coalesce(qn.quarantined_rows, 0) quarantined_rows, s.silver_rows, s.silver_distinct_ids,
+       b.bronze_rows - s.silver_rows - coalesce(qn.quarantined_rows, 0) AS removed_by_dedupe,
+       coalesce(mc.missing_ids, 0) distinct_ids_missing_from_silver, coalesce(mc.missing_ids_held_by_other_run, 0) missing_ids_held_by_other_run
+FROM b LEFT JOIN s USING (run) LEFT JOIN qn USING (run) LEFT JOIN dup USING (run) LEFT JOIN mc USING (run)
+"""
+
+
+def _old_new(key: str, cols: list[str], old: str, new: str, order: str) -> str:
+    sel = ", ".join(f"o.{c} AS old_{c}, n.{c} AS new_{c}" for c in cols)
+    return (f"SELECT coalesce(n.{key}, o.{key}) AS {key}, {sel} FROM {old} o FULL OUTER JOIN {new} n "
+            f"ON n.{key} = o.{key} ORDER BY {order}")
+
+
+def alarm_fix(r: Runner, run: dict) -> None:
+    _, old_tr = r.sql(f"SELECT model_version, mlflow_run_id, threshold FROM {R}.rca_training_runs_pr5")
+    _, old_ho = r.sql(f"SELECT model_version, mlflow_run_id FROM {R}.rca_holdout_runs_pr5")
+    _, new_ho = r.sql(f"SELECT model_version, mlflow_run_id FROM {R}.rca_holdout_runs")
+    d = Doc(r, "08_alarm_id_fix.md", "PR #6: run-unique alarm IDs, re-ingest, retrain and one holdout re-score", f"""
+**Defect** (found in step 4, `evidence/step4/09_holdout_alarm_gap.md`): incident alarm IDs hashed only the per-run
+incident ID (`INC-00001`, ...), so a later batch run reused an earlier run's alarm IDs and silver's cross-run dedupe
+on `record_id` dropped them. **Fix**: alarm and change IDs hash a run key (`docs/data_model.md`, "IDs across runs").
+`history_1m` and `holdout_1m` were regenerated with the same seeds and windows (`run_id` = run name). The
+regeneration was verified to differ from the ingested files **only in IDs** (KPIs, sessions, topology and incident
+ground truth byte-identical; alarms, DQ log and change calendar identical without `record_id` / `alarm_id` /
+`change_id`), and the three changed feeds were swapped in by `banksia-netmon-replace-run-feeds`
+(`notebooks/12_replace_run_feeds.py`; no full refresh, step-2 `history` / `stream` untouched).
+
+**Retraining decision.** The training data was affected: `history_1m` had lost 90 alarm IDs, 89 of them on
+2026-10-10, the first **train** day (to the step-2 `history` run's IDs). The contract says: if training data was
+affected, retrain. The model was retrained once with the **frozen design** (same code, features, hyperparameters,
+split dates and threshold rule; job `banksia-rca-train` with its defaults): old champion v{old_tr[0][0]} (MLflow run
+`{old_tr[0][1]}`, threshold {old_tr[0][2]}) -> new champion v{run['model_version']} (MLflow run
+`{run['mlflow_run_id']}`, threshold {run['threshold']}). The holdout was then re-scored **once** with the same
+evaluation code (`banksia-rca-evaluate-holdout`, then `banksia-rca-any-alert-metric`): old evaluation v{old_ho[0][0]}
+run `{old_ho[0][1]}`, new evaluation v{new_ho[0][0]} run `{new_ho[0][1]}`. Old numbers are the `*_pr5` snapshots
+taken before anything was changed. Both the model and the data changed between old and new, so the holdout
+difference is not attributable to either alone; the dev and validation rows show the model change on unchanged data
+(dev days lost no alarms).""")
+    d.query("Alarms per run BEFORE the fix (snapshot netmon_eval.alarm_counts_pr5)",
+            f"SELECT * FROM {E}.alarm_counts_pr5 ORDER BY run",
+            "`removed_by_dedupe` = bronze rows - silver rows - quarantined rows. It should equal `injected_duplicates`. "
+            "`missing_ids_held_by_other_run` = distinct IDs of the run absent from silver (and not quarantined) whose "
+            "ID is in silver under another run.")
+    d.query("Alarms per run AFTER the fix (same query, live)", ALARM_COUNTS_SQL + " ORDER BY run",
+            "Every run: `removed_by_dedupe` = `injected_duplicates`, nothing missing. Only the intended DQ duplicates "
+            "are removed. (Quarantine counts rise slightly: rows that were dropped by the dedupe before their "
+            "expectations ran now reach the quarantine.)")
+    d.query("Before vs after, side by side", f"""
+        SELECT n.run, o.silver_rows AS silver_before, n.silver_rows AS silver_after, n.silver_rows - o.silver_rows AS gained,
+               o.removed_by_dedupe AS dedupe_removed_before, n.removed_by_dedupe AS dedupe_removed_after,
+               n.injected_duplicates, o.distinct_ids_missing_from_silver AS missing_before,
+               n.distinct_ids_missing_from_silver AS missing_after
+        FROM ({ALARM_COUNTS_SQL}) n JOIN {E}.alarm_counts_pr5 o USING (run) ORDER BY n.run""")
+    acc = ["n", "model_top1_pct", "heuristic_same_cases_top1_pct", "model_top3_pct", "baseline_top1_pct"]
+    for split, label in (("holdout", "HOLDOUT (holdout_1m)"), ("dev", "DEV (history_1m 10-14 … 10-15)"),
+                         ("val", "VALIDATION (history_1m 10-13)")):
+        d.query(f"{label}: top-1 / top-3 old vs new", _old_new(
+            "fault_type", acc, f"{R}.rca_eval_{split}_accuracy_pr5", f"{R}.rca_eval_{split}_accuracy",
+            "fault_type = 'ALL' DESC, new_n DESC"),
+            "`baseline_top1_pct` = step 2's region-wide `eval_rca_baseline` on the same incidents.")
+        if split != "val":
+            d.query(f"{label}: non-oracle any-alert metric old vs new", _old_new(
+                "fault_type", ["n", "any_alert_correct_pct", "matched_top1_pct", "median_region_alerts"],
+                f"{R}.rca_eval_{split}_any_alert_summary_pr5", f"{R}.rca_eval_{split}_any_alert_summary",
+                "fault_type = 'ALL' DESC, new_n DESC"))
+        d.query(f"{label}: early catch old vs new (signed seconds; step-2 localisation on the same incidents)",
+                _old_new("fault_type", ["n", "model_within_5min_pct", "model_median_signed_s",
+                                        "heuristic_same_cases_within_5min_pct", "step2_within_5min_pct",
+                                        "step2_median_s"],
+                         f"{R}.rca_eval_{split}_early_catch_summary_pr5", f"{R}.rca_eval_{split}_early_catch_summary",
+                         "fault_type = 'ALL' DESC, new_n DESC"))
+        d.query(f"{label}: alert-level fault precision old vs new", _old_new(
+            "system", ["n_alerts", "fault", "unexplained", "fault_precision_pct"],
+            f"{R}.rca_eval_{split}_alert_precision_pr5", f"{R}.rca_eval_{split}_alert_precision", "system"))
+    d.query("Step 2 (rule-based) on the holdout run, old vs new: time to detect / localise", _old_new(
+        "event_class", ["n_incidents", "impact_within_5min_pct", "root_localised_pct", "localised_within_5min_pct",
+                        "localisation_median_ttd_s"],
+        f"(SELECT * FROM {E}.eval_ttd_summary_pr5 WHERE source_run = 'holdout_1m' AND fault_type = 'ALL')",
+        f"(SELECT * FROM {E}.eval_ttd_summary WHERE source_run = 'holdout_1m' AND fault_type = 'ALL')", "1"))
+    d.query("Step 2 region-wide RCA baseline per run, old vs new", _old_new(
+        "source_run", ["n", "hit_at_1_pct", "hit_at_3_pct"],
+        f"(SELECT source_run, count(*) AS n, round(100 * avg(CAST(hit_at_1 AS INT)), 1) AS hit_at_1_pct, "
+        f"round(100 * avg(CAST(hit_at_3 AS INT)), 1) AS hit_at_3_pct FROM {E}.eval_rca_baseline_pr5 GROUP BY 1)",
+        f"(SELECT source_run, count(*) AS n, round(100 * avg(CAST(hit_at_1 AS INT)), 1) AS hit_at_1_pct, "
+        f"round(100 * avg(CAST(hit_at_3 AS INT)), 1) AS hit_at_3_pct FROM {E}.eval_rca_baseline GROUP BY 1)", "1"),
+            "`history` and `stream` are untouched and must be equal old vs new.")
+    d.write()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", default="febar")
@@ -364,7 +467,8 @@ def main() -> None:
     run = latest_run(r)
     steps = {"training": lambda: training(r, w, run), "evaluation": lambda: evaluation(r, run),
              "registry": lambda: registry(r, w), "serving": lambda: serving(r, w, run),
-             "lakebase": lambda: lakebase(r, w), "live": lambda: live(r), "notes": lambda: pipeline_notes(r)}
+             "lakebase": lambda: lakebase(r, w), "live": lambda: live(r), "notes": lambda: pipeline_notes(r),
+             "alarm_fix": lambda: alarm_fix(r, run)}
     for k, f in steps.items():
         if a.only and k not in a.only.split(","):
             continue

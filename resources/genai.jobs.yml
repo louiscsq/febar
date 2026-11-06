@@ -46,6 +46,7 @@ resources:
         - {name: judges, default: "true"}
         - {name: max_workers, default: "8"}
         - {name: force, default: "false"}
+        - {name: force_reason, default: ""}
         - {name: experiment, default: /Shared/banksia_netmon/noc_assistant}
       environments: *genai_envs
       tasks:
