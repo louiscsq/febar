@@ -1,0 +1,15 @@
+# Step 5: the NOC Genie space (docs/genie_space.md). The space body (tables, column descriptions, instructions,
+# join hints, SQL snippets, trusted example SQL, sample questions, benchmark questions) is generated from
+# src/netmon_pipeline/genie_space.py by scripts/genie_build_space.py into noc_space.geniespace.json.
+# Every operational table is a region-filtered netmon_noc view (governance/sql/05_serving_views.sql); Genie runs
+# each query as the asking user, so UC row filters and grants apply per user.
+resources:
+  genie_spaces:
+    noc_genie:
+      title: "Banksia NOC: incidents, network health and detection KPIs"
+      description: >-
+        Ask about Banksia Mobile's live network incidents: the failing element and the root-cause ranker's top-3
+        suspects, element health from core to cell, customer impact by region (aggregate counts only), Gen AI
+        root-cause summaries and SMS drafts, and detection KPIs (time to detect, share within 5 minutes).
+      warehouse_id: ${var.warehouse_id}
+      file_path: genie/noc_space.geniespace.json
