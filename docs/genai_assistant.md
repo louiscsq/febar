@@ -252,7 +252,7 @@ evaluation runs link their traces to the assessments.
 
 **Set** (`notebooks/08_genai_build_evalset.py`): one case per scored step-3 incident that had a case output at the SLA
 moment, i.e. the same case and decision time step 3 judged its top-1 on (`rca_eval_{split}_ranking`), with the frozen
-champion v4's GT-free scores. **Dev** = `history_1m` 2026-10-14 … 10-15: 346 of 355 scored incidents. **Holdout** =
+champion's GT-free scores (v5 since PR #6; v4 before). **Dev** = `history_1m` 2026-10-14 … 10-15: 346 of 355 scored incidents. **Holdout** =
 step 3's fresh `holdout_1m` (2026-10-17 … 10-18): 323 of 337. The context table (`netmon_genai.genai_eval_contexts`)
 holds no ground truth; the labels (`netmon_eval.genai_eval_labels`) are joined only by the scorers.
 
@@ -261,7 +261,10 @@ wrong (to see whether the LLM fixes or breaks them), then two hand-built dev sit
 (`03b_early_and_ambiguous_examples.md`), which led to prompt v2, then a full dev run with the judges, whose
 groundedness failures led to v3. The final dev run and then the holdout run used the
 frozen prompts (`noc_summary_v3`, `sms_v1`). The holdout was run **once**; the job refuses to re-run it without
-`force=true`.
+`force=true` and, since PR #6, a `force_reason` that is recorded on the MLflow run (`holdout_rerun_reason`) and in the
+result tables. It was forced exactly once, for PR #6: the holdout's alarms had been dropped upstream (below), so the
+evaluation set was rebuilt from the corrected data and the retrained ranker v5, dev re-run, and the holdout re-run
+once with the same frozen prompts. Nothing was tuned on either holdout result.
 
 **Scorers** (`genai/scorers.py`). Ground truth reaches them as `expectations`; `predict_fn` sees `inputs.context` only.
 
@@ -281,56 +284,64 @@ frozen prompts (`noc_summary_v3`, `sms_v1`). The holdout was run **once**; the j
 
 ## Results
 
-Every number below is from `evidence/step4/04_evaluation.md` (final runs: prompts `noc_summary_v3`, `sms_v1`).
+Every number below is from `evidence/step4/04_evaluation.md` (final runs: prompts `noc_summary_v3`, `sms_v1`) and,
+old vs new, `evidence/step4/10_holdout_rerun.md`. **Old** = PR #5 (ranker v4; the holdout's fault alarms missing),
+**new** = PR #6 (alarms corrected, ranker v5, same prompts).
 
-| measure | **dev** (n = 346) | **holdout** (n = 323, run once) |
-|---|---|---|
-| **assistant root-cause agreement** (valid root list; `uncertain` = miss) | **97.1 %** | **82.0 %** |
-| ranker's top-1 alone, same contexts | 96.5 % | 97.2 % |
-| answered (not `uncertain`) | 99.7 % | 89.5 % |
-| selective accuracy (answered cases) | 97.4 % | 91.7 % |
-| ranker misses fixed by the assistant | 3 | 2 |
-| correct ranker answers turned wrong / turned `uncertain` | 0 / 1 | **18 / 33** |
-| fault-hypothesis match | 96.5 % | 69.0 % |
-| hallucinated root (raw output, before the guard) | 0.0 % | 1.9 % |
-| any unknown element ID in the raw output (scrubbed by the guard) | 2.6 % | 3.1 % |
-| cited evidence paths that exist | 99.4 % | 99.5 % |
-| fallback (gateway block / failure) | 0.3 % | 1.9 % |
-| groundedness (LLM judge) | 81.8 % | 78.6 % |
-| SMS: final drafts compliant | 100 % | 100 % |
-| SMS: LLM drafts compliant at the first try / after one repair | 98.3 % / 99.7 % | 98.5 % / 99.4 % |
-| SMS guidelines (LLM judge) | 99.7 % | 98.8 % |
-| latency per incident p50 / p95 | 6.4 s / 8.0 s | 6.6 s / 7.9 s |
-| tokens per incident (prompt / completion) | 4,896 / 772 | 4,705 / 791 |
-| over **all** scored incidents (no case output = miss): assistant / ranker | 94.6 % / 94.1 % (n = 355) | 78.6 % / 93.2 % (n = 337) |
+| measure | dev old (n = 346) | **dev new** | holdout old (n = 323) | **holdout new (re-run once)** |
+|---|---|---|---|---|
+| **assistant root-cause agreement** (valid root list; `uncertain` = miss) | 97.1 % | **96.8 %** | 82.0 % | **97.5 %** |
+| ranker's top-1 alone, same contexts | 96.5 % | 96.5 % | 97.2 % | 98.8 % |
+| answered (not `uncertain`) | 99.7 % | 100 % | 89.5 % | 99.1 % |
+| selective accuracy (answered cases) | 97.4 % | 96.8 % | 91.7 % | 98.4 % |
+| ranker misses fixed by the assistant | 3 | 3 | 2 | 0 |
+| correct ranker answers turned wrong / turned `uncertain` | 0 / 1 | 2 / 0 | 18 / 33 | **2 / 2** |
+| fault-hypothesis match | 96.5 % | 93.9 % | 69.0 % | 95.7 % |
+| hallucinated root (raw output, before the guard) | 0.0 % | 0.0 % | 1.9 % | 0.0 % |
+| any unknown element ID in the raw output (scrubbed by the guard) | 2.6 % | 5.2 % | 3.1 % | 5.0 % |
+| cited evidence paths that exist | 99.4 % | 99.7 % | 99.5 % | 99.4 % |
+| fallback (gateway block / failure) | 0.3 % | 0.6 % | 1.9 % | 1.9 % |
+| groundedness (LLM judge) | 81.8 % | 80.9 % | 78.6 % | 79.6 % |
+| SMS: final drafts compliant | 100 % | 100 % | 100 % | 100 % |
+| SMS: LLM drafts compliant at the first try / after one repair | 98.3 % / 99.7 % | 97.4 % / 99.1 % | 98.5 % / 99.4 % | 99.7 % / 99.7 % |
+| SMS guidelines (LLM judge) | 99.7 % | 99.4 % | 98.8 % | 99.1 % |
+| latency per incident p50 / p95 | 6.4 s / 8.0 s | 6.0 s / 7.3 s | 6.6 s / 7.9 s | 6.3 s / 7.4 s |
+| tokens per incident (prompt / completion) | 4,896 / 772 | 4,887 / 776 | 4,705 / 791 | 4,824 / 759 |
+| over **all** scored incidents (no case output = miss): assistant / ranker | 94.6 % / 94.1 % (n = 355) | 94.4 % / 94.1 % | 78.6 % / 93.2 % (n = 337) | 93.5 % / 94.7 % |
 
-**Does the LLM add or lose accuracy? Honestly: on dev it adds a little, on the holdout it loses a lot.**
+**Does the LLM add or lose accuracy? With a complete alarm feed: about even with the ranker on dev, slightly
+below it on the holdout. With missing alarms (the PR #5 holdout): it lost a lot.**
 
-- *Dev*: it follows the ranker on 336 of 346 cases, fixes 3 of the 12 ranker misses (twice a router chosen over a
-  sibling, once a sibling cell), never turns a right answer wrong, and goes `uncertain` once.
-- *Holdout*: it turns 18 correct ranker answers wrong (mostly cell outages blamed on the backhaul link above them)
-  and abstains on 33 more. **Cause, found after the run** (`evidence/step4/09_holdout_alarm_gap.md`; nothing re-run
-  or tuned on the holdout): an upstream defect drops about 20 % of the holdout's alarms. The generator reuses
-  incident-based alarm IDs across batch runs (`INC-00001` … in every run), so silver's cross-run dedupe treats the
-  holdout's fault alarms as redeliveries of `history_1m`'s. Only 36 % of holdout cell-outage contexts still carry an
-  active alarm (dev: 100 %), while seed-scoped noise alarms on neighbouring links survive. The ranker, which reads
-  KPIs as well as alarms, still scores 97 %; the assistant, prompted to look for alarms that corroborate the impact
-  pattern, either abstains or follows the surviving noise alarm. Even holdout contexts that do have an active alarm
-  show the gap (83.6 % vs 95.6 %), because the alarms that remain are often not the root's own.
-- *Lesson*: the LLM is not robust to gaps in the alarm feed, and real OSS alarm feeds do drop and lag. The ranker
-  stays the system of record for "which element"; the assistant's value is the explanation, the runbook steps, the
-  impact sentence and the customer draft, and its root-cause choice is shown **next to** the ranker's, never instead
-  of it. A tempting fix (only let the assistant override the ranker below the alert threshold) was designed after
-  seeing the holdout, so it is recorded as a next step to validate on a fresh run, not shipped here.
-- *Grounding*: no hallucinated root on dev; on the holdout 1.9 % of raw answers named a non-suspect, and the guard
-  turned those into `uncertain`. 2.6–3.1 % mentioned an element not in the context (e.g. a UPF named by convention);
+- *Dev (new)*: 96.8 % vs the ranker's 96.5 %. It fixes 3 ranker misses, turns 2 correct answers wrong and moves 2
+  wrong answers to other wrong ones. The dev contexts are practically unchanged by the fix (339 vs 340 of 346 carry an
+  active alarm); the small differences from PR #5 (97.1 %, 0 turned wrong) come from the v5 scores and from LLM
+  run-to-run variation at the same prompts.
+- *Holdout (new)*: 97.5 % vs the ranker's 98.8 %. It turns 2 correct ranker answers wrong (a router failure blamed
+  on a sibling router, a cell outage on its site), abstains on 2 AMF overloads, and fixes none. It does not beat the
+  ranker on the holdout.
+- *Holdout (old, PR #5)*: it turned 18 correct ranker answers wrong and abstained on 33 more. **Cause**
+  (`evidence/step4/09_holdout_alarm_gap.md`): incident alarm IDs repeated across batch runs, so silver's cross-run
+  dedupe had dropped the holdout's fault alarms as redeliveries of `history_1m`'s. Only 159 of 323 holdout contexts
+  carried an active alarm (after the fix: 315). The ranker, which reads KPIs as well as alarms, still scored 97 %;
+  the assistant, prompted to look for alarms that corroborate the impact pattern, abstained or followed a surviving
+  noise alarm on a neighbouring link. Fixed in PR #6.
+- *Lesson (still holds)*: the LLM is not robust to gaps in the alarm feed, and real OSS alarm feeds do drop and lag.
+  The ranker stays the system of record for "which element"; the assistant's value is the explanation, the runbook
+  steps, the impact sentence and the customer draft, and its root-cause choice is shown **next to** the ranker's,
+  never instead of it. A tempting fix (only let the assistant override the ranker below the alert threshold) was
+  designed after seeing the PR #5 holdout, so it is recorded as a next step to validate on a fresh run, not shipped.
+- *Grounding*: no hallucinated root on dev or the new holdout (the PR #5 holdout: 1.9 % of raw answers named a
+  non-suspect; the guard turned those into `uncertain`). Unknown element IDs in raw outputs **rose** to 5.0–5.2 % (PR #5:
+  2.6–3.1 %; the cause was not investigated). In PR #5 they were typically elements named by convention, e.g. a UPF;
   all were scrubbed. The groundedness judge failed about one answer in five, nearly always for one small slip in an
   otherwise supported answer: an RRC z-score reported as "RRC success 0 %", an alarm's severity misread, or an
   alarmed router called a cell's "parent". Prompt v3 targeted these; dev groundedness moved only 81.5 → 81.8 %.
 - *SMS*: every final draft is compliant by construction; the model's own drafts pass the deterministic rules 98–99 %
   of the time at the first try, and the judge finds them plain, calm and blame-free in 99 % of cases.
 
-Live: the 17 open incidents of step 3's live run all have a v3 summary and an SMS draft in UC and in Lakebase
+Live: after PR #6 the live run was re-scored with v5; the MERGE fired `banksia-genai-assistant` (run
+`584238101020942`: 17 processed, 34 LLM calls, synced to Lakebase), and every open incident's summary names the
+ranker's suspect #1. Before that, the 17 open incidents of step 3's live run all had a v3 summary and an SMS draft in UC and in Lakebase
 (`05_outputs_and_lakebase.md`). The trigger was exercised: a `banksia-rca-score-live` MERGE fired
 `banksia-genai-assistant`, which found all 17 unchanged and made **no** LLM call (run `147398191171624`: processed 0, skipped_unchanged 17, llm_calls 0, 0.3 min of notebook time; the run's own output is in `08_jobs_and_runs.md`).
 
@@ -408,12 +419,13 @@ needs it to exist, so on a fresh workspace deploy once more after that run.
 
 ## Known limits
 
-- **The assistant loses accuracy when alarms are missing** (holdout: 82.0 % vs the ranker's 97.2 %). The ranker
-  stays the system of record; show the assistant's choice next to the ranker's suspects, never instead of them.
-- **Upstream alarm-ID collision (step 1/2 follow-up).** Incident alarm IDs are not unique across batch runs
-  (`opaque_id("ALM", incident_id, n)` with `INC-00001`…), so silver's dedupe drops 20 % of the holdout's alarms
-  (`09_holdout_alarm_gap.md`). Fix: include the run / seed in the ID, then regenerate and re-ingest the holdout and
-  re-run step 3's frozen-model holdout evaluation. Not done here because it changes step 3's published holdout result.
+- **The assistant loses accuracy when alarms are missing** (PR #5 holdout: 82.0 % vs the ranker's 97.2 %) and is
+  slightly below the ranker even with a complete feed (new holdout: 97.5 % vs 98.8 %). The ranker stays the system
+  of record; show the assistant's choice next to the ranker's suspects, never instead of them.
+- **Upstream alarm-ID collision: fixed in PR #6.** Incident alarm IDs were not unique across batch runs, so silver's
+  dedupe had dropped about 20 % of the holdout's alarms (`09_holdout_alarm_gap.md`). Alarm and change IDs now hash
+  the run; `history_1m` and `holdout_1m` were regenerated and re-ingested, the ranker retrained once (v5) and both
+  holdouts re-run once (`evidence/step3/08_alarm_id_fix.md`, `evidence/step4/10_holdout_rerun.md`).
 - **Same synthetic generator.** The runbooks and signatures in the prompt describe this generator's fault types. A real
   NOC would replace them with its own runbooks (ideally retrieved, not inlined) and evaluate on its own incidents.
 - **Matched case.** Like step 3, the evaluation grades the case ground truth matched by footprint overlap at the SLA

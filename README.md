@@ -82,10 +82,13 @@ databricks bundle run -p febar rca_score_live       # element_status / open_inci
 databricks bundle run -p febar rca_lakebase_check   # psycopg + OAuth read-latency check
 ```
 
-On a fresh holdout run generated after the design was frozen (337 faults), the model's top-1 is **93.2 %
-against 78.3 %** for step 2's topology heuristic on the same GT-free cases (top-3 95.3 % vs 80.7 %). 80.4 % of
-faults are localised within 5 minutes (step-2 localisation: 65.6 %). Slowly degrading backhaul links are still
-not localised within 5 minutes by any system: median 615 s vs 1,011 s for step 2. Step 2's *published*,
+On a fresh holdout run generated after the design was frozen (337 faults), the model's (v5) top-1 is **94.7 %
+against 78.3 %** for step 2's topology heuristic on the same GT-free cases (top-3 95.5 % vs 80.7 %). 80.7 % of
+faults are localised within 5 minutes (step-2 localisation: 78.6 %). Slowly degrading backhaul links are still
+not localised within 5 minutes by any system: median 619 s vs 1,011 s for step 2. These are the PR #6 numbers,
+after a cross-run alarm ID collision was fixed and the holdout re-ingested; the model was retrained once with the
+frozen design and the holdout re-scored once (published v4 result before the fix: 93.2 % top-1, 80.4 % / 65.6 %
+within 5 min; `evidence/step3/08_alarm_id_fix.md`). Step 2's *published*,
 region-wide baseline (27.9 % top-1 on the holdout; the "58 %" figure was the sparse 15-minute history) is a
 different, weaker framing.
 
@@ -110,11 +113,12 @@ databricks bundle run -p febar genai_build_evalset && databricks bundle run -p f
 databricks bundle run -p febar genai_assistant      # also triggered by every open_incidents update
 ```
 
-On step 3's dev days the assistant's root cause agrees with ground truth on **97.1 %** of evaluated incidents (the
-ranker's top-1 alone: 96.5 %; it fixed 3 ranker misses and broke none). On the fresh holdout it **loses** accuracy:
-**82.0 % against 97.2 %**. Most of the gap traces to an upstream defect found after the run: incident alarm IDs repeat
-across batch runs, so silver drops about 20 % of the holdout's alarms. The ranker copes from KPIs; the assistant,
-looking for corroborating alarms, abstains or blames a neighbour. The ranker therefore stays the system of record.
+On step 3's dev days the assistant's root cause agrees with ground truth on **96.8 %** of evaluated incidents (the
+ranker's top-1 alone: 96.5 %; it fixed 3 ranker misses and broke 2). On the fresh holdout, re-run once after the
+PR #6 alarm fix, it scores **97.5 % against the ranker's 98.8 %**: slightly below the ranker. Before the fix
+(PR #5) it scored 82.0 % against 97.2 %: incident alarm IDs repeated across batch runs, so silver had dropped about
+20 % of the holdout's alarms, and the assistant, looking for corroborating alarms, abstained or blamed a neighbour
+(`evidence/step4/09_holdout_alarm_gap.md`, `10_holdout_rerun.md`). The ranker therefore stays the system of record.
 No hallucinated root survives the guard. SMS drafts are 100 % rule-compliant (98 % at the model's first try). About
 6.5 s and 5.6 k tokens per incident. 6 of 6 live guardrail tests (prompt injection, PII leaks) were blocked or
 neutralised.

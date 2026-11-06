@@ -214,7 +214,8 @@ def evaluation_doc(r: Runner) -> None:
 `banksia-genai-evaluate` runs `mlflow.genai.evaluate` over the evaluation set: one grounded context per scored step-3
 incident that had a case output at the SLA moment. **Dev** = `history_1m` 2026-10-14 … 10-15 (prompt iteration
 happened here only). **Holdout** = `holdout_1m` 2026-10-17 … 10-18, run **once** with the frozen prompts (the job
-refuses to re-run it). Ground truth reaches only the scorers (`expectations`). Assistant `{EP}`; LLM judges
+refuses to re-run it without `force=true` and a recorded reason). These are the PR #6 runs: after the alarm ID fix the
+evaluation set was rebuilt and the holdout re-run once (reason in `rerun_reason`; old vs new in `10_holdout_rerun.md`). Ground truth reaches only the scorers (`expectations`). Assistant `{EP}`; LLM judges
 `{gateway.JUDGE_ENDPOINT}` (another model family). Definitions: `netmon_pipeline.genai.scorers`.
 
 - `llm_root_agreement_pct`: the assistant's root is in the valid root list; "uncertain" counts as a miss.

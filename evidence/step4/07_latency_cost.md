@@ -1,6 +1,6 @@
 # Latency and cost
 
-Captured 2026-11-06 02:27 UTC from workspace profile `febar` by `scripts/capture_evidence_step4.py`.
+Captured 2026-11-06 08:13 UTC from workspace profile `febar` by `scripts/capture_evidence_step4.py`.
 
 Latency is measured client side per incident (summary call + SMS call(s), job -> endpoint), from the evaluation
 results. Tokens come from the responses (and match the gateway's usage tracking). Cost: pay-per-token DBUs that
@@ -18,7 +18,7 @@ SELECT count(*) AS n, round(percentile(latency_ms, 0.5)) AS p50_ms, round(percen
 
 | n | p50_ms | p95_ms | max_ms | prompt_tokens_mean | completion_tokens_mean | calls_per_incident |
 |---|---|---|---|---|---|---|
-| 346 | 6411.0 | 8012.0 | 21350.0 | 4896.0 | 772.0 | 2.02 |
+| 346 | 6014.0 | 7289.0 | 8501.0 | 4887.0 | 776.0 | 2.03 |
 
 _1 row(s)_
 
@@ -33,7 +33,7 @@ SELECT count(*) AS n, round(percentile(latency_ms, 0.5)) AS p50_ms, round(percen
 
 | n | p50_ms | p95_ms | max_ms | prompt_tokens_mean | completion_tokens_mean | calls_per_incident |
 |---|---|---|---|---|---|---|
-| 323 | 6606.0 | 7925.0 | 9098.0 | 4705.0 | 791.0 | 2.02 |
+| 323 | 6307.0 | 7406.0 | 8300.0 | 4824.0 | 759.0 | 2.0 |
 
 _1 row(s)_
 
@@ -48,8 +48,8 @@ SELECT purpose, count(*) AS n, round(percentile(latency_ms, 0.5)) AS p50_ms,
 
 | purpose | n | p50_ms | p95_ms | prompt_tokens | completion_tokens |
 |---|---|---|---|---|---|
-| noc_summary | 1044 | 5232.0 | 6501.0 | 4218.0 | 723.0 |
-| sms_drafts | 1071 | 1223.0 | 1672.0 | 581.0 | 49.0 |
+| noc_summary | 1741 | 5065.0 | 6337.0 | 4258.0 | 725.0 |
+| sms_drafts | 1786 | 1209.0 | 1649.0 | 581.0 | 49.0 |
 
 _2 row(s)_
 
@@ -67,9 +67,12 @@ SELECT usage_date, sku_name, usage_unit, round(sum(usage_quantity), 4) AS dbus,
 
 | usage_date | sku_name | usage_unit | dbus | usd_at_list_price |
 |---|---|---|---|---|
-| 2026-11-05 | ENTERPRISE_SERVERLESS_REAL_TIME_INFERENCE_US_EAST_N_VIRGINIA | DBU | 0.0000 | 0.0000 |
+| 2026-11-05 | ENTERPRISE_OPENAI_MODEL_SERVING | DBU | 0.3105 | 0.0217 |
+| 2026-11-05 | ENTERPRISE_SERVERLESS_REAL_TIME_INFERENCE_US_EAST_N_VIRGINIA | DBU | 0.0004 | 0.0000 |
+| 2026-11-06 | ENTERPRISE_OPENAI_MODEL_SERVING | DBU | 188.2638 | 13.1785 |
+| 2026-11-06 | ENTERPRISE_SERVERLESS_REAL_TIME_INFERENCE_US_EAST_N_VIRGINIA | DBU | 0.0630 | 0.0044 |
 
-_1 row(s)_
+_4 row(s)_
 
 ## Gateway usage tracking: tokens on the endpoint (this workspace)
 
@@ -82,6 +85,6 @@ SELECT count(*) AS requests, sum(u.input_token_count) AS input_tokens, sum(u.out
 
 | requests | input_tokens | output_tokens |
 |---|---|---|
-| 3543 | 8372962 | 1249535 |
+| 4315 | 10235708 | 1545632 |
 
 _1 row(s)_
