@@ -1,7 +1,7 @@
 """Last line of defence on every API response: no subscriber identifier and no ground-truth label leaves the app.
 
 The app's sources hold neither (Lakebase serves the ranker's and the assistant's outputs; the UC views exclude
-sessions and the eval schema), so in normal operation nothing is removed. `scrub` still drops any forbidden column
+sessions and the ground-truth schema), so in normal operation nothing is removed. `scrub` still drops any forbidden column
 by name, at any depth, and redacts raw IMSI / MSISDN-shaped values, so a future query or a Genie answer cannot leak
 them through the app. Tests cover both.
 """

@@ -33,15 +33,15 @@
         ]
       },
       {
-        "id": "65a76af30f24628490e61064e6b40f7b",
-        "question": [
-          "What is the scored time to detect by fault type on the live feed?"
-        ]
-      },
-      {
         "id": "934b5e40b7c3977a3f96a309f08d184a",
         "question": [
           "Which cell sites are down right now?"
+        ]
+      },
+      {
+        "id": "aa6d564aa8e68c9c5c920fd79dcf9403",
+        "question": [
+          "What is the time to detect by fault type?"
         ]
       },
       {
@@ -66,41 +66,6 @@
   },
   "data_sources": {
     "tables": [
-      {
-        "identifier": "telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary",
-        "description": [
-          "EVALUATION SCORECARD (ground-truth scored, national NOC only): detection KPIs per generator run, event class and fault type: share of faults detected, median / p90 time to detect, share within 5 minutes, root-cause localisation. Use only for 'scored' / 'official' detection KPI questions, never for live incident lists."
-        ],
-        "column_configs": [
-          {
-            "column_name": "event_class",
-            "enable_format_assistance": true,
-            "enable_entity_matching": true
-          },
-          {
-            "column_name": "fault_type",
-            "enable_format_assistance": true,
-            "enable_entity_matching": true
-          },
-          {
-            "column_name": "impact_median_ttd_s",
-            "description": [
-              "Median time to detect customer impact, seconds (scored against ground truth)"
-            ]
-          },
-          {
-            "column_name": "impact_within_5min_pct",
-            "description": [
-              "Share of scored faults whose customer impact was detected within 5 minutes (%)"
-            ]
-          },
-          {
-            "column_name": "source_run",
-            "enable_format_assistance": true,
-            "enable_entity_matching": true
-          }
-        ]
-      },
       {
         "identifier": "telco_netmon_febar_catalog.netmon_noc.customer_sms_drafts",
         "description": [
@@ -418,9 +383,8 @@
           "  \"Detected within 5 minutes\" = detected_within_5min (SLA 300 s). Report seconds and minutes. This operational TTD\n",
           "  starts at the first anomaly visible in the telemetry, so for slowly ramping faults (backhaul degradation) the\n",
           "  true time to detect is longer; mention that when the user asks about backhaul or about SLA compliance.\n",
-          "- The ground-truth scored detection KPIs (the \"official\" scorecard) are in netmon_eval.eval_ttd_summary: use\n",
-          "  source_run = 'stream' (the live feed), event_class = 'fault' and fault_type = 'ALL' for the headline unless a\n",
-          "  fault type is asked. Say these are evaluation figures.\n",
+          "- Detection KPIs by fault type: group incident_detection_times joined to incident_ai_summary.fault_hypothesis\n",
+          "  (the assistant's fault class); this space has no scored / ground-truth figures, say so if asked for them.\n",
           "- MTTR (mean time to repair / restore) cannot be computed: the space only holds currently open incidents, no\n",
           "  resolved ones. Say so and offer the incident age instead (max(last_scored_ts) - detected_ts).\n",
           "- Impacted subscribers: use incident_ai_summary.est_affected_subscribers (estimate, aggregate). Impacted cells:\n",
@@ -476,18 +440,6 @@
         ]
       },
       {
-        "id": "604704b74c36ab9893993017236290c4",
-        "question": [
-          "What is the scored detection SLA of the live feed?"
-        ],
-        "sql": [
-          "SELECT n_incidents, impact_detected_pct, impact_median_ttd_s, impact_p90_ttd_s, impact_within_5min_pct,\n",
-          "       root_localised_pct, localised_within_5min_pct\n",
-          "FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary\n",
-          "WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"
-        ]
-      },
-      {
         "id": "a45207a1f87694b643125b88bba740e3",
         "question": [
           "What share of open incidents was detected within 5 minutes, and what is the MTTD?"
@@ -535,6 +487,18 @@
           "WHERE state IN ('down', 'degraded')\n",
           "ORDER BY CASE state WHEN 'down' THEN 0 ELSE 1 END, rca_score DESC NULLS LAST, n_impacted_cells DESC\n",
           "LIMIT 10"
+        ]
+      },
+      {
+        "id": "f10d8bc4d25be163bb3cd9f2cddedaac",
+        "question": [
+          "What is the time to detect by fault type?"
+        ],
+        "sql": [
+          "SELECT a.fault_hypothesis, count(*) AS n_incidents, round(avg(d.time_to_detect_s), 1) AS mttd_s,\n",
+          "       round(100 * avg(CASE WHEN d.detected_within_5min THEN 1 ELSE 0 END), 1) AS pct_detected_within_5min\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times d JOIN telco_netmon_febar_catalog.netmon_noc.incident_ai_summary a ON a.incident_id = d.incident_id\n",
+          "GROUP BY a.fault_hypothesis ORDER BY mttd_s DESC"
         ]
       }
     ],
@@ -678,13 +642,6 @@
     "sql_snippets": {
       "filters": [
         {
-          "id": "2bb2b9bbf9e6e94a998e9e64a3cece28",
-          "sql": [
-            "eval_ttd_summary.source_run = 'stream' AND eval_ttd_summary.event_class = 'fault' AND eval_ttd_summary.fault_type = 'ALL'"
-          ],
-          "display_name": "scorecard headline"
-        },
-        {
           "id": "4bcbc35556f0f2a100d5ec317beefddb",
           "sql": [
             "element_status.state IN ('down', 'degraded')"
@@ -749,6 +706,20 @@
             "format": "SQL",
             "content": [
               "SELECT element_type, count(*) AS n_down FROM telco_netmon_febar_catalog.netmon_noc.element_status WHERE state = 'down' GROUP BY element_type ORDER BY n_down DESC"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "1eb59f5f625917fc05a9a78cf793266f",
+        "question": [
+          "What is the average time to detect per region, in seconds?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT region_code, round(avg(time_to_detect_s), 1) AS mttd_s FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times GROUP BY region_code ORDER BY region_code"
             ]
           }
         ]
@@ -922,20 +893,6 @@
         ]
       },
       {
-        "id": "c2b599f95b5aed6fdecc2c6015486c70",
-        "question": [
-          "What is the scored median time to detect per fault type on the live feed?"
-        ],
-        "answer": [
-          {
-            "format": "SQL",
-            "content": [
-              "SELECT fault_type, impact_median_ttd_s FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type <> 'ALL' ORDER BY fault_type"
-            ]
-          }
-        ]
-      },
-      {
         "id": "c9ad45368ba672095e082aee99a20573",
         "question": [
           "Which element types does the aggregation router AGG-NSW-04 serve directly?"
@@ -950,15 +907,15 @@
         ]
       },
       {
-        "id": "d5eb8c250dc6dbcd1e92f28c15582a43",
+        "id": "dfd5b5be3fa061e65ba980033d3a1e3c",
         "question": [
-          "What is the scored share of faults detected within 5 minutes on the live feed?"
+          "What is the average time to detect for backhaul incidents?"
         ],
         "answer": [
           {
             "format": "SQL",
             "content": [
-              "SELECT impact_within_5min_pct FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"
+              "SELECT round(avg(d.time_to_detect_s), 1) AS mttd_s FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times d JOIN telco_netmon_febar_catalog.netmon_noc.open_incidents o ON o.incident_id = d.incident_id WHERE o.suspect_1_type = 'BACKHAUL_LINK'"
             ]
           }
         ]

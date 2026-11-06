@@ -98,19 +98,19 @@ class FakeStore:
         return [s for s in reversed(self.saved) if s["incident_id"] == incident_id and s["region_code"] in regions]
 
     def ping(self):
-        return {"pg_user": "app-sp", "open_incidents": len(self.rows)}
+        return {"pg_user": "app-sp", "server_time": "2026-11-07T00:00:00Z"}
 
 
 class FakeWarehouse:
     """Answers the app's UC queries; `regions_by_token` stands in for the row filter of the netmon_noc views."""
 
-    def __init__(self, regions_by_token=None, scorecard_denied_for=()):
+    def __init__(self, regions_by_token=None):
         self.regions_by_token = regions_by_token or {"tok-national": ["NSW", "VIC"], "tok-nsw": ["NSW"]}
-        self.scorecard_denied_for = set(scorecard_denied_for)
         self.calls: list[tuple] = []
 
     def query(self, user_token, sql, params=None):
         self.calls.append((user_token, sql, params))
+        assert "netmon_eval" not in sql and "{eval}" not in sql, "the app must never query ground truth"
         visible = self.regions_by_token.get(user_token, [])
         if sql == wh.REGION_SCOPE_SQL:
             return [{"region_code": r} for r in visible]
@@ -122,10 +122,6 @@ class FakeWarehouse:
         if sql == wh.KPI_SQL:
             return [{"region_code": r, "n_open_incidents": 1, "mttd_s": 160.0, "pct_detected_within_5min": 100.0}
                     for r in visible]
-        if sql == wh.SCORECARD_SQL:
-            if user_token in self.scorecard_denied_for:
-                raise PermissionError("PERMISSION_DENIED: User does not have USE SCHEMA on netmon_eval")
-            return [{"n_incidents": 26, "impact_within_5min_pct": 88.5, "impact_median_ttd_s": 141.4}]
         raise AssertionError(f"unexpected SQL {sql}")
 
 

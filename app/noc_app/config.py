@@ -16,7 +16,6 @@ def _host() -> str:
 class Settings:
     catalog: str = field(default_factory=lambda: os.environ.get("NETMON_CATALOG", "telco_netmon_febar_catalog"))
     noc_schema: str = field(default_factory=lambda: os.environ.get("NETMON_NOC_SCHEMA", "netmon_noc"))
-    eval_schema: str = field(default_factory=lambda: os.environ.get("NETMON_EVAL_SCHEMA", "netmon_eval"))
     warehouse_id: str = field(default_factory=lambda: os.environ.get("DATABRICKS_WAREHOUSE_ID", ""))
     genie_space_id: str = field(default_factory=lambda: os.environ.get("GENIE_SPACE_ID", ""))
     lakebase_instance: str = field(default_factory=lambda: os.environ.get("LAKEBASE_INSTANCE", ""))
@@ -35,7 +34,3 @@ class Settings:
     @property
     def noc(self) -> str:
         return f"{self.catalog}.{self.noc_schema}"
-
-    @property
-    def eval(self) -> str:
-        return f"{self.catalog}.{self.eval_schema}"

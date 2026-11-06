@@ -37,10 +37,6 @@ async function loadKpis() {
   try {
     const k = await api("/api/kpis");
     const tiles = k.operational.map((r) => `<div class="kpi"><b>${num(r.mttd_s, 0)} s</b><span>${esc(r.region_code)} MTTD · ${num(r.pct_detected_within_5min, 0)} % ≤ 5 min · ${r.n_open_incidents} open</span></div>`);
-    const sc = k.scorecard;
-    tiles.push(sc && sc.available
-      ? `<div class="kpi"><b>${num(sc.impact_within_5min_pct, 1)} %</b><span>scored: faults detected ≤ 5 min (median ${num(sc.impact_median_ttd_s, 0)} s, evaluation)</span></div>`
-      : `<div class="kpi"><b>n/a</b><span>scored KPI: national NOC only</span></div>`);
     $("#kpis").innerHTML = tiles.join("");
   } catch (e) { $("#kpis").innerHTML = `<span class="err">KPIs: ${esc(e.message)}</span>`; }
 }

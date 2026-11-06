@@ -85,11 +85,12 @@ def cli_token(profile: str) -> str:
     return json.loads(out.stdout)["access_token"]
 
 
-def app_call(url: str, token: str, path: str, body: dict | None = None) -> tuple[int, dict, float]:
+def app_call(url: str, token: str, path: str, body: dict | None = None,
+             extra_headers: dict | None = None) -> tuple[int, dict, float]:
     import httpx
 
     t0 = time.perf_counter()
-    h = {"Authorization": f"Bearer {token}"}
+    h = {"Authorization": f"Bearer {token}", **(extra_headers or {})}
     resp = (httpx.post(url + path, json=body, headers=h, timeout=240) if body is not None
             else httpx.get(url + path, headers=h, timeout=240))
     try:
@@ -336,10 +337,11 @@ Latest run of each job that writes the incident tables, with everything that run
             names_[x["job_id"]] = "?"
     t.text("Job IDs: " + ", ".join(f"`{k}` = `{v}`" for k, v in names_.items()) + ".")
 
-    # ---- 11: ground truth check ----------------------------------------------------------------------------------
-    t.hop("Check against the generator's ground truth (evaluation only)", """
-Not used by anything above: the app, Genie's operational views, the ranker's features and the assistant never read
-`netmon_eval`. Shown here only to confirm the trace followed a real fault:""")
+    # ---- 11: final verification against ground truth (never shown by the app or Genie) ---------------------------
+    t.hop("FINAL VERIFICATION against the generator's ground truth (not part of the operational path)", """
+Everything above is operational: the app, the Genie space, the ranker's features and the assistant never read
+`netmon_eval`, and no number above comes from it (enforced by `tests/test_no_ground_truth_surface.py`). This section
+alone reads ground truth, after the fact, to confirm the trace followed a real fault:""")
     gt = t.sql(f"""SELECT incident_id, event_class, fault_type, root_element_ids, impact_start_ts, impact_end_ts,
                           is_censored, n_affected_cells, estimated_impacted_subscribers, description
                    FROM {EV}.eval_gt_incidents
@@ -357,7 +359,7 @@ Not used by anything above: the app, Genie's operational views, the ranker's fea
                f"detect of {ops:.0f} s shown by the app and Genie, which can only start at the first anomaly visible "
                "in the telemetry (a lower bound when a fault ramps up slowly before any KPI rule fires). The incident is `is_censored` when the "
                "live run ended before the fault cleared; censored incidents are excluded from the scored KPIs "
-               "(`eval_ttd_summary`), which is why this open incident is not in that scorecard.")
+               "(`eval_ttd_summary`, an offline evaluation table), which is why this open incident is not in them.")
     t.write(a.out)
 
 

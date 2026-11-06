@@ -96,7 +96,7 @@ CREATE OR REPLACE VIEW ${noc_schema}.incident_detection_times (
   detected_within_5min COMMENT 'time_to_detect_s <= 300',
   n_detection_rows COMMENT 'Detection rows (KPI or alarm) on the suspect subtree in that window'
 )
-COMMENT 'Operational time to detect / localise per open incident (GT-free; the ground-truth-scored KPI is netmon_eval.eval_ttd_summary)'
+COMMENT 'Operational time to detect / localise per open incident, from the build''s own telemetry (no ground truth)'
 AS WITH d AS (
   SELECT i.incident_id, i.source_run, i.region_code, i.suspect_1_id, i.detected_ts AS incident_detected_ts,
          g.signal_start_ts,

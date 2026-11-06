@@ -133,9 +133,6 @@ def test_app_sources_never_reference_sessions_or_raw_ground_truth():
         assert "silver_sessions" not in src, f
         for gt in ("eval_gt_incidents", "bronze_gt_", "eval_incident_detection", "genai_eval_labels"):
             assert gt not in src, (f, gt)
-    # the only eval-schema read is the labelled KPI scorecard
-    wsrc = (ROOT / "app" / "noc_app" / "warehouse.py").read_text()
-    assert re.findall(r"\{eval\}\.(\w+)", wsrc) == ["eval_ttd_summary"]
 
 
 def test_app_yaml_and_bundle_declare_the_resources():

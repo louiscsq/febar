@@ -2,7 +2,7 @@
 
 The Apps proxy forwards the user's downscoped token (`x-forwarded-access-token`, scope `sql`). Queries run as that
 user, so the `netmon_noc` views' regional row filter and the user's grants decide what comes back: a regional NOC
-user gets only their region's topology, and the evaluation scorecard only answers for the national role.
+user gets only their region's topology and incidents. Nothing here reads the ground-truth schema.
 
 Used for reference data and analytics, not the hot path: the region scope of the user, the network inventory of a
 region (cached: it changes with network builds, not by the minute), operational detection timing per incident and
@@ -32,11 +32,6 @@ KPI_SQL = """
 SELECT region_code, count(*) AS n_open_incidents, round(avg(time_to_detect_s), 1) AS mttd_s,
        round(100 * avg(CASE WHEN detected_within_5min THEN 1 ELSE 0 END), 1) AS pct_detected_within_5min
 FROM {noc}.incident_detection_times GROUP BY region_code ORDER BY region_code"""
-
-SCORECARD_SQL = """
-SELECT n_incidents, impact_detected_pct, impact_median_ttd_s, impact_p90_ttd_s, impact_within_5min_pct,
-       root_localised_pct, localised_within_5min_pct
-FROM {eval}.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"""
 
 
 class Warehouse(Protocol):
@@ -72,7 +67,7 @@ class SqlWarehouse:
         from databricks.sdk.service.sql import StatementParameterListItem, StatementState
 
         w = self._client(user_token)
-        stmt = sql.format(noc=self.s.noc, eval=self.s.eval)
+        stmt = sql.format(noc=self.s.noc)
         p = [StatementParameterListItem(name=k, value=str(v)) for k, v in (params or {}).items()]
         r = w.statement_execution.execute_statement(statement=stmt, warehouse_id=self.s.warehouse_id,
                                                     parameters=p or None, wait_timeout="30s")

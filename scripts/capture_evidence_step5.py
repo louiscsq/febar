@@ -81,8 +81,7 @@ The NOC Genie space as deployed by the bundle (`resources/genie.yml`, body gener
               "benchmark_questions": len(s["benchmarks"]["questions"])}])
     d.table([{"table": t["identifier"], "description": t["description"][0],
               "column_configs": len(t.get("column_configs", []))} for t in s["data_sources"]["tables"]],
-            note="Tables (every operational one is a region-filtered `netmon_noc` view; the eval scorecard is "
-                 "labelled):", max_cell=260)
+            note="Tables (all region-filtered `netmon_noc` views; no ground-truth table):", max_cell=260)
     d.h("Sample questions")
     d.text("\n".join(f"- {q['question'][0]}" for q in s["config"]["sample_questions"]))
     d.h("General instructions")
@@ -118,6 +117,20 @@ removed).""")
         "`/api/health` round-trips to Lakebase as the app service principal; then 20 timed calls of the hot-path "
         "endpoints (warm):")
     d.http("GET /api/health", app_call(a.url, tok, "/api/health"))
+    d.h("Forwarded-header trust boundary (spoofing attempt)",
+        "The app takes the user's identity from `x-forwarded-email` / `x-forwarded-access-token`, set by the Databricks "
+        "Apps proxy. Here the client sends its own (spoofed) values for both headers through the proxy, with a valid "
+        "login token for the capturing user; `/api/me` reports which identity the backend actually received:")
+    spoof = {"x-forwarded-email": "spoofed.attacker@banksia.example",
+             "x-forwarded-preferred-username": "spoofed.attacker", "x-forwarded-access-token": "spoofed-token"}
+    code, body, _ = app_call(a.url, tok, "/api/me", extra_headers=spoof)
+    d.code({"request": "GET /api/me with spoofed x-forwarded-* headers", "sent_headers": spoof, "http_status": code,
+            "body": body})
+    seen = body.get("user") if isinstance(body, dict) else None
+    d.text(f"Backend saw user `{seen}`: the spoofed email was "
+           f"{'**overwritten by the proxy**' if seen != spoof['x-forwarded-email'] else '**NOT overwritten (finding)**'}"
+           f"; the region scope {body.get('regions') if isinstance(body, dict) else None} came from Unity Catalog with "
+           "the proxy-forwarded token (a spoofed token would have failed the UC query).")
     lat = {}
     for path in ("/api/incidents?region=NSW", f"/api/incidents/{INCIDENT}",
                  f"/api/regions/NSW/topology?incident_id={INCIDENT}"):
@@ -346,10 +359,9 @@ The capturing user is `{me.user_name}`: a member of `noc_national` (sees every r
   groups (docs/pipeline.md). Unity Catalog cannot grant to them; the row filter tests their membership with
   `is_member()`, which is what changes the regional view above. With account groups nothing in the app changes.
 - **Grant-level denial is not visible with this user.** The capturing user owns the catalog, so after the switch it
-  still reads tables a real `noc_region_nsw` member has no grant on: the evaluation scorecard (`/api/kpis` ->
-  `scorecard`) stays available above, where a regional member would get `PERMISSION_DENIED` (the app shows "national
-  NOC only"; unit-tested in `tests/test_app_service.py::test_kpis_scorecard_is_national_only`). Regional roles' grants
-  are `netmon_noc` only (`governance/sql/03_grants_regional.sql`).
+  could still read base tables a real `noc_region_nsw` member has no grant on. The app and Genie only read
+  `netmon_noc` views, where the row filter (not ownership) decides, so the regional view above is what a regional
+  member gets; regional roles' grants are `netmon_noc` only (`governance/sql/03_grants_regional.sql`).
 - **No second human user / persona login.** The persona service principals (`netmon-noc-nsw-analyst`, ...) cannot be
   used interactively here (no OAuth secret creation for this session, as in step 2), and the Apps proxy forwards a
   user token only for interactive users, so the regional view is shown by changing the capturing user's membership.

@@ -59,16 +59,13 @@ def test_governed_objects_only():
     tables = [t["identifier"] for t in s["data_sources"]["tables"]]
     for t in tables:
         schema = t.split(".")[1]
-        assert schema == "netmon_noc" or t == f"{CAT}.netmon_eval.eval_ttd_summary", t
+        assert schema == "netmon_noc", t
     blob = json.dumps(s).lower()
     for bad in g.FORBIDDEN_IDENTIFIERS:
         assert bad not in blob, bad
     for pii in ("imsi", "msisdn", "subscriber_key"):
         # only mentioned in the refusal instruction, never as a table or column
         assert all(pii not in json.dumps(t).lower() for t in s["data_sources"]["tables"]), pii
-    # the scorecard is labelled as evaluation in its description
-    ev = next(t for t in s["data_sources"]["tables"] if "eval_ttd_summary" in t["identifier"])
-    assert ev["description"][0].startswith("EVALUATION SCORECARD")
 
 
 def test_every_sql_references_only_space_tables():

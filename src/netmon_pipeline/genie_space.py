@@ -7,8 +7,8 @@ general instructions, join hints, SQL snippets, trusted example SQL, sample ques
 
 Governance: every operational table is a `netmon_noc` view that applies the regional row filter for the user who
 asks (Genie runs queries as the asking user), and none of them carries IMSI / MSISDN (no session table is in the
-space). The only ground-truth table is the evaluation scorecard `netmon_eval.eval_ttd_summary`: aggregate KPI
-scoring per run and fault type, labelled as such, readable by the national NOC role only.
+space). No ground truth: nothing in the space reads the `netmon_eval` schema (ground truth is used only to verify
+the build, in the evidence scripts), which tests/test_no_ground_truth_surface.py enforces.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import hashlib
 import json
 
 NOC = "netmon_noc"
-EVAL = "netmon_eval"
 
 TITLE = "Banksia NOC: incidents, network health and detection KPIs"
 DESCRIPTION = (
@@ -80,13 +79,6 @@ TABLES: list[tuple[str, str, str, dict[str, str], list[str]]] = [
      "Network alarms (fault management events) with severity, alarm code, element and its ancestors.",
      {"is_service_down": "True for element-down alarm codes (NODE_DOWN, NE_UNREACHABLE, CELL_OUT_OF_SERVICE, ...)"},
      ["alarm_code", "severity", "element_type", "region_code"]),
-    (EVAL, "eval_ttd_summary",
-     "EVALUATION SCORECARD (ground-truth scored, national NOC only): detection KPIs per generator run, event class "
-     "and fault type: share of faults detected, median / p90 time to detect, share within 5 minutes, root-cause "
-     "localisation. Use only for 'scored' / 'official' detection KPI questions, never for live incident lists.",
-     {"impact_within_5min_pct": "Share of scored faults whose customer impact was detected within 5 minutes (%)",
-      "impact_median_ttd_s": "Median time to detect customer impact, seconds (scored against ground truth)"},
-     ["event_class", "fault_type", "source_run"]),
 ]
 
 INSTRUCTIONS = """\
@@ -116,9 +108,8 @@ KPIs:
   "Detected within 5 minutes" = detected_within_5min (SLA 300 s). Report seconds and minutes. This operational TTD
   starts at the first anomaly visible in the telemetry, so for slowly ramping faults (backhaul degradation) the
   true time to detect is longer; mention that when the user asks about backhaul or about SLA compliance.
-- The ground-truth scored detection KPIs (the "official" scorecard) are in netmon_eval.eval_ttd_summary: use
-  source_run = 'stream' (the live feed), event_class = 'fault' and fault_type = 'ALL' for the headline unless a
-  fault type is asked. Say these are evaluation figures.
+- Detection KPIs by fault type: group incident_detection_times joined to incident_ai_summary.fault_hypothesis
+  (the assistant's fault class); this space has no scored / ground-truth figures, say so if asked for them.
 - MTTR (mean time to repair / restore) cannot be computed: the space only holds currently open incidents, no
   resolved ones. Say so and offer the incident age instead (max(last_scored_ts) - detected_ts).
 - Impacted subscribers: use incident_ai_summary.est_affected_subscribers (estimate, aggregate). Impacted cells:
@@ -136,7 +127,7 @@ customer_sms_drafts is the full draft history (several per incident, including s
 history questions such as "how many drafts were written".
 """
 
-# Trusted example SQL (also used by Genie as patterns). Placeholders: {noc}, {eval}.
+# Trusted example SQL (also used by Genie as patterns). Placeholder: {noc}.
 EXAMPLE_SQL: list[tuple[str, str]] = [
     ("What is the time to detect for each open incident?",
      "SELECT incident_id, region_code, suspect_1_id, first_impact_signal_ts, first_detection_ts,\n"
@@ -156,10 +147,11 @@ EXAMPLE_SQL: list[tuple[str, str]] = [
      "       sum(a.est_affected_subscribers) AS est_affected_subscribers, sum(o.n_impacted_cells) AS impacted_cells\n"
      "FROM {noc}.incident_ai_summary a JOIN {noc}.open_incidents o ON o.incident_id = a.incident_id\n"
      "GROUP BY a.region_code ORDER BY est_affected_subscribers DESC"),
-    ("What is the scored detection SLA of the live feed?",
-     "SELECT n_incidents, impact_detected_pct, impact_median_ttd_s, impact_p90_ttd_s, impact_within_5min_pct,\n"
-     "       root_localised_pct, localised_within_5min_pct\nFROM {eval}.eval_ttd_summary\n"
-     "WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"),
+    ("What is the time to detect by fault type?",
+     "SELECT a.fault_hypothesis, count(*) AS n_incidents, round(avg(d.time_to_detect_s), 1) AS mttd_s,\n"
+     "       round(100 * avg(CASE WHEN d.detected_within_5min THEN 1 ELSE 0 END), 1) AS pct_detected_within_5min\n"
+     "FROM {noc}.incident_detection_times d JOIN {noc}.incident_ai_summary a ON a.incident_id = d.incident_id\n"
+     "GROUP BY a.fault_hypothesis ORDER BY mttd_s DESC"),
     ("Show the top-3 suspects of every open incident",
      "SELECT incident_id, region_code, detected_ts, suspect_1_id, round(suspect_1_score, 2) AS suspect_1_score,\n"
      "       suspect_2_id, round(suspect_2_score, 2) AS suspect_2_score, suspect_3_id,\n"
@@ -184,7 +176,7 @@ SAMPLE_QUESTIONS = [
     "Which backhaul links are degraded?",
     "What does the AI summary recommend for the North Queensland incident?",
     "Show the customer SMS drafts waiting for approval",
-    "What is the scored time to detect by fault type on the live feed?",
+    "What is the time to detect by fault type?",
     "Which alarms were raised on SITE-NSW-00105 and its cells?",
 ]
 
@@ -198,8 +190,6 @@ MEASURES = [
 FILTERS = [
     ("live feed", "gold_impact_detections.source_run = 'stream'"),
     ("failing elements", "element_status.state IN ('down', 'degraded')"),
-    ("scorecard headline", "eval_ttd_summary.source_run = 'stream' AND eval_ttd_summary.event_class = 'fault' "
-                           "AND eval_ttd_summary.fault_type = 'ALL'"),
 ]
 EXPRESSIONS = [
     ("detected_sydney_time", "detected (Sydney time)", "from_utc_timestamp(open_incidents.detected_ts, 'Australia/Sydney')"),
@@ -259,12 +249,12 @@ BENCHMARKS: list[tuple[str, str]] = [
      "WHERE region_code = 'NQL'"),
     ("How many SMS drafts are waiting for approval?",
      "SELECT count(*) AS n_drafts FROM {noc}.incident_ai_summary WHERE sms_draft_status = 'draft'"),
-    ("What is the scored share of faults detected within 5 minutes on the live feed?",
-     "SELECT impact_within_5min_pct FROM {eval}.eval_ttd_summary "
-     "WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"),
-    ("What is the scored median time to detect per fault type on the live feed?",
-     "SELECT fault_type, impact_median_ttd_s FROM {eval}.eval_ttd_summary WHERE source_run = 'stream' "
-     "AND event_class = 'fault' AND fault_type <> 'ALL' ORDER BY fault_type"),
+    ("What is the average time to detect per region, in seconds?",
+     "SELECT region_code, round(avg(time_to_detect_s), 1) AS mttd_s FROM {noc}.incident_detection_times "
+     "GROUP BY region_code ORDER BY region_code"),
+    ("What is the average time to detect for backhaul incidents?",
+     "SELECT round(avg(d.time_to_detect_s), 1) AS mttd_s FROM {noc}.incident_detection_times d "
+     "JOIN {noc}.open_incidents o ON o.incident_id = d.incident_id WHERE o.suspect_1_type = 'BACKHAUL_LINK'"),
     ("How many customer-impact detections did the live feed produce per signal source?",
      "SELECT signal_source, count(*) AS n_detections FROM {noc}.gold_impact_detections "
      "WHERE source_run = 'stream' GROUP BY signal_source ORDER BY signal_source"),
@@ -273,8 +263,8 @@ BENCHMARKS: list[tuple[str, str]] = [
      "GROUP BY element_type"),
 ]
 
-FORBIDDEN_IDENTIFIERS = ("silver_sessions", "bronze_", "eval_gt_incidents", "bronze_gt_incidents",
-                         "eval_incident_detection", "genai_eval_labels", "rca_training_labels")
+FORBIDDEN_IDENTIFIERS = ("silver_sessions", "bronze_", "netmon_eval", "eval_ttd_summary", "eval_gt_incidents",
+                         "bronze_gt_incidents", "eval_incident_detection", "genai_eval_labels", "rca_training_labels")
 
 
 def _id(*parts: str) -> str:
@@ -289,10 +279,10 @@ def _lines(text: str) -> list[str]:
 
 
 def build_space(catalog: str) -> dict:
-    noc, ev = f"{catalog}.{NOC}", f"{catalog}.{EVAL}"
+    noc = f"{catalog}.{NOC}"
 
     def fill(sql: str) -> str:
-        return sql.format(noc=noc, eval=ev)
+        return sql.format(noc=noc)
 
     tables = []
     for schema, name, desc, cols, entity in TABLES:
@@ -352,5 +342,5 @@ def to_json(catalog: str) -> str:
 
 def benchmark_sql(catalog: str) -> dict[str, str]:
     """question -> expected SQL (catalog-qualified)."""
-    noc, ev = f"{catalog}.{NOC}", f"{catalog}.{EVAL}"
-    return {q: s.format(noc=noc, eval=ev) for q, s in BENCHMARKS}
+    noc = f"{catalog}.{NOC}"
+    return {q: s.format(noc=noc) for q, s in BENCHMARKS}

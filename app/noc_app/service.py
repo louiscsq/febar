@@ -230,15 +230,8 @@ class NocService:
 
     # ---- analytics and Genie -----------------------------------------------------------------------------------
     def kpis(self, user: User) -> dict:
-        out: dict[str, Any] = {"operational": [], "scorecard": None}
-        out["operational"] = self.wh.query(user.token, wh.KPI_SQL)
-        try:
-            rows = self.wh.query(user.token, wh.SCORECARD_SQL)
-            out["scorecard"] = {"available": True, "label": "evaluation (ground-truth scored, live feed)",
-                                **(rows[0] if rows else {})}
-        except Exception as e:  # noqa: BLE001 - regional roles hold no grant on the eval schema
-            out["scorecard"] = {"available": False, "reason": str(e)[:200]}
-        return out
+        """Operational detection KPIs per region (netmon_noc.incident_detection_times, as the user). No ground truth."""
+        return {"operational": self.wh.query(user.token, wh.KPI_SQL)}
 
     def ask_genie(self, user: User, question: str, conversation_id: str | None = None) -> dict:
         q = (question or "").strip()

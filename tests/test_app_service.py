@@ -157,13 +157,12 @@ def test_review_table_cannot_record_a_send():
 
 # ---- KPIs and Genie ------------------------------------------------------------------------------------------------
 
-def test_kpis_scorecard_is_national_only():
-    s = svc(warehouse=FakeWarehouse(scorecard_denied_for={"tok-nsw"}))
+def test_kpis_are_operational_only_and_scoped_by_uc():
+    s = svc()
     k = s.kpis(NATIONAL)
-    assert k["scorecard"]["available"] and k["scorecard"]["impact_within_5min_pct"] == 88.5
-    k = s.kpis(NSW)
-    assert [r["region_code"] for r in k["operational"]] == ["NSW"]
-    assert k["scorecard"]["available"] is False and "PERMISSION_DENIED" in k["scorecard"]["reason"]
+    assert set(k) == {"operational"}  # no ground-truth scorecard
+    assert [r["region_code"] for r in k["operational"]] == ["NSW", "VIC"]
+    assert [r["region_code"] for r in s.kpis(NSW)["operational"]] == ["NSW"]
 
 
 def test_genie_runs_as_the_user():

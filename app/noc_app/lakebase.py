@@ -163,6 +163,5 @@ class LakebaseStore:
         return self._all(REVIEWS_SQL, {"incident_id": incident_id, "regions": regions})
 
     def ping(self) -> dict:
-        r = self._all("SELECT current_user AS pg_user, now() AS server_time, "
-                      "(SELECT count(*) FROM netmon_rca.lb_open_incidents) AS open_incidents", {})
-        return r[0]
+        """Connection status only: the Postgres role and server time (no data, so nothing to region-scope)."""
+        return self._all("SELECT current_user AS pg_user, now() AS server_time", {})[0]
