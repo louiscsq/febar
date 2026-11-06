@@ -1,0 +1,80 @@
+# Step 5: the Banksia NOC topology Databricks App (app/, docs/topology_app.md).
+# Identities:
+#   - app service principal: Lakebase (hot path reads + the SMS review write) via the `database` resource, which
+#     creates its Postgres role with CONNECT + CREATE on netmon_serving; SELECT on the synced tables is granted by
+#     the app_lakebase_grants job (notebooks/13_app_lakebase_grants.py). CAN_USE on the warehouse, CAN_RUN on Genie.
+#   - signed-in user (on-behalf-of, user_api_scopes): every Unity Catalog read through the SQL warehouse and every
+#     Genie question, so the netmon_noc views' regional row filter and the user's own grants apply.
+resources:
+  apps:
+    noc_topology:
+      name: ${var.app_name}
+      description: "Banksia NOC: network topology, failing-element pinpoint, incident panel, SMS draft review, Ask Genie"
+      source_code_path: ../app
+      user_api_scopes:
+        - sql
+        - dashboards.genie
+      resources:
+        - name: database
+          description: Lakebase serving database (synced incident / element-status / AI tables + SMS reviews)
+          database:
+            instance_name: ${resources.database_instances.netmon_lakebase.name}
+            database_name: ${var.lakebase_database}
+            permission: CAN_CONNECT_AND_CREATE
+        - name: sql-warehouse
+          description: Serverless SQL warehouse for UC reads (as the user) and the Genie space
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: genie-space
+          description: NOC Genie space (resources/genie.yml)
+          genie_space:
+            name: noc_genie
+            space_id: ${resources.genie_spaces.noc_genie.id}
+            permission: CAN_RUN
+      # NOC roles may open the app; their data scope comes from UC (see the identity notes above).
+      permissions:
+        - group_name: noc_national
+          level: CAN_USE
+        - group_name: noc_region_nsw
+          level: CAN_USE
+        - group_name: noc_region_vic
+          level: CAN_USE
+        - group_name: noc_region_qld
+          level: CAN_USE
+        - group_name: noc_region_wa
+          level: CAN_USE
+        - group_name: noc_region_sa
+          level: CAN_USE
+        - group_name: noc_region_tas
+          level: CAN_USE
+        - group_name: noc_region_act
+          level: CAN_USE
+        - group_name: noc_region_nt
+          level: CAN_USE
+        - group_name: noc_region_nql
+          level: CAN_USE
+        - group_name: noc_region_pil
+          level: CAN_USE
+
+  jobs:
+    # Postgres grants for the app's service principal on the synced tables (run after the app is deployed and
+    # after a synced table is recreated). Idempotent; no secrets (OAuth database credential of the job's identity).
+    app_lakebase_grants:
+      name: banksia-app-lakebase-grants
+      parameters:
+        - {name: app_name, default: "${var.app_name}"}
+        - {name: instance, default: "${resources.database_instances.netmon_lakebase.name}"}
+        - {name: database, default: "${var.lakebase_database}"}
+      environments:
+        - environment_key: app_grants
+          spec:
+            client: "4"
+            dependencies:
+              - databricks-sdk>=0.81
+              - psycopg[binary]>=3.2
+      tasks:
+        - task_key: grants
+          environment_key: app_grants
+          notebook_task:
+            notebook_path: ../notebooks/13_app_lakebase_grants.py

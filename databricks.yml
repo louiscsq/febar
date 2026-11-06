@@ -78,6 +78,12 @@ variables:
   rca_model_version:
     description: UC model version served by the endpoint (the one the `champion` alias points at)
     default: "5"
+  # Step 5 (Genie space + topology app)
+  warehouse_id:
+    description: Serverless SQL warehouse for the Genie space and the app's analytics panels
+    default: d7fa853ab15b20a3
+  app_name:
+    default: banksia-noc-topology
 
 targets:
   dev:
