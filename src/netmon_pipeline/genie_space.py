@@ -113,7 +113,9 @@ NQL Australia/Brisbane, WA Australia/Perth) when the user asks for local time.
 
 KPIs:
 - Time to detect (TTD) per incident = incident_detection_times.time_to_detect_s (seconds). MTTD = AVG of it.
-  "Detected within 5 minutes" = detected_within_5min (SLA 300 s). Report seconds and minutes.
+  "Detected within 5 minutes" = detected_within_5min (SLA 300 s). Report seconds and minutes. This operational TTD
+  starts at the first anomaly visible in the telemetry, so for slowly ramping faults (backhaul degradation) the
+  true time to detect is longer; mention that when the user asks about backhaul or about SLA compliance.
 - The ground-truth scored detection KPIs (the "official" scorecard) are in netmon_eval.eval_ttd_summary: use
   source_run = 'stream' (the live feed), event_class = 'fault' and fault_type = 'ALL' for the headline unless a
   fault type is asked. Say these are evaluation figures.

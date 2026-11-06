@@ -120,6 +120,7 @@ def test_label_list_matches_step3_labels():
 @pytest.mark.parametrize(("text", "clean"), [
     (f"imsi {RAW_IMSI}.", "imsi [redacted]."), (f"tel {RAW_MSISDN}", "tel [redacted]"),
     ("masked 00101********33 / +999******961", "masked 00101********33 / +999******961"),
+    ("6.000000476837158 cells, score 0.123456789012345", "6.000000476837158 cells, score 0.123456789012345"),
     ("CELL-NSW-00105-4G1 at 2026-10-09T00:10:42Z, 420 subs", "CELL-NSW-00105-4G1 at 2026-10-09T00:10:42Z, 420 subs"),
 ])
 def test_redaction(text, clean):

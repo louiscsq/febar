@@ -22,8 +22,9 @@ LABEL_COLUMNS = frozenset({
 })
 FORBIDDEN_COLUMNS = PII_COLUMNS | LABEL_COLUMNS
 
-# Raw identifiers: a 15-digit IMSI, or an E.164 MSISDN. Masked values (00101********33, +999******961) do not match.
-_IMSI = re.compile(r"(?<!\d)\d{15}(?!\d)")
+# Raw identifiers: a standalone 15-digit IMSI (not the fraction of a decimal number such as 6.000000476837158), or
+# an E.164 MSISDN. Masked values (00101********33, +999******961) do not match.
+_IMSI = re.compile(r"(?<!\d)(?<!\d\.)\d{15}(?!\d)(?!\.\d)")
 _MSISDN = re.compile(r"\+\d{8,15}(?!\d)")
 REDACTED = "[redacted]"
 

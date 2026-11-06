@@ -91,7 +91,7 @@ CREATE OR REPLACE VIEW ${noc_schema}.incident_detection_times (
   first_impact_signal_ts COMMENT 'Start of the first anomalous KPI period or alarm on the suspect subtree (UTC)',
   first_detection_ts COMMENT 'When the first customer-impact detection was available to the NOC (UTC)',
   incident_detected_ts COMMENT 'When the ranker opened the incident and named the suspects (UTC)',
-  time_to_detect_s COMMENT 'Operational MTTD sample: first_detection_ts - first_impact_signal_ts, seconds',
+  time_to_detect_s COMMENT 'Operational MTTD sample: first_detection_ts - first_impact_signal_ts, seconds. Starts at the first anomaly visible in telemetry, so a lower bound for slowly ramping faults',
   time_to_localise_s COMMENT 'incident_detected_ts - first_impact_signal_ts, seconds (minute resolution)',
   detected_within_5min COMMENT 'time_to_detect_s <= 300',
   n_detection_rows COMMENT 'Detection rows (KPI or alarm) on the suspect subtree in that window'
