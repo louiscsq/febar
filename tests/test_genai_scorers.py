@@ -52,3 +52,16 @@ def test_summary_metrics():
     assert m["latency_p50_ms"] == 1000.0
     by = evaluation.summarise(pd.DataFrame(rows), by="fault_type")
     assert list(by["group"]) == ["ALL", "BACKHAUL_DEGRADATION"]
+
+
+def test_judge_values_are_read_from_trace_assessments():
+    class Res:
+        result_df = pd.DataFrame([{
+            "request": {"ctx": {"incident": {"ref": "EVAL-dev-1"}}},
+            "assessments": [{"assessment_name": "groundedness", "feedback": {"value": "no"}, "rationale": "x unsupported"},
+                            {"assessment_name": "sms_guidelines", "feedback": {"value": "yes"}, "rationale": "ok"},
+                            {"assessment_name": "root_agreement", "feedback": {"value": True}}]}])
+
+    got = evaluation._judge_values(Res())
+    assert got == {"EVAL-dev-1": {"groundedness": False, "groundedness_rationale": "x unsupported",
+                                  "sms_guidelines": True, "sms_guidelines_rationale": "ok"}}

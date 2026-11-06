@@ -184,4 +184,180 @@ always parseable into the pydantic models.
 **Judge: `databricks-claude-sonnet-5-5`** (another model family, to avoid self-preference; the judges use free-form
 output, which Claude supports).
 
+## Governance: AI Gateway, guardrails, tracing
+
+**Where the gateway sits.** Every LLM call goes to the Databricks-hosted pay-per-token endpoint
+`databricks-gpt-5-4-mini`, with AI Gateway configured on that endpoint from code (`genai/gateway.py`, applied by
+`scripts/genai_configure_gateway.py`; the live config is dumped in `evidence/step4/01_gateway_config.md`). A
+dedicated, bundle-managed endpoint was not possible here (see [Workspace limitations](#workspace-limitations)).
+Calls use the caller's own Databricks identity (job identity, app service principal, or a signed-in user); no
+token is stored anywhere.
+
+| AI Gateway feature | setting | status |
+|---|---|---|
+| usage tracking | on | per-request tokens in `system.serving.endpoint_usage`; `client_request_id` = the assistant's `X-Request-Id` |
+| rate limits | 600 calls / min per endpoint, 300 per user | on (the evaluation runs 8 workers, ~120 calls / min) |
+| PII guardrail, input | BLOCK | on: a prompt carrying an MSISDN / IMSI is blocked (`06_guardrail_tests.md` 2b) |
+| PII guardrail, output | BLOCK | on |
+| safety guardrail, output | on | on |
+| safety guardrail, input | **off** | false positives: benign NOC prompts (telemetry + runbooks) flagged "violent-crimes" 3 / 3 times on the same request |
+| inference table | requested | **fails server-side** on this workspace; replaced by the request log below |
+
+### Guardrails
+
+Two layers. The deterministic layer (`genai/guards.py`) runs on every call, so the behaviour does not depend on what
+the gateway supports, and it is unit-tested. The gateway layer is a safety net on the wire.
+
+| risk | deterministic (code) | gateway |
+|---|---|---|
+| **prompt injection** in alarm free text (typed by operators, sent by equipment) | `sanitize_free_text`: control chars stripped, PII redacted, truncated to 120 chars; instruction-like text (ignore / override instructions, role markers, "root cause is …", "reply only …", "send … to all customers", template tokens) is withheld and flagged; the prompt says context strings are data, never instructions | (input safety off, see above) |
+| model **acting on** an injection anyway | the root can only be a suspect or `uncertain`; unknown element IDs scrubbed; SMS rules (no operator names, no blame, no unsupported ETA) | output safety |
+| **PII** in a prompt | aggregates only, column allowlists, redaction, `assert_no_pii` before every call (IMSI, MSISDN / E.164 / AU numbers, e-mail) | input PII BLOCK |
+| **PII** in a response | `check_sms` (PII patterns) | output PII BLOCK |
+| **hallucinated** elements / numbers | `validate_summary` | |
+| a blocked or failed call | deterministic fallback summary / template SMS, `generated_by` recorded | |
+
+Live results (`evidence/step4/06_guardrail_tests.md`): an injection planted in a real incident's alarm text is
+withheld (1a) and, with the sanitiser bypassed on purpose, the answer stays a suspect and the SMS stays compliant (1b);
+an IMSI / MSISDN in alarm text is redacted (2a); a prompt carrying them is blocked by the gateway's PII guardrail (2b)
+and by the pre-send check (2c); asking the model to put phone numbers into an SMS is blocked (2d).
+
+**Gateway PII false positives.** The gateway's PII detector is a statistical model. It read a z-score `-10.292` and
+a count `168.0` as phone numbers and blocked those prompts: 3 / 40 dev prompts at 3-decimal precision, 0 / 40 after
+rounding (1–2 decimals, integer counts). A blocked call falls back to the ranker's view; the evaluation reports the
+fallback rate.
+
+### Request / response logging (in place of the inference table)
+
+`llm.RequestLog` appends one row per call to `netmon_genai.noc_assistant_request_log`: request ID (also sent as
+`X-Request-Id`, so it joins the gateway's usage rows), time, endpoint, purpose, prompt version, incident reference,
+status (`ok` / `blocked` / `error` / `invalid_json`), error (the gateway's guardrail verdict when blocked), latency,
+attempts, tokens, the request JSON's SHA-256, the full request and the raw response. Sample rows:
+`evidence/step4/02_inference_log.md`.
+
+### MLflow Tracing
+
+`assistant.run` (span `AGENT` "noc_assistant") → `summarise` and `draft_sms` (`CHAIN`) → `llm.chat_json` (`LLM`,
+with endpoint, status, tokens and prompt version as attributes). The jobs set the experiment
+`/Shared/banksia_netmon/noc_assistant`, so every live summary and every evaluation case is a trace there; the
+evaluation runs link their traces to the assessments.
+
+## Evaluation
+
+**Set** (`notebooks/08_genai_build_evalset.py`): one case per scored step-3 incident that had a case output at the SLA
+moment, i.e. the same case and decision time step 3 judged its top-1 on (`rca_eval_{split}_ranking`), with the frozen
+champion v4's GT-free scores. **Dev** = `history_1m` 2026-10-14 … 10-15: 346 of 355 scored incidents. **Holdout** =
+step 3's fresh `holdout_1m` (2026-10-17 … 10-18): 323 of 337. The context table (`netmon_genai.genai_eval_contexts`)
+holds no ground truth; the labels (`netmon_eval.genai_eval_labels`) are joined only by the scorers.
+
+**Protocol.** Prompt iteration on dev only: a 40-case random sample, then the 12 dev cases where the ranker's top-1 is
+wrong (to see whether the LLM fixes or breaks them), then two hand-built dev situations below the alert threshold
+(`03b_early_and_ambiguous_examples.md`), which led to prompt v2. The final dev run and then the holdout run used the
+frozen prompts (`noc_summary_v2`, `sms_v1`). The holdout was run **once**; the job refuses to re-run it without
+`force=true`.
+
+**Scorers** (`genai/scorers.py`). Ground truth reaches them as `expectations`; `predict_fn` sees `inputs.context` only.
+
+| measure | how | type |
+|---|---|---|
+| root-cause agreement | assistant's root ∈ valid root list (any listed element counts); `uncertain` = miss | code |
+| vs the ranker's top-1 alone | ranker's suspect #1 ∈ valid roots on the same contexts; per case: same / changed to correct / changed correct to wrong / uncertain on correct / … | code |
+| selective accuracy | agreement on the cases the assistant answered | code |
+| hallucinated root / element | raw output (before repair) named a root that is not a suspect / any element ID not in the context | code |
+| evidence validity | share of cited context paths that exist | code |
+| fault-hypothesis match | hypothesis maps to the true fault type | code |
+| SMS compliance | final drafts compliant; the LLM's own drafts compliant at the first try / after the repair round | code |
+| groundedness | every claim in the summary, evidence and impact sentence supported by the context; next steps only refer to context elements | LLM judge (`make_judge`, Claude Sonnet 5.5) |
+| SMS guidelines | plain, calm, apologetic, blame-free, jargon-free, no unsupported ETA | LLM judge (`Guidelines`, Claude Sonnet 5.5) |
+| latency | per incident: summary + SMS call(s), p50 / p95 | code |
+| tokens / cost | per incident, from the responses; DBUs from billing | code |
+
 RESULTS_PLACEHOLDER
+
+## Outputs, serving to the app, trigger
+
+| table (`telco_netmon_febar_catalog.netmon_genai`) | write | content |
+|---|---|---|
+| `incident_ai_summaries` | append | every NOC summary: incident, `generated_at`, `status = 'draft'`, endpoint, prompt / context / ranker versions, the structured output, guard report, latency, tokens, and the context it was grounded on |
+| `customer_notice_drafts` | append | one SMS draft per incident × region: text, rule check, `status = 'draft'`, `requires_human_approval = true`, `approved_by` / `approved_at` / `sent_at` NULL (never sent) |
+| `incident_ai_latest` | MERGE, Change Data Feed | latest summary + SMS draft per **open** incident (closed ones deleted) |
+| `lb_incident_ai_latest` | synced table (TRIGGERED) | `incident_ai_latest` in Lakebase: database `netmon_serving`, schema `netmon_genai` |
+| `noc_assistant_request_log` | append | every LLM request / response |
+| `genai_eval_contexts`, `genai_eval_results_{dev,holdout}`, `genai_eval_summary_{dev,holdout}` | overwrite | evaluation |
+
+**For the step-5 app.**
+- *Fast path*: read Lakebase with psycopg and an OAuth database credential, next to step 3's tables:
+  `SELECT … FROM netmon_rca.lb_open_incidents i LEFT JOIN netmon_genai.lb_incident_ai_latest a USING (incident_id)
+  WHERE i.region_code = %s` (`notebooks/11_genai_lakebase_check.py` runs exactly this; p50 / p95 in `05_outputs_and_lakebase.md`).
+- *On demand* ("refresh this summary"): `netmon_pipeline.genai.service.summarise_open_incident(incident_id, ws,
+  warehouse_id)` builds the context through a SQL warehouse and calls the governed endpoint as the app's identity;
+  it returns the summary, SMS drafts, guard report and context and writes nothing.
+
+**Trigger: why a table-update trigger.** `banksia-genai-assistant` runs when `netmon_rca.open_incidents` changes (each
+scoring run's MERGE; at most once a minute), and only calls the LLM for incidents that are new or whose suspects /
+ranker version changed (`store.suspects_signature`); unchanged incidents are copied over at no cost.
+
+| option | cost | latency to a summary | why not |
+|---|---|---|---|
+| **table-update trigger + change detection (chosen)** | a serverless job start per scoring run (seconds of compute when nothing changed) + ~2 LLM calls per new incident | one job start after detection (~1–4 min) | |
+| a task inside `banksia-rca-score-live` | same LLM cost | lowest | couples the ranker's publish to the LLM: a gateway block or rate limit would fail the scoring run |
+| fixed schedule (e.g. every 5 min) | idle job starts even when nothing changed | up to the schedule period | pays when idle |
+| only on demand from the app | LLM cost only when a user asks | 6–8 s at click time | no summary waiting in Lakebase, no audit trail of what the NOC was shown |
+| summarise every open incident every run | ~2 LLM calls × open incidents × runs | lowest | pays again for unchanged incidents (17 open incidents × 60 runs/h ≈ 2,000 calls/h) |
+
+## Deploy and run
+
+```bash
+databricks bundle validate -t dev -p febar && databricks bundle deploy -t dev -p febar
+python scripts/genai_configure_gateway.py --profile febar --no-inference-table   # AI Gateway on the endpoint
+databricks bundle run -p febar genai_build_evalset                              # contexts + labels (dev, holdout)
+python scripts/genai_eval_local.py --profile febar --warehouse <id> --limit 40  # dev iteration only
+databricks bundle run -p febar genai_evaluate --params split=dev               # final dev run
+databricks bundle run -p febar genai_evaluate --params split=holdout           # once
+databricks bundle run -p febar genai_assistant                                 # also fires on open_incidents updates
+databricks bundle run -p febar genai_lakebase_check                            # psycopg read-back + latency
+python scripts/genai_guardrail_tests.py --profile febar --warehouse <id>       # live guardrail tests
+python scripts/genai_early_example.py --profile febar --warehouse <id>         # below-threshold examples (dev)
+python scripts/capture_evidence_step4.py --profile febar --warehouse <id>      # evidence/step4
+```
+
+The first `genai_assistant` run creates `incident_ai_latest`; the synced table (`resources/genai.synced_tables.yml`)
+needs it to exist, so on a fresh workspace deploy once more after that run.
+
+## Known limits
+
+- **The ranker does the hard part.** On these synthetic runs the ranker's top-1 is right about 96 % of the time on
+  the evaluated cases, so the assistant mostly explains and operationalises the ranker's answer. Its accuracy
+  contribution is small (see Results), and it could equally lose accuracy on a network where the ranker is weaker
+  and the signals are messier. Keep the ranker's suspects next to the assistant's choice in the UI.
+- **Same synthetic generator.** The runbooks and signatures in the prompt describe this generator's fault types. A real
+  NOC would replace them with its own runbooks (ideally retrieved, not inlined) and evaluate on its own incidents.
+- **Matched case.** Like step 3, the evaluation grades the case ground truth matched by footprint overlap at the SLA
+  moment; incidents without a case output (dev 9, holdout 14) are not in the LLM evaluation and count as misses in the
+  "all scored incidents" rows.
+- **Subscriber counts are estimates**: peak connected users per impacted cell over the last hour, not unique
+  subscribers; the sampled xDR failures are a 1 % sample.
+- **Gateway PII detector**: statistical, so a residual rate of false-positive blocks on numeric telemetry remains;
+  the fallback gives the ranker's view, but no LLM summary, for those incidents.
+- **Judges are LLMs too**: groundedness and SMS-guideline verdicts come from Claude Sonnet 5.5 and were not
+  hand-audited beyond the worked examples.
+- **Live run.** The open incidents are step 3's static `stream` run (2026-10-08); no new live stream was started, so
+  the table-update trigger was exercised by manual runs rather than by a continuous scorer.
+
+## Workspace limitations
+
+- **No dedicated governed endpoint.** The pay-per-token Claude / GPT / Gemini models are not eligible for provisioned
+  throughput on this workspace (`get-model-optimization-info`: `optimizable: false`), and an external-model endpoint
+  pointing back at them needs a stored API token. So AI Gateway is configured on the shared pay-per-token endpoint
+  `databricks-gpt-5-4-mini` itself (this FEVM workspace serves only this project). Its config is code
+  (`genai/gateway.py`), not a bundle resource, because bundles cannot manage system endpoints.
+- **Inference tables fail to enable.** `PUT /api/2.0/serving-endpoints/databricks-gpt-5-4-mini/ai-gateway` with
+  `inference_table_config` returns `500 INTERNAL_ERROR java.nio.channels.ClosedChannelException` (request
+  `1e3b343b-f98f-4784-a001-b5a9e67826a0`), on `netmon_genai` and on `netmon_rca`, after creating an empty
+  `<prefix>_payload` table (dropped again). Replaced by `noc_assistant_request_log` (same content) plus the gateway's
+  usage tracking.
+- **Input safety guardrail unusable** for this content (false positives above); prompt injection is handled in code.
+- **No `CREATE CATALOG`** (as in step 3): the synced table is registered in the project catalog
+  (`netmon_genai.lb_incident_ai_latest`).
+- **System tables are account-wide** on this workspace: the evidence filters every system-table query to this
+  workspace's ID and the assistant endpoint.

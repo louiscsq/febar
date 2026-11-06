@@ -8,7 +8,6 @@ import json
 import os
 import threading
 
-import numpy as np
 import pandas as pd
 
 from netmon_pipeline.genai import assistant, gateway, llm, scorers
@@ -71,27 +70,43 @@ def run(case_list: list[dict], ws, run_name: str, endpoint: str = gateway.ASSIST
 
 
 def _judge_values(result) -> dict[str, dict]:
-    """eval_id -> {groundedness: bool, sms_guidelines: bool} from the evaluation result traces."""
+    """eval_id -> {groundedness: bool, groundedness_rationale, sms_guidelines: bool, ...} from the assessments that
+    the judges attached to the evaluation run's traces (`mlflow.search_traces(run_id=...)`, spans not needed)."""
+    import mlflow
+
     out: dict[str, dict] = {}
-    try:
-        df = result.result_df
-    except Exception:  # noqa: BLE001
-        return out
-    if df is None or df.empty:
-        return out
-    for _, r in df.iterrows():
-        req = r.get("request")
+    df = getattr(result, "result_df", None)
+    if df is None or "assessments" not in getattr(df, "columns", []):
         try:
-            ref = (req if isinstance(req, dict) else json.loads(req))["context"]["incident"]["ref"]
-        except Exception:  # noqa: BLE001
+            run_id = getattr(result, "run_id", None) or mlflow.active_run().info.run_id
+            df = mlflow.search_traces(run_id=run_id, max_results=5000, include_spans=False)
+        except Exception as e:  # noqa: BLE001 - judges are optional; the code scorers do not depend on this
+            print("judge assessments not readable:", str(e)[:200])
+            return out
+    for _, r in df.iterrows():
+        ref = _ref(r.get("request"))
+        if ref is None:
             continue
-        vals = {}
-        for name in ("groundedness", "sms_guidelines"):
-            v = r.get(f"{name}/value")
-            if v is not None and not (isinstance(v, float) and np.isnan(v)):
-                vals[name] = v if isinstance(v, bool) else str(v).strip().lower() in ("yes", "true", "pass")
+        vals: dict = {}
+        for a in r.get("assessments") or []:
+            a = a if isinstance(a, dict) else a.to_dictionary()
+            name = a.get("assessment_name") or a.get("name")
+            if name not in ("groundedness", "sms_guidelines"):
+                continue
+            v = (a.get("feedback") or {}).get("value")
+            vals[name] = v if isinstance(v, bool) else str(v).strip().lower() in ("yes", "true", "pass")
+            vals[f"{name}_rationale"] = (a.get("rationale") or "")[:1000]
         out[ref] = vals
     return out
+
+
+def _ref(req) -> str | None:
+    try:
+        req = req if isinstance(req, dict) else json.loads(req)
+        ctx = req.get("context") or req.get("ctx")
+        return ctx["incident"]["ref"]
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _pct(x: pd.Series) -> float | None:

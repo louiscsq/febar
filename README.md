@@ -92,3 +92,24 @@ different, weaker framing.
 See [`docs/rca_model.md`](docs/rca_model.md) for features, labels, split, model choice, the evaluation protocol,
 results against the step-2 localiser, serving and the Lakebase design, and [`evidence/step3/`](evidence/step3/)
 for the captured run.
+
+## Gen AI NOC assistant and customer SMS drafts (step 4)
+
+For an open incident, an LLM (`databricks-gpt-5-4-mini`, Databricks Foundation Model API) drafts a root-cause
+summary with evidence, runbook next steps and customer impact for the NOC, plus one proactive outage SMS per affected
+region for human approval (never sent by the system). The context is assembled only from the build's own tables
+(the ranker's top-3 and their signals, topology, alarms, KPI deviation, subscriber counts by region and segment), with
+no per-subscriber data and no ground truth (both tested). Calls go through AI Gateway (PII guardrails, output safety,
+rate limits, usage tracking), are MLflow traced and are checked by deterministic guards: the root cause must be a
+suspect or "uncertain", unknown element IDs are scrubbed, and SMS rules are enforced. Results land in Unity Catalog
+(`netmon_genai`) and in Lakebase for the topology app (`src/netmon_pipeline/genai/`).
+
+```bash
+python scripts/genai_configure_gateway.py --profile febar --no-inference-table
+databricks bundle run -p febar genai_build_evalset && databricks bundle run -p febar genai_evaluate --params split=dev
+databricks bundle run -p febar genai_assistant      # also triggered by every open_incidents update
+```
+
+STEP4_HEADLINE
+
+See [`docs/genai_assistant.md`](docs/genai_assistant.md) and [`evidence/step4/`](evidence/step4/).
