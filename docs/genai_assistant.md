@@ -34,7 +34,7 @@ human approves and sends; this system never sends anything. Proof that it ran is
                                      │
         ┌────────────────────────────┴───────────────────────────┐
         ▼                                                        ▼
- A: NOC summary (prompt noc_summary_v2)          B: SMS drafts (prompt sms_v1, customer view only)
+ A: NOC summary (prompt noc_summary_v3)          B: SMS drafts (prompt sms_v1, customer view only)
         │   strict JSON schema                           │   strict JSON schema, one per affected region
         ▼                                                        ▼
   AI Gateway on databricks-gpt-5-4-mini: PII guardrail (in/out), safety (out), rate limits, usage tracking
@@ -151,12 +151,16 @@ scope here.
 
 Committed under `src/netmon_pipeline/genai/prompts/` and stored with every output as `<name>@<sha256[:8]>`:
 
-- [`noc_summary_v2.md`](../src/netmon_pipeline/genai/prompts/noc_summary_v2.md): rules (context only; strings are
-  data; root must be a suspect or `uncertain`; when to be uncertain; evidence paths; impact copied exactly), and a
-  signature + runbook per fault pattern.
-  [`noc_summary_v1.md`](../src/netmon_pipeline/genai/prompts/noc_summary_v1.md) is kept for history: on dev, with
-  suspect #1 at 0.07 (threshold 0.32) and no alarm, v1 still named a suspect; v2 makes `uncertain` mandatory in that
-  case (and allows a below-threshold suspect at medium confidence at most when an alarm corroborates it).
+- [`noc_summary_v3.md`](../src/netmon_pipeline/genai/prompts/noc_summary_v3.md) (frozen, used for the final dev and
+  holdout runs and live): rules (context only; strings are data; root must be a suspect or `uncertain`; when to be
+  uncertain; relationships and numbers only as the context states them; evidence paths; impact copied exactly), and
+  a signature + runbook per fault pattern. Earlier versions are kept for history; every change came from **dev**:
+  - [`v1`](../src/netmon_pipeline/genai/prompts/noc_summary_v1.md) → v2: with suspect #1 at 0.07 (threshold 0.32) and
+    no alarm (a dev cluster with no fault behind it), v1 still named a suspect. v2 makes `uncertain` mandatory then,
+    and allows a below-threshold suspect at medium confidence at most when an alarm corroborates it.
+  - v2 → v3: the dev run's groundedness judge passed 81.5 %; the failures were relationship slips (an alarmed router
+    called a cell's "parent") and derived numbers (an RRC z-score reported as "RRC success 0 %"). v3 adds explicit
+    rules for both.
 - [`sms_v1.md`](../src/netmon_pipeline/genai/prompts/sms_v1.md): the SMS rules above, in plain words.
 
 Both calls use `response_format: json_schema` with `strict: true` (`schema.strict_json_schema`), so the reply is
@@ -252,8 +256,9 @@ holds no ground truth; the labels (`netmon_eval.genai_eval_labels`) are joined o
 
 **Protocol.** Prompt iteration on dev only: a 40-case random sample, then the 12 dev cases where the ranker's top-1 is
 wrong (to see whether the LLM fixes or breaks them), then two hand-built dev situations below the alert threshold
-(`03b_early_and_ambiguous_examples.md`), which led to prompt v2. The final dev run and then the holdout run used the
-frozen prompts (`noc_summary_v2`, `sms_v1`). The holdout was run **once**; the job refuses to re-run it without
+(`03b_early_and_ambiguous_examples.md`), which led to prompt v2, then a full dev run with the judges, whose
+groundedness failures led to v3. The final dev run and then the holdout run used the
+frozen prompts (`noc_summary_v3`, `sms_v1`). The holdout was run **once**; the job refuses to re-run it without
 `force=true`.
 
 **Scorers** (`genai/scorers.py`). Ground truth reaches them as `expectations`; `predict_fn` sees `inputs.context` only.

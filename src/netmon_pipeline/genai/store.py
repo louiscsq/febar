@@ -45,9 +45,10 @@ REQUEST_LOG_DDL = (
 
 
 def suspects_signature(row: dict) -> str:
-    """Identity of what the summary was grounded on: the suspects and the ranker version. A new summary is generated
-    only when this changes (new incident, re-ranked suspects, new model)."""
-    return "|".join(str(row.get(k) or "") for k in ("suspect_1_id", "suspect_2_id", "suspect_3_id", "model_version"))
+    """Identity of what the summary was grounded on and how: the suspects, the ranker version and the prompt version.
+    A new summary is generated only when this changes (new incident, re-ranked suspects, new model, new prompt)."""
+    keys = ("suspect_1_id", "suspect_2_id", "suspect_3_id", "model_version")
+    return "|".join([*(str(row.get(k) or "") for k in keys), assistant.prompt(assistant.NOC_PROMPT)[1]])
 
 
 def rows_for(inc: dict, ctx: dict, res: assistant.AssistantResult, generated_at: pd.Timestamp
