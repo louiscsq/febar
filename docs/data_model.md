@@ -441,7 +441,9 @@ natural key:
 | `incident_id` | `INC-00001` … | not used as a record key; ground truth is keyed by (`source_run`, `incident_id`) everywhere |
 
 The **run key** is `GeneratorConfig.run_id` when set (the jobs pass the landing sub-directory, i.e. the pipeline's
-`source_run`; CLI `--run-id`), else `<mode>/seed/network seed/window start/days/step`. Same run, same key, same bytes.
+`source_run`; CLI `--run-id`), else a digest of every other config field (scale, seeds, window, faults, DQ rates,
+format, …) plus the mode and window start, so two runs that differ in any parameter never share IDs. Same run, same
+key, same bytes.
 Event-time ties are broken by the ID *without* the run key, so a different run id changes only the IDs: event order
 and DQ defect assignment stay the same. KPI and session IDs are time-qualified on purpose: two runs over the same
 simulated minutes would also collide in the append-only, event-time-watermarked health and session windows, so

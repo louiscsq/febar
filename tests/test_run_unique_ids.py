@@ -15,7 +15,7 @@ import pytest
 
 from conftest import read_table, tiny_cfg
 from netmon_datagen.batch import generate_history
-from netmon_datagen.config import FaultConfig
+from netmon_datagen.config import DQConfig, FaultConfig
 from netmon_pipeline.dedupe import WatermarkDeduper
 
 FAULTS = FaultConfig(rate_multiplier=50)  # plenty of incidents (and incident alarms) on the tiny network
@@ -77,6 +77,10 @@ def test_run_id_changes_only_the_ids(runs):
         pd.testing.assert_frame_equal(read_table(a, table), read_table(b, table), obj=table)
     strip = lambda df: df.drop(columns=ALARM_IDS).reset_index(drop=True)  # noqa: E731
     pd.testing.assert_frame_equal(strip(read_table(a, "alarms")), strip(read_table(b, "alarms")))
+    mw_a, mw_b = read_table(a, "maintenance_windows"), read_table(b, "maintenance_windows")
+    assert len(mw_a)  # the change calendar is non-empty, so this checks something
+    pd.testing.assert_frame_equal(mw_a.drop(columns="change_id"), mw_b.drop(columns="change_id"),
+                                  obj="maintenance_windows")
     log_a, log_b = read_table(a, "ground_truth/dq_injections"), read_table(b, "ground_truth/dq_injections")
     pd.testing.assert_frame_equal(log_a.drop(columns="record_id"), log_b.drop(columns="record_id"))
     keep = log_a["feed"] != "alarms"
@@ -88,13 +92,27 @@ def test_same_run_is_deterministic(runs):
         pd.testing.assert_frame_equal(read_table(runs["a"], table), read_table(runs["a_again"], table), obj=table)
 
 
-def test_default_run_key_depends_on_seed_and_window():
+def test_default_run_key_depends_on_every_generation_parameter():
     base = tiny_cfg()
-    keys = {base.run_key("batch", "w0"), base.with_(seed=7).run_key("batch", "w0"),
-            base.run_key("batch", "w1"), base.with_(topology_seed=9).run_key("batch", "w0"),
-            base.with_(days=1).run_key("batch", "w0")}
-    assert len(keys) == 5
+    variants = [base, base.with_(seed=7), base.with_(topology_seed=9), base.with_(days=1), base.with_(step_minutes=1),
+                base.with_(fmt="json"), base.with_(dq=DQConfig.none()), base.with_(dq=DQConfig().scaled(2)),
+                base.with_(faults=FaultConfig(rate_multiplier=200)), base.with_(faults=FaultConfig(enabled=False)),
+                base.with_(faults=FaultConfig(min_per_type=0)), tiny_cfg(start="2026-09-05")]
+    keys = [c.run_key("batch", "w0") for c in variants]
+    assert len(set(keys)) == len(variants)
+    assert base.run_key("batch", "w1") != base.run_key("batch", "w0")
+    assert base.run_key("stream", "w0") != base.run_key("batch", "w0")
+    # stable: equal configs give the same key (also across processes: no hash randomisation involved)
+    assert tiny_cfg().run_key("batch", "w0") == base.run_key("batch", "w0")
     assert base.with_(run_id="holdout_1m").run_key("batch", "w0") == "holdout_1m"
+
+
+def test_same_seed_and_window_different_parameters_do_not_collide(tmp_path):
+    """No run id: two runs that differ only in a fault / DQ parameter still get disjoint alarm IDs."""
+    a = _gen(tmp_path / "a", days=1)
+    b = _gen(tmp_path / "b", days=1, dq=DQConfig().scaled(2))
+    assert _incident_alarm_ids(a) and not _ids(a, "alarms", "record_id") & _ids(b, "alarms", "record_id")
+    assert not _ids(a, "maintenance_windows", "change_id") & _ids(b, "maintenance_windows", "change_id")
 
 
 def test_step3_like_runs_have_disjoint_ids(runs):
@@ -152,3 +170,15 @@ def test_injected_duplicates_still_share_their_record_id(runs):
     assert (counts.reindex(dup_ids).fillna(0) >= 2).all()
     # and nothing else repeats
     assert set(counts[counts > 1].index) <= set(dup_ids)
+
+
+def test_replace_check_legacy_change_id_matches_the_pre_fix_scheme():
+    from netmon_datagen.faults import opaque_id
+    from netmon_pipeline import replace_check
+
+    assert replace_check.legacy_change_id("INC-00001") == opaque_id("CHG", "INC-00001")  # pre-fix: no run key
+    assert replace_check.legacy_change_id("INC-00001") != opaque_id("CHG", "holdout_1m", "INC-00001")
+    q = replace_check.checks("cat", ["history_1m", "holdout_1m"], "r2", ["CHG-0"])
+    assert {"superseded_rows_bronze_maintenance_windows", "legacy_change_ids", "duplicate_maintenance_windows",
+            "silver_vs_bronze_maintenance", "fanout_unexplained_gold_impact_detections"} <= set(q)
+    assert all("'history_1m', 'holdout_1m'" in s for s in q.values())

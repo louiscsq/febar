@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import zlib
 from dataclasses import dataclass, field, replace
 
@@ -118,7 +120,7 @@ class GeneratorConfig:
     faults: FaultConfig = field(default_factory=FaultConfig)
     # Run identity mixed into every event ID that would otherwise repeat between runs (alarm and change IDs are
     # derived from per-run incident counters `INC-00001`, ...). Jobs pass the landing sub-directory, which is the
-    # pipeline's `source_run`. None = derived from the seeds and the window (`run_key`).
+    # pipeline's `source_run`. None = a digest of the whole config and the window (`run_key`).
     run_id: str | None = None
 
     @property
@@ -126,14 +128,18 @@ class GeneratorConfig:
         return self.seed if self.topology_seed is None else self.topology_seed
 
     def run_key(self, mode: str, window_start: object) -> str:
-        """Run-scoped salt for generated IDs: `run_id`, or the seeds, mode and window when no run id is given.
+        """Run-scoped salt for generated IDs: `run_id`, else a digest of every other config field (scale, seeds,
+        window, faults, DQ rates, format, ...) plus the mode and the resolved window start.
 
-        Same config (same run) -> same key -> bit-identical output; two runs that differ in run id, seed or window
-        get disjoint alarm / change IDs, so the pipeline's cross-run dedupe on `record_id` never drops one run's
-        records as redeliveries of another's."""
+        Same config (same run) -> same key -> bit-identical output; two runs that differ in the run id or in any
+        generation parameter get disjoint alarm / change IDs, so the pipeline's cross-run dedupe on `record_id`
+        never drops one run's records as redeliveries of another's."""
         if self.run_id:
             return self.run_id
-        return f"{mode}/seed={self.seed}/net={self.network_seed}/start={window_start}/days={self.days}/step={self.step_minutes}"
+        fields = {k: v for k, v in dataclasses.asdict(self).items() if k != "run_id"}
+        blob = json.dumps({"mode": mode, "window_start": str(window_start), "config": fields}, sort_keys=True,
+                          default=str)
+        return "cfg-" + hashlib.blake2b(blob.encode(), digest_size=8).hexdigest()
 
     def with_(self, **kwargs) -> GeneratorConfig:
         return replace(self, **kwargs)
