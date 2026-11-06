@@ -39,6 +39,9 @@ def test_pii_is_redacted_from_free_text_and_detected_in_prompts():
     assert flagged and "+999" not in out and "00101" not in out and "@" not in out
     assert set(guards.pii_findings("imsi 001019876543210")) == {"imsi"}
     assert guards.pii_findings('{"as_of":"2026-10-17T01:02:00Z","n":1234,"id":"CELL-NSW-00123-5G2"}') == []
+    assert guards.pii_findings('{"ref":"EVAL-dev-1234567890ab","x":0.123456789012,"c":"SITE-NSW-00123"}') == []
+    for phone in ("+999123456789", "+61 412 345 678", "0412 345 678", "0298765432"):
+        assert guards.pii_findings(f"call {phone} now") == ["msisdn_or_phone"], phone
 
 
 # ---- hallucination guard -----------------------------------------------------------------------------------

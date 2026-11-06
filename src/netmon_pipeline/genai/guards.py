@@ -25,8 +25,10 @@ import unicodedata
 
 ELEMENT_ID = re.compile(r"\b(?:AMF|UPF|AGG|BH|SITE|CELL)-[A-Z]{2,3}-[0-9]{2,5}(?:-[0-9A-Z]{2,4})?\b")
 ELEMENT_ID_LOOSE = re.compile(r"\b(?:AMF|UPF|AGG|BH|SITE|CELL)[-_ ]?[A-Z]{2,3}[-_ ]?\d{2,5}\w*\b", re.IGNORECASE)
-IMSI = re.compile(r"(?<!\d)\d{15}(?!\d)")  # any 15-digit run (IMSI length), incl. the 00101 test PLMN
-MSISDN = re.compile(r"(?<![\w+])\+?\d{1,3}[ -]?\d{2,4}[ -]?\d{3}[ -]?\d{3,4}(?!\d)")
+# Bounded so that digits inside identifiers / hashes / decimals (e.g. `EVAL-dev-1234567890ab`, `0.123`) never match.
+IMSI = re.compile(r"(?<![\w.-])\d{15}(?!\w|\.\d)")  # a free-standing 15-digit IMSI, incl. the 00101 test PLMN
+# E.164 with '+' (the synthetic +999 MSISDNs, +61 ...) or an Australian national number (02/03/04/07/08 + 8 digits)
+MSISDN = re.compile(r"(?<![\w+.-])(?:\+\d(?:[ -]?\d){7,14}|0[2-478](?:[ -]?\d){8})(?!\w|\.\d)")
 EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 PII_PATTERNS = {"imsi": IMSI, "msisdn_or_phone": MSISDN, "email": EMAIL}
 

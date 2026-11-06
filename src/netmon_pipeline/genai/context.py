@@ -118,6 +118,13 @@ def _num(v, nd: int = 2):
     return round(f, nd)
 
 
+def _digits(key: str) -> int:
+    """Decimals in the context: fractions / shares 2, everything else (z-scores, %, counts, minutes) 1. Short numbers
+    keep the prompt compact and stop the gateway's PII detector reading long decimals (e.g. `-10.292`) as phone
+    numbers (measured: 3 / 40 dev prompts blocked at 3 decimals, 0 / 40 at this precision)."""
+    return 2 if ("fraction" in key or "coverage" in key or key.startswith("share")) else 1
+
+
 def _frame(df: pd.DataFrame | None, cols: list[str]) -> pd.DataFrame:
     """Allowlisted columns only (missing ones as null): nothing else of an input frame can reach the context."""
     if df is None or df.empty:
@@ -179,7 +186,7 @@ def _suspects(inp: IncidentRef, rows: pd.DataFrame, tree: _Tree, impacted: set[s
     out = []
     for rank, (eid, etype, score) in enumerate(inp.suspects, start=1):
         r = by_el.loc[eid] if eid in by_el.index else None
-        signals = {k: (None if r is None else _num(r.get(col), 3)) for k, col in SUSPECT_SIGNALS.items()}
+        signals = {k: (None if r is None else _num(r.get(col), _digits(k))) for k, col in SUSPECT_SIGNALS.items()}
         if signals.get("in_maintenance") is not None:
             signals["in_maintenance"] = bool(signals["in_maintenance"])
         anc = tree.chain(eid)[1:]
@@ -191,7 +198,7 @@ def _suspects(inp: IncidentRef, rows: pd.DataFrame, tree: _Tree, impacted: set[s
         imp_kids = sorted((k for k in kids if imp_count.get(k, 0) > 0), key=lambda k: (-imp_count[k], k))
         out.append({
             "rank": rank, "element_id": eid, "element_type": etype or tree.get(eid, "element_type"),
-            "ranker_score": _num(score, 3), "signals": signals,
+            "ranker_score": _num(score, 2), "signals": signals,
             "neighbourhood": {
                 "region_code": tree.get(eid, "region_code"),
                 "parent": None if not anc else {"element_id": anc[0], "element_type": tree.get(anc[0], "element_type")},
@@ -243,13 +250,13 @@ def _kpi(health: pd.DataFrame, cells: list[str], silent: list[str], as_of: pd.Ti
     w = h[h["window_start"].isin(last)]
     half = len(last) // 2
     early, late = w[w["window_start"].isin(last[:half])], w[w["window_start"].isin(last[half:])]
-    med = {k: _num(w[c].astype(float).median()) for k, c in KPI_Z.items()}
-    trend = {k: _num(late[c].astype(float).median() - early[c].astype(float).median())
+    med = {k: _num(w[c].astype(float).median(), 1) for k, c in KPI_Z.items()}
+    trend = {k: _num(late[c].astype(float).median() - early[c].astype(float).median(), 1)
              for k, c in KPI_Z.items()} if half else {}
     latest = w[w["window_start"] == last[-1]]
     return {"n_cells": len(cells), "n_silent_cells": len(silent), "n_windows": len(last),
             "window_minutes": len(last), "first_window": _iso(last[0]), "last_window": _iso(last[-1]),
-            "share_cells_degraded_latest_window": _num(latest["is_degraded"].astype(float).mean(), 3),
+            "share_cells_degraded_latest_window": _num(latest["is_degraded"].astype(float).mean(), 2),
             "median_z": med, "z_change_second_half_vs_first_half": trend,
             "median_availability_pct": _num(w["availability_pct"].astype(float).median(), 1)}
 
@@ -354,7 +361,7 @@ def build_context(inp: ContextInputs) -> dict:
             "as_of": _iso(as_of), "detected_at": _iso(det),
             "minutes_since_detected": None if det is None else _num((as_of - det).total_seconds() / 60, 1),
             "minutes_since_first_anomaly": minutes_anom, "ranker_model_version": str(i.model_version),
-            "ranker_alert_threshold": _num(i.alert_threshold, 3), "n_candidates_ranked": int(rows["element_id"].nunique())
+            "ranker_alert_threshold": _num(i.alert_threshold, 2), "n_candidates_ranked": int(rows["element_id"].nunique())
             if len(rows) else 0,
         },
         "suspects": sus,
