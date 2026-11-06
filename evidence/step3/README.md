@@ -66,6 +66,7 @@ the **same cases**.
 | [`05_lakebase.md`](05_lakebase.md) | Lakebase Provisioned instance; both synced tables (source, PK, TRIGGERED, state, last synced commit); latency check (p50 / p95 / p99 / max); row counts and sample rows read back from Postgres; PK lookup plan |
 | [`06_live_scoring.md`](06_live_scoring.md) | `element_status` / `open_incidents` counts, states, open incidents with top-3 suspects, open incidents checked against the live run's ground truth (evidence only), element status sample, scored candidates per model version |
 | [`08_alarm_id_fix.md`](08_alarm_id_fix.md) | PR #6: the defect, retraining decision, alarms per run before / after (bronze, silver, quarantine, injected duplicates, missing IDs), and old (v4, alarms missing) vs new (v5, corrected) for holdout, dev and validation: top-1 / top-3, any-alert, early catch, alert precision; step-2 TTD and baseline old vs new |
+| [`09_replace_check.md`](09_replace_check.md) | PR #6 review: what the swap deleted per table, change calendar per run in bronze and silver after the swap (rows = change IDs = windows), every `replace_check` violation count (superseded rows, pre-fix change IDs, duplicate windows, orphan detections: all 0), and the pre-existing in-maintenance join fan-out |
 | [`07_pr3_review_notes.md`](07_pr3_review_notes.md) | the three PR #3 notes: Spark test of the late-data rule, signed evidence lag (negative lags shown), shared baseline-comparison code |
 
 ## What was run (final)
@@ -93,6 +94,9 @@ the **same cases**.
    `banksia-rca-evaluate-holdout` **once** with v5 (evaluation MLflow run `d58a5f8893df4d37b7835be9877811df`);
    `banksia-rca-any-alert-metric`; bundle deploy with `rca_model_version=5`; `banksia-rca-score-live` (v5);
    `banksia-rca-lakebase-check`. Files 01–06 and 08 regenerated; 07 unchanged.
+10. PR #6 review round: `banksia-netmon-replace-run-feeds` re-run (`stage=verify`, idempotent: no file swapped,
+    nothing deleted, empty incremental update) with its new `check` task: every violation 0. `09_replace_check.md`
+    captured. No model, holdout or step-4 result was re-run: no input of them changed.
 
 ## Limitations recorded
 

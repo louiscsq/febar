@@ -134,3 +134,15 @@ resources:
           depends_on: [{task_key: replace}]
           pipeline_task:
             pipeline_id: ${resources.pipelines.netmon_pipeline.id}
+        # After the update: no superseded row, legacy change ID or duplicate maintenance window may remain.
+        - task_key: check
+          depends_on: [{task_key: pipeline}]
+          environment_key: netmon
+          notebook_task:
+            notebook_path: ../notebooks/12_replace_run_feeds.py
+            base_parameters:
+              task: check
+              bronze_schema: ${resources.schemas.netmon_bronze.name}
+              silver_schema: ${resources.schemas.netmon_silver.name}
+              gold_schema: ${resources.schemas.netmon_gold.name}
+              eval_schema: ${resources.schemas.netmon_eval.name}

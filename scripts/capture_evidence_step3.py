@@ -456,6 +456,67 @@ difference is not attributable to either alone; the dev and validation rows show
     d.write()
 
 
+SWAP_RUN_ID = 812068105574215  # banksia-netmon-replace-run-feeds, stage=swap (the one replacement run)
+REPLACED_RUNS = ["history_1m", "holdout_1m"]
+
+
+def replace_check_doc(r: Runner, w) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from netmon_pipeline import replace_check
+
+    def task_output(run_id: int, key: str) -> dict:
+        run = w.jobs.get_run(run_id)
+        t = next(t for t in run.tasks if t.task_key == key)
+        return json.loads(w.jobs.get_run_output(t.run_id).notebook_output.result)
+
+    d = Doc(r, "09_replace_check.md", "PR #6: replacement check (change calendar, superseded rows, duplicates)", """
+The replacement swapped three feeds of `history_1m` and `holdout_1m`: alarms, the DQ log and the change calendar
+(`maintenance_windows`, whose `change_id` hashes the run key). Every table derived from the calendar is a
+materialized view recomputed from bronze (`silver_maintenance_windows`, then `gold_element_impact_5m` and the eval
+views); no streaming table stores calendar rows. Streaming detections carry only the `in_maintenance` flag, and the
+regenerated windows are identical to the old ones except `change_id` (verified file by file before the swap), so
+the flag cannot change. Below: what the swap deleted, the counts now, and every check of
+`netmon_pipeline.replace_check` (also the last task of `banksia-netmon-replace-run-feeds`, which fails on any
+violation).""")
+    swap = task_output(SWAP_RUN_ID, "replace")
+    rows = [[run, t.split(".")[-1].strip("`"), n] for run, dd in swap["deleted"].items() for t, n in dd.items()]
+    d.text(f"BEFORE: rows deleted by the swap (job run {SWAP_RUN_ID}, notebook output)",
+           "Superseded rows = every row ingested from a replaced file. Bronze maintenance before the swap held "
+           "exactly these rows for the two runs (one calendar file each).\n\n" + md_table(["run", "table", "deleted_rows"], rows))
+    d.text("BEFORE: files verified identical except IDs", md_table(
+        ["run", "unchanged_files (byte-identical)", "changed_files (identical without IDs)"],
+        [[k, v["unchanged_files"], v["changed_files"]] for k, v in swap["report"].items()]))
+    rl = ", ".join(f"'{x}'" for x in REPLACED_RUNS)
+    d.query("AFTER: change calendar per run, bronze", f"""
+        SELECT _source_run AS run, count(*) AS rows, count_if(_source_file RLIKE '-r2[.]json$') AS rows_from_new_files,
+               count(DISTINCT change_id) AS change_ids, count(DISTINCT element_id, planned_start_ts, planned_end_ts) AS windows
+        FROM {CAT}.netmon_bronze.bronze_maintenance_windows GROUP BY 1 ORDER BY 1""")
+    d.query("AFTER: change calendar per run, silver_maintenance_windows (materialized view)", f"""
+        SELECT source_run AS run, count(*) AS rows, count(DISTINCT change_id) AS change_ids,
+               count(DISTINCT element_id, planned_start_ts, planned_end_ts) AS windows
+        FROM {CAT}.netmon_silver.silver_maintenance_windows GROUP BY 1 ORDER BY 1""",
+            "rows = change_ids = windows: no duplicate window. `history` was not replaced.")
+    _, inc = r.sql(f"SELECT DISTINCT incident_id FROM {E}.eval_gt_incidents WHERE fault_type = 'PLANNED_MAINTENANCE' "
+                   f"AND source_run IN ({rl})")
+    legacy = [replace_check.legacy_change_id(x[0]) for x in inc]
+    res = []
+    for name, stmt in replace_check.checks(CAT, REPLACED_RUNS, "r2", legacy).items():
+        _, rr = r.sql(stmt)
+        got = {x[0]: int(x[1]) for x in rr}
+        res.append([name, *[got.get(run, 0) for run in REPLACED_RUNS]])
+    d.text("AFTER: replacement checks (violations; all must be 0)",
+           f"`legacy_change_ids` looks for the {len(legacy)} pre-fix change IDs (`opaque_id(\"CHG\", incident_id)`, "
+           "computed from the ground-truth planned-maintenance incidents of both runs: 130 windows, but incident IDs repeat "
+           "between runs, which is the original defect) in bronze and silver.\n\n"
+           + md_table(["check", *REPLACED_RUNS], res))
+    d.query("Repeated detection rows (informational, pre-existing)", replace_check.fanout_summary_sql(CAT, REPLACED_RUNS),
+            "Repeated `detection_id`s are not a replacement artefact: `fanout_unexplained_gold_impact_detections` = 0 "
+            "above means every repeated detection matches exactly that many change windows (e.g. its site's and its "
+            "router's overlapping windows), because the in-maintenance flag is a join. The KPI rows (never touched "
+            "by the replacement, written 2026-11-05) repeat the same way. Recorded as a known limit.")
+    d.write()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", default="febar")
@@ -470,7 +531,7 @@ def main() -> None:
     steps = {"training": lambda: training(r, w, run), "evaluation": lambda: evaluation(r, run),
              "registry": lambda: registry(r, w), "serving": lambda: serving(r, w, run),
              "lakebase": lambda: lakebase(r, w), "live": lambda: live(r), "notes": lambda: pipeline_notes(r),
-             "alarm_fix": lambda: alarm_fix(r, run)}
+             "alarm_fix": lambda: alarm_fix(r, run), "replace_check": lambda: replace_check_doc(r, w)}
     for k, f in steps.items():
         if a.only and k not in a.only.split(","):
             continue

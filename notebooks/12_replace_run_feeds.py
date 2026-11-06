@@ -15,7 +15,15 @@
 # MAGIC 3. **deletes the superseded rows** (from the old files) in bronze, silver, quarantine and the alarm detections.
 # MAGIC    The pipeline reads those tables with `skipChangeCommits`, so the deletes do not break its streams.
 # MAGIC
-# MAGIC The job's next task runs a normal (incremental) pipeline update, which ingests the new files. KPIs, sessions and
+# MAGIC **Change calendar.** `maintenance_windows` is replaced too (its `change_id` hashes the run key). Its derived tables
+# MAGIC are materialized views recomputed from bronze (`silver_maintenance_windows`, then `gold_element_impact_5m` and the
+# MAGIC eval views), so deleting the superseded bronze rows is enough; no streaming table stores calendar rows. Streaming
+# MAGIC detections only carry the `in_maintenance` flag, and the regenerated windows are identical except `change_id`.
+# MAGIC
+# MAGIC The job's next task runs a normal (incremental) pipeline update, which ingests the new files; the last task
+# MAGIC (`task=check`, `netmon_pipeline.replace_check`) fails the job unless no superseded row, legacy change ID or
+# MAGIC duplicate maintenance window remains and every repeated detection is explained by overlapping change windows.
+# MAGIC KPIs, sessions and
 # MAGIC every other run are untouched; no full refresh, so the step-2 live run keeps its measured wall-clock latency and
 # MAGIC the append-only health windows keep their state. Idempotent: re-running after a completed swap verifies and
 # MAGIC deletes nothing new.
@@ -33,6 +41,8 @@ dbutils.widgets.text("eval_schema", "netmon_eval")
 dbutils.widgets.text("runs", "history_1m,holdout_1m")
 dbutils.widgets.text("revision", "r2")
 dbutils.widgets.dropdown("stage", "verify", ["verify", "swap"])
+# Not a job parameter (job parameters override task parameters): the job's last task sets task=check.
+dbutils.widgets.dropdown("task", "replace", ["replace", "check"])
 
 # COMMAND ----------
 
@@ -41,10 +51,11 @@ import json
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 w = {k: dbutils.widgets.get(k) for k in ["catalog", "raw_schema", "landing_volume", "staging_volume", "bronze_schema",
-                                          "silver_schema", "gold_schema", "eval_schema", "runs", "revision", "stage"]}
+                                          "silver_schema", "gold_schema", "eval_schema", "runs", "revision", "stage", "task"]}
 CAT, REV = w["catalog"], w["revision"]
 assert re.fullmatch(r"[a-z0-9]+", REV), REV
 RUNS = [r.strip() for r in w["runs"].split(",") if r.strip()]
@@ -87,6 +98,31 @@ def sql(stmt: str) -> int:
     n = int(rows[0]["num_affected_rows"]) if rows and "num_affected_rows" in rows[0].asDict() else 0
     print(f"{n:>8}  {' '.join(stmt.split())[:160]}")
     return n
+
+# COMMAND ----------
+
+# MAGIC %md ## 0. Check (after the pipeline update): nothing superseded or duplicated remains
+
+# COMMAND ----------
+
+if w["task"] == "check":
+    try:
+        from netmon_pipeline import replace_check
+    except ImportError:
+        sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..", "src")))
+        from netmon_pipeline import replace_check
+    inc = spark.sql(f"SELECT DISTINCT incident_id FROM {E}.eval_gt_incidents WHERE fault_type = 'PLANNED_MAINTENANCE' "
+                    f"AND source_run IN ({', '.join(repr(r) for r in RUNS)})").collect()
+    legacy = [replace_check.legacy_change_id(r["incident_id"]) for r in inc]
+    results, bad = {}, {}
+    for name, stmt in replace_check.checks(CAT, RUNS, REV, legacy).items():
+        rows = {r["run"]: int(r["violations"]) for r in spark.sql(stmt).collect()}
+        results[name] = rows
+        if any(rows.values()):
+            bad[name] = rows
+    print(json.dumps(results, indent=1))
+    assert not bad, f"replacement check failed: {bad}"
+    dbutils.notebook.exit(json.dumps({"stage": "check", "legacy_change_ids": len(legacy), "results": results}))
 
 # COMMAND ----------
 
