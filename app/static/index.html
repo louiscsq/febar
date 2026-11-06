@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Banksia NOC · topology</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">Banksia Mobile · NOC <span class="sub">network topology &amp; root-cause pinpoint</span></div>
+  <div class="ctl">
+    <label>Region <select id="region"></select></label>
+    <span id="who" class="who"></span>
+  </div>
+</header>
+<section id="kpis" class="kpis"></section>
+<main>
+  <aside class="col incidents">
+    <h2>Open incidents <span id="inc-count" class="pill"></span></h2>
+    <div id="incident-list"></div>
+  </aside>
+  <section class="col centre">
+    <div class="tabs">
+      <button data-tab="topo" class="active">Topology</button>
+      <button data-tab="map">Map</button>
+      <span id="topo-title" class="topo-title"></span>
+    </div>
+    <div id="topo" class="pane active"><svg id="topo-svg"></svg></div>
+    <div id="map" class="pane"></div>
+    <div class="legend">
+      <span class="dot down"></span>down <span class="dot degraded"></span>degraded <span class="dot impacted"></span>impacted
+      <span class="dot alarm"></span>alarm <span class="dot ok"></span>ok
+      <span class="ring pinpoint"></span>suspect 1 (pinpoint) <span class="ring suspect"></span>suspects 2-3
+    </div>
+  </section>
+  <aside class="col detail" id="detail"><p class="muted">Select an incident.</p></aside>
+</main>
+<section class="genie">
+  <h2>Ask Genie <span class="muted small">(NOC Genie space, runs as you: your regions and grants apply)</span></h2>
+  <form id="genie-form">
+    <input id="genie-q" placeholder="e.g. Which cell sites are down right now?" autocomplete="off">
+    <button type="submit">Ask</button>
+    <button type="button" id="genie-new" class="secondary">New conversation</button>
+  </form>
+  <div id="genie-out"></div>
+</section>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

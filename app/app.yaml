@@ -1,0 +1,19 @@
+# Databricks App: Banksia NOC topology (docs/topology_app.md). Deployed by the bundle (resources/app.yml), which
+# declares the resources referenced below; no secret is stored here or anywhere in the repo.
+#   database      -> PGHOST / PGDATABASE / PGUSER / PGPORT / PGSSLMODE (Lakebase, app service principal, OAuth)
+#   sql-warehouse -> DATABRICKS_WAREHOUSE_ID (UC reads run as the signed-in user, on-behalf-of token, scope `sql`)
+#   genie-space   -> GENIE_SPACE_ID (Genie Conversation API, as the signed-in user, scope `dashboards.genie`)
+command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: GENIE_SPACE_ID
+    valueFrom: genie-space
+  - name: LAKEBASE_INSTANCE
+    value: banksia-netmon-lakebase
+  - name: NETMON_CATALOG
+    value: telco_netmon_febar_catalog
+  - name: NETMON_NOC_SCHEMA
+    value: netmon_noc
+  - name: NETMON_EVAL_SCHEMA
+    value: netmon_eval
