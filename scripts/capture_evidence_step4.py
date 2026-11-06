@@ -337,6 +337,50 @@ the evidence. The assistant job has a table-update trigger on `netmon_rca.open_i
     d.write()
 
 
+def alarm_gap(r: Runner) -> None:
+    B, S = f"{CAT}.netmon_bronze", f"{CAT}.netmon_silver"
+    d = Doc(r, "09_holdout_alarm_gap.md", "Holdout finding: incident alarms lost upstream, and what it does to the LLM", """
+The holdout evaluation (`04_evaluation.md`) shows the assistant **losing** accuracy against the ranker. Root cause found
+afterwards (analysis only; nothing was re-run or tuned on the holdout): the generator derives incident alarm IDs from
+the batch incident ID (`netmon_datagen.faults`: `opaque_id("ALM", incident_id, n)`, with `incident_id` = `INC-00001`,
+`INC-00002`, … in every batch run). The holdout's fault alarms therefore reuse the alarm IDs of `history_1m` (and of
+the step-2 `history` run), and the silver layer's cross-run deduplication (`dropDuplicatesWithinWatermark` on
+`record_id`) drops them as redeliveries. Background alarm IDs include the run seed and survive. Result: the alarms
+that corroborate a fault are missing for much of the holdout, while noise alarms on neighbouring elements remain.
+The step-3 ranker's holdout features had the same gap (it still scored 93.2 % top-1 from KPIs); the dev days are
+almost unaffected. This is a step-1/2 defect, recorded here and in the PR as a follow-up; it was not fixed in step 4
+because fixing it means regenerating and re-ingesting the holdout, which changes step 3's published holdout result.""")
+    d.query("Alarms per run: bronze (delivered) vs silver (after dedupe)", f"""
+        SELECT b._source_run AS run, count(*) AS bronze_rows, count(DISTINCT b.record_id) AS bronze_distinct_ids,
+               count(DISTINCT s.record_id) AS in_silver
+        FROM {B}.bronze_alarms b LEFT JOIN {S}.silver_alarms s ON s.record_id = b.record_id AND s.source_run = b._source_run
+        WHERE b._source_run IN ('history_1m', 'holdout_1m') GROUP BY 1 ORDER BY 1""")
+    d.query("Holdout alarm IDs that already exist in silver under an earlier run", f"""
+        SELECT s.source_run AS earlier_run, count(*) AS holdout_rows_with_same_record_id
+        FROM {B}.bronze_alarms b JOIN {S}.silver_alarms s ON s.record_id = b.record_id AND s.source_run <> 'holdout_1m'
+        WHERE b._source_run = 'holdout_1m' GROUP BY 1 ORDER BY 1""")
+    for split in ("dev", "holdout"):
+        d.query(f"{split.upper()}: assistant vs ranker by whether the context has an active alarm", f"""
+            SELECT CAST(get_json_object(c.context_json, '$.alarm_summary.n_active') AS INT) > 0 AS context_has_active_alarm,
+                   l.fault_type, count(*) AS n, round(100 * avg(CAST(r.root_agreement AS INT)), 1) AS llm_pct,
+                   round(100 * avg(CAST(r.ranker_top1_agreement AS INT)), 1) AS ranker_pct,
+                   sum(CAST(r.llm_vs_ranker = 'changed_correct_to_wrong' AS INT)) AS changed_correct_to_wrong,
+                   sum(CAST(r.llm_vs_ranker = 'uncertain_on_correct' AS INT)) AS uncertain_on_correct,
+                   sum(CAST(r.llm_vs_ranker = 'changed_to_correct' AS INT)) AS changed_to_correct
+            FROM {G}.genai_eval_results_{split} r JOIN {G}.genai_eval_contexts c USING (eval_id)
+            JOIN {E}.genai_eval_labels l USING (eval_id)
+            GROUP BY GROUPING SETS ((1), (1, 2)) ORDER BY 1, 2 NULLS FIRST""")
+    d.text("Reading", """
+- On dev, 340 of 346 contexts carry an active alarm and the assistant matches or beats the ranker.
+- On the holdout, about half the contexts carry no active alarm (cell outages: about a third have one). Without the
+  root's own alarm, the prompt's "alarms + impact pattern agree" reading fails: the assistant answers `uncertain` on
+  correct ranker answers, or follows a surviving noise alarm on a neighbouring backhaul link.
+- The lesson holds beyond this defect: OSS alarm feeds do drop and lag in real networks. The ranker, trained on KPIs
+  and alarms, degrades gracefully; the LLM, told to look for corroborating alarms, does not. Keep the ranker as the
+  system of record and treat the assistant as an explainer (see docs/genai_assistant.md, Results and Known limits).""")
+    d.write()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", default="febar")
@@ -350,7 +394,7 @@ def main() -> None:
     wsid = workspace_id(w)
     steps = {"gateway": lambda: gateway_doc(r, w), "log": lambda: inference_log(r, wsid),
              "examples": lambda: examples(r), "evaluation": lambda: evaluation_doc(r), "outputs": lambda: outputs(r, w),
-             "cost": lambda: cost(r, wsid), "runs": lambda: runs(r, w)}
+             "cost": lambda: cost(r, wsid), "runs": lambda: runs(r, w), "gap": lambda: alarm_gap(r)}
     for k, f in steps.items():
         if a.only and k not in a.only.split(","):
             continue

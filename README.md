@@ -110,6 +110,13 @@ databricks bundle run -p febar genai_build_evalset && databricks bundle run -p f
 databricks bundle run -p febar genai_assistant      # also triggered by every open_incidents update
 ```
 
-STEP4_HEADLINE
+On step 3's dev days the assistant's root cause agrees with ground truth on **97.1 %** of evaluated incidents (the
+ranker's top-1 alone: 96.5 %; it fixed 3 ranker misses and broke none). On the fresh holdout it **loses** accuracy:
+**82.0 % against 97.2 %**. Most of the gap traces to an upstream defect found after the run: incident alarm IDs repeat
+across batch runs, so silver drops about 20 % of the holdout's alarms. The ranker copes from KPIs; the assistant,
+looking for corroborating alarms, abstains or blames a neighbour. The ranker therefore stays the system of record.
+No hallucinated root survives the guard. SMS drafts are 100 % rule-compliant (98 % at the model's first try). About
+6.5 s and 5.6 k tokens per incident. 6 of 6 live guardrail tests (prompt injection, PII leaks) were blocked or
+neutralised.
 
 See [`docs/genai_assistant.md`](docs/genai_assistant.md) and [`evidence/step4/`](evidence/step4/).

@@ -200,7 +200,7 @@ token is stored anywhere.
 | AI Gateway feature | setting | status |
 |---|---|---|
 | usage tracking | on | per-request tokens in `system.serving.endpoint_usage`; `client_request_id` = the assistant's `X-Request-Id` |
-| rate limits | 600 calls / min per endpoint, 300 per user | on (the evaluation runs 8 workers, ~120 calls / min) |
+| rate limits | 600 calls / min per endpoint, 300 per user | on (the evaluation runs 8 parallel workers and was never throttled) |
 | PII guardrail, input | BLOCK | on: a prompt carrying an MSISDN / IMSI is blocked (`06_guardrail_tests.md` 2b) |
 | PII guardrail, output | BLOCK | on |
 | safety guardrail, output | on | on |
@@ -277,7 +277,82 @@ frozen prompts (`noc_summary_v3`, `sms_v1`). The holdout was run **once**; the j
 | latency | per incident: summary + SMS call(s), p50 / p95 | code |
 | tokens / cost | per incident, from the responses; DBUs from billing | code |
 
-RESULTS_PLACEHOLDER
+## Results
+
+Every number below is from `evidence/step4/04_evaluation.md` (final runs: prompts `noc_summary_v3`, `sms_v1`).
+
+| measure | **dev** (n = 346) | **holdout** (n = 323, run once) |
+|---|---|---|
+| **assistant root-cause agreement** (valid root list; `uncertain` = miss) | **97.1 %** | **82.0 %** |
+| ranker's top-1 alone, same contexts | 96.5 % | 97.2 % |
+| answered (not `uncertain`) | 99.7 % | 89.5 % |
+| selective accuracy (answered cases) | 97.4 % | 91.7 % |
+| ranker misses fixed by the assistant | 3 | 2 |
+| correct ranker answers turned wrong / turned `uncertain` | 0 / 1 | **18 / 33** |
+| fault-hypothesis match | 96.5 % | 69.0 % |
+| hallucinated root (raw output, before the guard) | 0.0 % | 1.9 % |
+| any unknown element ID in the raw output (scrubbed by the guard) | 2.6 % | 3.1 % |
+| cited evidence paths that exist | 99.4 % | 99.5 % |
+| fallback (gateway block / failure) | 0.3 % | 1.9 % |
+| groundedness (LLM judge) | 81.8 % | 78.6 % |
+| SMS: final drafts compliant | 100 % | 100 % |
+| SMS: LLM drafts compliant at the first try / after one repair | 98.3 % / 99.7 % | 98.5 % / 99.4 % |
+| SMS guidelines (LLM judge) | 99.7 % | 98.8 % |
+| latency per incident p50 / p95 | 6.4 s / 8.0 s | 6.6 s / 7.9 s |
+| tokens per incident (prompt / completion) | 4,896 / 772 | 4,705 / 791 |
+| over **all** scored incidents (no case output = miss): assistant / ranker | 94.6 % / 94.1 % (n = 355) | 78.6 % / 93.2 % (n = 337) |
+
+**Does the LLM add or lose accuracy? Honestly: on dev it adds a little, on the holdout it loses a lot.**
+
+- *Dev*: it follows the ranker on 336 of 346 cases, fixes 3 of the 12 ranker misses (twice a router chosen over a
+  sibling, once a sibling cell), never turns a right answer wrong, and goes `uncertain` once.
+- *Holdout*: it turns 18 correct ranker answers wrong (mostly cell outages blamed on the backhaul link above them)
+  and abstains on 33 more. **Cause, found after the run** (`evidence/step4/09_holdout_alarm_gap.md`; nothing re-run
+  or tuned on the holdout): an upstream defect drops about 20 % of the holdout's alarms. The generator reuses
+  incident-based alarm IDs across batch runs (`INC-00001` … in every run), so silver's cross-run dedupe treats the
+  holdout's fault alarms as redeliveries of `history_1m`'s. Only 36 % of holdout cell-outage contexts still carry an
+  active alarm (dev: 100 %), while seed-scoped noise alarms on neighbouring links survive. The ranker, which reads
+  KPIs as well as alarms, still scores 97 %; the assistant, prompted to look for alarms that corroborate the impact
+  pattern, either abstains or follows the surviving noise alarm. Even holdout contexts that do have an active alarm
+  show the gap (83.6 % vs 95.6 %), because the alarms that remain are often not the root's own.
+- *Lesson*: the LLM is not robust to gaps in the alarm feed, and real OSS alarm feeds do drop and lag. The ranker
+  stays the system of record for "which element"; the assistant's value is the explanation, the runbook steps, the
+  impact sentence and the customer draft, and its root-cause choice is shown **next to** the ranker's, never instead
+  of it. A tempting fix (only let the assistant override the ranker below the alert threshold) was designed after
+  seeing the holdout, so it is recorded as a next step to validate on a fresh run, not shipped here.
+- *Grounding*: no hallucinated root on dev; on the holdout 1.9 % of raw answers named a non-suspect, and the guard
+  turned those into `uncertain`. 2.6–3.1 % mentioned an element not in the context (e.g. a UPF named by convention);
+  all were scrubbed. The groundedness judge failed about one answer in five, nearly always for one small slip in an
+  otherwise supported answer: an RRC z-score reported as "RRC success 0 %", an alarm's severity misread, or an
+  alarmed router called a cell's "parent". Prompt v3 targeted these; dev groundedness moved only 81.5 → 81.8 %.
+- *SMS*: every final draft is compliant by construction; the model's own drafts pass the deterministic rules 98–99 %
+  of the time at the first try, and the judge finds them plain, calm and blame-free in 99 % of cases.
+
+Live: the 17 open incidents of step 3's live run all have a v3 summary and an SMS draft in UC and in Lakebase
+(`05_outputs_and_lakebase.md`). The trigger was exercised: a `banksia-rca-score-live` MERGE fired
+`banksia-genai-assistant`, which found all 17 unchanged and made **no** LLM call (0.3 min of notebook time, 1.0 min job run; `08_jobs_and_runs.md`).
+
+## Latency and cost
+
+| | p50 | p95 | tokens in / out |
+|---|---|---|---|
+| NOC summary call | 5.2 s | 6.5 s | 4,218 / 723 |
+| SMS call | 1.2 s | 1.7 s | 581 / 49 |
+| per incident (summary + SMS, repairs included; 2.02 calls on average) | 6.4–6.6 s | 7.9–8.0 s | ~4.8 k / ~0.8 k |
+| Lakebase read of the latest summary (PK) | 2.8 ms | 6.0 ms | |
+| Lakebase open incidents of a region + their summaries | 3.3 ms | 11.0 ms | |
+
+(`07_latency_cost.md`, `05_outputs_and_lakebase.md`. Client-side times, job → endpoint; the app reads Lakebase, so the
+LLM latency is off its path.)
+
+**Cost.** About **4.8 k input + 0.8 k output tokens per incident** on GPT-5.4 mini (pay-per-token). At the
+build's live rate (a few hundred incidents a day) that is roughly 1–2 M input and 0.2–0.3 M output tokens a day,
+and the change detection keeps it at one summary per incident and suspect set, not per scoring run. The whole
+step-4 build used 3,543 gateway-tracked requests, 8.4 M input and 1.25 M output tokens (`system.serving.endpoint_usage`,
+this workspace and endpoint), most of it the evaluation runs and their judges. **The billing rows for these
+tokens had not posted** when the evidence was captured (`system.billing.usage` lags); `07_latency_cost.md` holds
+the query that turns them into DBUs and dollars (list price $0.07 / DBU for the `*_MODEL_SERVING` pay-per-token
+SKUs). No per-token price is assumed here. The judges (Claude Sonnet 5.5) are evaluation-only cost.
 
 ## Outputs, serving to the app, trigger
 
@@ -331,10 +406,12 @@ needs it to exist, so on a fresh workspace deploy once more after that run.
 
 ## Known limits
 
-- **The ranker does the hard part.** On these synthetic runs the ranker's top-1 is right about 96 % of the time on
-  the evaluated cases, so the assistant mostly explains and operationalises the ranker's answer. Its accuracy
-  contribution is small (see Results), and it could equally lose accuracy on a network where the ranker is weaker
-  and the signals are messier. Keep the ranker's suspects next to the assistant's choice in the UI.
+- **The assistant loses accuracy when alarms are missing** (holdout: 82.0 % vs the ranker's 97.2 %). The ranker
+  stays the system of record; show the assistant's choice next to the ranker's suspects, never instead of them.
+- **Upstream alarm-ID collision (step 1/2 follow-up).** Incident alarm IDs are not unique across batch runs
+  (`opaque_id("ALM", incident_id, n)` with `INC-00001`…), so silver's dedupe drops 20 % of the holdout's alarms
+  (`09_holdout_alarm_gap.md`). Fix: include the run / seed in the ID, then regenerate and re-ingest the holdout and
+  re-run step 3's frozen-model holdout evaluation. Not done here because it changes step 3's published holdout result.
 - **Same synthetic generator.** The runbooks and signatures in the prompt describe this generator's fault types. A real
   NOC would replace them with its own runbooks (ideally retrieved, not inlined) and evaluate on its own incidents.
 - **Matched case.** Like step 3, the evaluation grades the case ground truth matched by footprint overlap at the SLA
