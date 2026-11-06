@@ -81,7 +81,7 @@ function renderTopology(t) {
     ? `incident ${t.incident_id}: path from core to suspects` : `${t.region} overview: ${t.n_elements} elements (healthy ones collapsed)`;
   const W = Math.max(svg.parentElement.clientWidth - 10, 600), rowH = 78, H = (g.max_depth + 1) * rowH + 40;
   const leaves = g.nodes.filter((n) => !g.edges.some((e) => e.source === n.id)).length;
-  const width = Math.max(W, leaves * 62);
+  const width = Math.max(W, leaves * 112);
   svg.setAttribute("viewBox", `0 0 ${width} ${H}`); svg.style.height = H + "px"; svg.style.width = width + "px";
   const pos = {}; g.nodes.forEach((n) => pos[n.id] = [30 + n.x * (width - 60), 24 + n.depth * rowH]);
   const onPath = new Set(g.path || []);
@@ -96,7 +96,8 @@ function renderTopology(t) {
     const r = n.highlight === "pinpoint" ? 11 : n.highlight === "suspect" ? 9 : 7;
     const ring = n.highlight === "pinpoint" ? `<circle cx="${x}" cy="${y}" r="${r + 6}" fill="none" stroke="#ff3b6b" stroke-width="3"><animate attributeName="r" values="${r + 4};${r + 9};${r + 4}" dur="1.6s" repeatCount="indefinite"/></circle>`
       : n.highlight === "suspect" ? `<circle cx="${x}" cy="${y}" r="${r + 4}" fill="none" stroke="#ffb020" stroke-width="2.5"/>` : "";
-    const label = n.suspect_rank ? `#${n.suspect_rank} ${n.id} (${num(n.suspect_score, 2)})` : n.id;
+    const short = n.element_type === "CELL" ? n.id.split("-").pop() : n.id;  // cells: sector (4G1), site is the parent
+    const label = n.suspect_rank ? `#${n.suspect_rank} ${n.id} (${num(n.suspect_score, 2)})` : short;
     return `<g><title>${esc(n.name)} · ${esc(n.element_type)} · ${esc(n.state)}${n.rca_score != null ? " · score " + num(n.rca_score, 2) : ""}</title>${ring}
       <circle cx="${x}" cy="${y}" r="${r}" fill="${COLORS[n.state] || COLORS.ok}" stroke="#0f1720"/>
       <text x="${x}" y="${y + r + 12}" text-anchor="middle" class="${n.highlight ? "" : "lbl-muted"}">${esc(label)}</text></g>`;
@@ -147,7 +148,7 @@ function renderIncident(d) {
     <h3>Gen AI root-cause summary <span class="tag">${esc(d.ai.confidence || "")}</span>${d.ai.agrees_with_ranker ? "" : ' <span class="tag rejected">differs from ranker</span>'}</h3>
       <div><b>${esc(d.ai.likely_root_cause || "")}</b> · ${esc(d.ai.fault_hypothesis || "")}</div><p>${esc(d.ai.summary || "No summary yet.")}</p>
       <ol>${(d.ai.next_steps || []).map((s) => `<li>${esc(typeof s === "string" ? s : JSON.stringify(s))}</li>`).join("")}</ol>
-    <h3>Customer SMS draft <span class="tag ${esc(sms.decision)}">${esc(sms.decision)}</span></h3>
+    <h3>Customer SMS draft <span id="sms-tag" class="tag ${esc(sms.decision)}">${esc(sms.decision)}</span></h3>
       <div class="sms">${esc(sms.text || "No draft.")}</div>
       <div class="muted small">${esc(sms.note)}${sms.reviewed_by ? ` Last decision by ${esc(sms.reviewed_by)} at ${fmtTs(sms.reviewed_at)}.` : ""}</div>
       ${sms.text ? `<p><input id="sms-note" placeholder="note (optional)" style="width:100%"></p>
@@ -165,6 +166,7 @@ async function review(d, decision) {
   try {
     const r = await api(`/api/incidents/${encodeURIComponent(d.incident_id)}/sms-review`, {method: "POST",
       body: JSON.stringify({decision, summary_id: d.sms.summary_id, note: $("#sms-note").value || null})});
+    $("#sms-tag").className = `tag ${r.decision}`; $("#sms-tag").textContent = r.decision;
     $("#sms-msg").innerHTML = `Recorded <b>${esc(r.decision)}</b> by ${esc(r.reviewed_by)} at ${fmtTs(r.reviewed_at)} (not sent).`;
     loadReviews(d.incident_id);
     loadIncidentList();

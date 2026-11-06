@@ -1,0 +1,1128 @@
+# Genie space: deployed configuration
+
+Captured 2026-11-06 11:32 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
+
+The NOC Genie space as deployed by the bundle (`resources/genie.yml`, body generated from
+`src/netmon_pipeline/genie_space.py`), read back from the Genie API (`GET /api/2.0/genie/spaces/{id}` with
+`include_serialized_space`). It holds no credentials. Space `01f1d9cd2ee0117c82252259a6bfd81f`: https://fevm-telco-netmon-febar.cloud.databricks.com/genie/rooms/01f1d9cd2ee0117c82252259a6bfd81f?w=7474648429104135
+
+```json
+{
+  "space_id": "01f1d9cd2ee0117c82252259a6bfd81f",
+  "title": "Banksia NOC: incidents, network health and detection KPIs",
+  "description": "Ask about Banksia Mobile's live network incidents: the failing element and the root-cause ranker's top-3 suspects, element health from core to cell, customer impact by region (aggregate counts only), Gen AI root-cause summaries and SMS drafts, and detection KPIs (time to detect, share within 5 minutes).",
+  "warehouse_id": "d7fa853ab15b20a3",
+  "parent_path": "/Users/louis.chen@databricks.com/.bundle/banksia_netmon/dev/resources",
+  "create_time": "2026-11-06T10:31:10.315Z",
+  "update_time": "2026-11-06T11:30:08.314Z"
+}
+```
+
+## Contents
+
+| tables | sample_questions | trusted_example_sql | join_hints | sql_snippets | benchmark_questions |
+|---|---|---|---|---|---|
+| 10 | 10 | 8 | 9 | 7 | 18 |
+
+_1 row(s)_
+
+Tables (every operational one is a region-filtered `netmon_noc` view; the eval scorecard is labelled):
+
+| table | description | column_configs |
+|---|---|---|
+| telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary | EVALUATION SCORECARD (ground-truth scored, national NOC only): detection KPIs per generator run, event class and fault type: share of faults detected, median / p90 time to detect, share within 5 minutes, root-cause localisation. Use only for 'scored' / 'offic… | 5 |
+| telco_netmon_febar_catalog.netmon_noc.customer_sms_drafts | Every proactive customer outage SMS draft written for an incident (one per incident and region). Drafts only: the system never sends; approval decisions are made in the topology app. | 2 |
+| telco_netmon_febar_catalog.netmon_noc.element_status | Live health of every network element (cell, cell site, backhaul link, aggregation router, UPF, AMF): state down / degraded / impacted / alarm / ok, impacted cell counts, alarms and the highest root-cause score. | 4 |
+| telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m | 5-minute cell KPI health windows: availability, attach / RRC success, latency, packet loss, throughput, drop rate, their baseline z-scores and whether the cell was degraded. | 3 |
+| telco_netmon_febar_catalog.netmon_noc.gold_impact_detections | Per-record customer-impact detections (degraded KPI minute of a cell, or an element-down alarm) from the streaming pipeline, with detection time, rules fired (flags) and the element's ancestors. | 4 |
+| telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | Latest Gen AI NOC summary per open incident: likely root cause, fault hypothesis, confidence, runbook next steps, estimated affected subscribers (aggregate) and the customer outage SMS draft (never sent). | 4 |
+| telco_netmon_febar_catalog.netmon_noc.incident_detection_times | Operational detection timing per open incident from the build's own telemetry (no ground truth): first anomaly on the top-1 suspect's subtree, first customer-impact detection, time to detect (seconds) and whether it was within the 5-minute SLA. | 3 |
+| telco_netmon_febar_catalog.netmon_noc.open_incidents | One row per OPEN network incident: the root-cause ranker's alert on a case, with its top-3 suspected root elements and scores (suspect_1 = most likely root cause). Same data the topology app reads from Lakebase. | 5 |
+| telco_netmon_febar_catalog.netmon_noc.silver_alarms | Network alarms (fault management events) with severity, alarm code, element and its ancestors. | 5 |
+| telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes | Network inventory: every element with type, name, parent, region, coordinates (lat / lon), vendor, technology (4G / 5G), urbanity and backhaul transport medium. | 8 |
+
+_10 row(s)_
+
+## Sample questions
+
+- What does the AI summary recommend for the North Queensland incident?
+- Which network element is failing in each open incident?
+- Show the customer SMS drafts waiting for approval
+- How many subscribers are impacted by open incidents in each region?
+- What are the top-3 suspects for the incident on SITE-NSW-00105?
+- What is the scored time to detect by fault type on the live feed?
+- Which cell sites are down right now?
+- Which backhaul links are degraded?
+- What is our MTTD and the share of incidents detected within 5 minutes?
+- Which alarms were raised on SITE-NSW-00105 and its cells?
+
+## General instructions
+
+```text
+You answer questions from Banksia Mobile's Network Operations Centre (NOC). All data is synthetic.
+
+Network hierarchy (parent_id chains upward): CELL (a 4G/5G sector) > SITE (cell site / tower) > BACKHAUL_LINK
+(fibre or microwave backhaul) > AGG_ROUTER (aggregation router) > UPF_SGW (core user plane) > AMF_MME (core control
+plane, "the AMF" / "the MME"). "Core" means AMF_MME and UPF_SGW. "Cell site" or "tower" means SITE. "Backhaul" means
+BACKHAUL_LINK. "Router" means AGG_ROUTER.
+
+Regions: NSW = Sydney & NSW, VIC = Melbourne & Victoria, NQL = North Queensland, WA = Perth & South West WA. Filter
+with region_code. Users only see the regions they are entitled to; never claim a region has no incidents when the
+user may simply not be allowed to see it: say "in the regions you can see".
+
+Incidents: open_incidents has one row per open incident; suspect_1_id is the most likely root-cause ("failing")
+element, suspect_2/3 are the alternatives with lower scores. "Top-3 suspects" = suspect_1..3 with their scores. The
+Gen AI explanation is in incident_ai_summary (same incident_id); always present the ranker's suspects first and the
+AI summary as supporting text.
+
+Time: all timestamps are UTC. The data is a replayed feed from 2026-10-08/09, so "now" / "currently" / "latest"
+means max(last_scored_ts) of open_incidents, never current_timestamp(). Convert to local time with
+from_utc_timestamp(ts, timezone) using silver_topology_nodes.timezone (NSW Australia/Sydney, VIC Australia/Melbourne,
+NQL Australia/Brisbane, WA Australia/Perth) when the user asks for local time.
+
+KPIs:
+- Time to detect (TTD) per incident = incident_detection_times.time_to_detect_s (seconds). MTTD = AVG of it.
+  "Detected within 5 minutes" = detected_within_5min (SLA 300 s). Report seconds and minutes. This operational TTD
+  starts at the first anomaly visible in the telemetry, so for slowly ramping faults (backhaul degradation) the
+  true time to detect is longer; mention that when the user asks about backhaul or about SLA compliance.
+- The ground-truth scored detection KPIs (the "official" scorecard) are in netmon_eval.eval_ttd_summary: use
+  source_run = 'stream' (the live feed), event_class = 'fault' and fault_type = 'ALL' for the headline unless a
+  fault type is asked. Say these are evaluation figures.
+- MTTR (mean time to repair / restore) cannot be computed: the space only holds currently open incidents, no
+  resolved ones. Say so and offer the incident age instead (max(last_scored_ts) - detected_ts).
+- Impacted subscribers: use incident_ai_summary.est_affected_subscribers (estimate, aggregate). Impacted cells:
+  open_incidents.n_impacted_cells. There is no per-subscriber data in this space; refuse requests for IMSI, MSISDN,
+  phone numbers or named customers.
+- "Failing" / "worst" elements: element_status with state IN ('down','degraded'), ordered by state severity
+  (down first) then rca_score DESC, then n_impacted_cells DESC.
+
+Detections and KPI windows have several generator runs: default to source_run = 'stream' (the live feed) unless the
+user asks about history.
+
+SMS drafts are drafts: never describe one as sent. Drafts "waiting for approval" / "pending" are the CURRENT draft
+of each open incident: incident_ai_summary.sms_draft_status = 'draft' (one per open incident).
+customer_sms_drafts is the full draft history (several per incident, including superseded ones): use it only for
+history questions such as "how many drafts were written".
+
+```
+
+## Space permissions
+
+| principal | display_name | levels |
+|---|---|---|
+| noc_region_nt | NULL | CAN_RUN |
+| noc_region_nql | NULL | CAN_RUN |
+| noc_region_act | NULL | CAN_RUN |
+| noc_region_nsw | NULL | CAN_RUN |
+| noc_national | NULL | CAN_RUN |
+| noc_region_qld | NULL | CAN_RUN |
+| louis.chen@databricks.com | Louis Chen | CAN_MANAGE, CAN_MANAGE |
+| noc_region_pil | NULL | CAN_RUN |
+| noc_region_tas | NULL | CAN_RUN |
+| noc_region_wa | NULL | CAN_RUN |
+| admins | NULL | CAN_MANAGE |
+| noc_region_sa | NULL | CAN_RUN |
+| noc_region_vic | NULL | CAN_RUN |
+
+_13 row(s)_
+
+## Full serialized space (as deployed)
+
+```json
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {
+        "id": "153eb8037ac4a51561fc0646df3762d3",
+        "question": [
+          "What does the AI summary recommend for the North Queensland incident?"
+        ]
+      },
+      {
+        "id": "1731e2d39e9ab4b781c645f0b2133d72",
+        "question": [
+          "Which network element is failing in each open incident?"
+        ]
+      },
+      {
+        "id": "17e0f1ccbbc2d0c572e7c427e0dbbf10",
+        "question": [
+          "Show the customer SMS drafts waiting for approval"
+        ]
+      },
+      {
+        "id": "2c4efd00f7cd9ccd5227f51a6bc98141",
+        "question": [
+          "How many subscribers are impacted by open incidents in each region?"
+        ]
+      },
+      {
+        "id": "64bfe4e683200dc5219cdc545205adbb",
+        "question": [
+          "What are the top-3 suspects for the incident on SITE-NSW-00105?"
+        ]
+      },
+      {
+        "id": "65a76af30f24628490e61064e6b40f7b",
+        "question": [
+          "What is the scored time to detect by fault type on the live feed?"
+        ]
+      },
+      {
+        "id": "934b5e40b7c3977a3f96a309f08d184a",
+        "question": [
+          "Which cell sites are down right now?"
+        ]
+      },
+      {
+        "id": "f2204665f1b4e18479dbd0d0cd6c7df2",
+        "question": [
+          "Which backhaul links are degraded?"
+        ]
+      },
+      {
+        "id": "f921dc1dcfa2bd66b25b52da7c4af960",
+        "question": [
+          "What is our MTTD and the share of incidents detected within 5 minutes?"
+        ]
+      },
+      {
+        "id": "fb2211af0cd576e6e12525cac9e008d8",
+        "question": [
+          "Which alarms were raised on SITE-NSW-00105 and its cells?"
+        ]
+      }
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary",
+        "description": [
+          "EVALUATION SCORECARD (ground-truth scored, national NOC only): detection KPIs per generator run, event class and fault type: share of faults detected, median / p90 time to detect, share within 5 minutes, root-cause localisation. Use only for 'scored' / 'official' detection KPI questions, never for live incident lists."
+        ],
+        "column_configs": [
+          {
+            "column_name": "event_class",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "fault_type",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "impact_median_ttd_s",
+            "description": [
+              "Median time to detect customer impact, seconds (scored against ground truth)"
+            ]
+          },
+          {
+            "column_name": "impact_within_5min_pct",
+            "description": [
+              "Share of scored faults whose customer impact was detected within 5 minutes (%)"
+            ]
+          },
+          {
+            "column_name": "source_run",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.customer_sms_drafts",
+        "description": [
+          "Every proactive customer outage SMS draft written for an incident (one per incident and region). Drafts only: the system never sends; approval decisions are made in the topology app."
+        ],
+        "column_configs": [
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "status",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.element_status",
+        "description": [
+          "Live health of every network element (cell, cell site, backhaul link, aggregation router, UPF, AMF): state down / degraded / impacted / alarm / ok, impacted cell counts, alarms and the highest root-cause score."
+        ],
+        "column_configs": [
+          {
+            "column_name": "element_type",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "rca_score",
+            "description": [
+              "Highest root-cause probability of this element in any current case (0-1)"
+            ]
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "state",
+            "description": [
+              "down > degraded > impacted > alarm > ok (worst first)"
+            ],
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m",
+        "description": [
+          "5-minute cell KPI health windows: availability, attach / RRC success, latency, packet loss, throughput, drop rate, their baseline z-scores and whether the cell was degraded."
+        ],
+        "column_configs": [
+          {
+            "column_name": "is_degraded",
+            "description": [
+              "True when the cell breached a detection rule in the window"
+            ]
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "source_run",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.gold_impact_detections",
+        "description": [
+          "Per-record customer-impact detections (degraded KPI minute of a cell, or an element-down alarm) from the streaming pipeline, with detection time, rules fired (flags) and the element's ancestors."
+        ],
+        "column_configs": [
+          {
+            "column_name": "element_type",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "signal_source",
+            "description": [
+              "kpi (degraded cell KPI record) or alarm (element-down alarm)"
+            ],
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "source_run",
+            "description": [
+              "Generator run; 'stream' is the live feed, history* are backfills"
+            ],
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.incident_ai_summary",
+        "description": [
+          "Latest Gen AI NOC summary per open incident: likely root cause, fault hypothesis, confidence, runbook next steps, estimated affected subscribers (aggregate) and the customer outage SMS draft (never sent)."
+        ],
+        "column_configs": [
+          {
+            "column_name": "confidence",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "est_affected_subscribers",
+            "description": [
+              "Estimated affected subscribers for the incident (aggregate count)"
+            ]
+          },
+          {
+            "column_name": "fault_hypothesis",
+            "description": [
+              "Fault class, e.g. SITE_POWER_OUTAGE, BACKHAUL_DEGRADATION, CELL_OUTAGE, LONG_HAUL_FIBRE_CUT"
+            ],
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.incident_detection_times",
+        "description": [
+          "Operational detection timing per open incident from the build's own telemetry (no ground truth): first anomaly on the top-1 suspect's subtree, first customer-impact detection, time to detect (seconds) and whether it was within the 5-minute SLA."
+        ],
+        "column_configs": [
+          {
+            "column_name": "detected_within_5min",
+            "description": [
+              "True when time_to_detect_s <= 300 (the NOC's 5-minute SLA)"
+            ]
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "time_to_detect_s",
+            "description": [
+              "Operational time to detect in seconds (MTTD = average of this)"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.open_incidents",
+        "description": [
+          "One row per OPEN network incident: the root-cause ranker's alert on a case, with its top-3 suspected root elements and scores (suspect_1 = most likely root cause). Same data the topology app reads from Lakebase."
+        ],
+        "column_configs": [
+          {
+            "column_name": "detected_ts",
+            "description": [
+              "UTC time the incident was opened (ranker alert)"
+            ]
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "status",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "suspect_1_id",
+            "description": [
+              "Most likely root-cause element; use this for 'failing element' / 'root cause' questions"
+            ]
+          },
+          {
+            "column_name": "suspect_1_type",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_alarms",
+        "description": [
+          "Network alarms (fault management events) with severity, alarm code, element and its ancestors."
+        ],
+        "column_configs": [
+          {
+            "column_name": "alarm_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "element_type",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "is_service_down",
+            "description": [
+              "True for element-down alarm codes (NODE_DOWN, NE_UNREACHABLE, CELL_OUT_OF_SERVICE, ...)"
+            ]
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "severity",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      },
+      {
+        "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes",
+        "description": [
+          "Network inventory: every element with type, name, parent, region, coordinates (lat / lon), vendor, technology (4G / 5G), urbanity and backhaul transport medium."
+        ],
+        "column_configs": [
+          {
+            "column_name": "element_type",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "name",
+            "description": [
+              "Human-readable element name, e.g. 'Sydney & NSW site 105'"
+            ]
+          },
+          {
+            "column_name": "parent_id",
+            "description": [
+              "Parent element: CELL > SITE > BACKHAUL_LINK > AGG_ROUTER > UPF_SGW > AMF_MME"
+            ]
+          },
+          {
+            "column_name": "region",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "region_code",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "technology",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "transport_medium",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "urbanity",
+            "enable_format_assistance": true,
+            "enable_entity_matching": true
+          }
+        ]
+      }
+    ]
+  },
+  "instructions": {
+    "text_instructions": [
+      {
+        "id": "cbde2df6a7c89370edc449dc5705d30c",
+        "content": [
+          "You answer questions from Banksia Mobile's Network Operations Centre (NOC). All data is synthetic.\n",
+          "\n",
+          "Network hierarchy (parent_id chains upward): CELL (a 4G/5G sector) > SITE (cell site / tower) > BACKHAUL_LINK\n",
+          "(fibre or microwave backhaul) > AGG_ROUTER (aggregation router) > UPF_SGW (core user plane) > AMF_MME (core control\n",
+          "plane, \"the AMF\" / \"the MME\"). \"Core\" means AMF_MME and UPF_SGW. \"Cell site\" or \"tower\" means SITE. \"Backhaul\" means\n",
+          "BACKHAUL_LINK. \"Router\" means AGG_ROUTER.\n",
+          "\n",
+          "Regions: NSW = Sydney & NSW, VIC = Melbourne & Victoria, NQL = North Queensland, WA = Perth & South West WA. Filter\n",
+          "with region_code. Users only see the regions they are entitled to; never claim a region has no incidents when the\n",
+          "user may simply not be allowed to see it: say \"in the regions you can see\".\n",
+          "\n",
+          "Incidents: open_incidents has one row per open incident; suspect_1_id is the most likely root-cause (\"failing\")\n",
+          "element, suspect_2/3 are the alternatives with lower scores. \"Top-3 suspects\" = suspect_1..3 with their scores. The\n",
+          "Gen AI explanation is in incident_ai_summary (same incident_id); always present the ranker's suspects first and the\n",
+          "AI summary as supporting text.\n",
+          "\n",
+          "Time: all timestamps are UTC. The data is a replayed feed from 2026-10-08/09, so \"now\" / \"currently\" / \"latest\"\n",
+          "means max(last_scored_ts) of open_incidents, never current_timestamp(). Convert to local time with\n",
+          "from_utc_timestamp(ts, timezone) using silver_topology_nodes.timezone (NSW Australia/Sydney, VIC Australia/Melbourne,\n",
+          "NQL Australia/Brisbane, WA Australia/Perth) when the user asks for local time.\n",
+          "\n",
+          "KPIs:\n",
+          "- Time to detect (TTD) per incident = incident_detection_times.time_to_detect_s (seconds). MTTD = AVG of it.\n",
+          "  \"Detected within 5 minutes\" = detected_within_5min (SLA 300 s). Report seconds and minutes. This operational TTD\n",
+          "  starts at the first anomaly visible in the telemetry, so for slowly ramping faults (backhaul degradation) the\n",
+          "  true time to detect is longer; mention that when the user asks about backhaul or about SLA compliance.\n",
+          "- The ground-truth scored detection KPIs (the \"official\" scorecard) are in netmon_eval.eval_ttd_summary: use\n",
+          "  source_run = 'stream' (the live feed), event_class = 'fault' and fault_type = 'ALL' for the headline unless a\n",
+          "  fault type is asked. Say these are evaluation figures.\n",
+          "- MTTR (mean time to repair / restore) cannot be computed: the space only holds currently open incidents, no\n",
+          "  resolved ones. Say so and offer the incident age instead (max(last_scored_ts) - detected_ts).\n",
+          "- Impacted subscribers: use incident_ai_summary.est_affected_subscribers (estimate, aggregate). Impacted cells:\n",
+          "  open_incidents.n_impacted_cells. There is no per-subscriber data in this space; refuse requests for IMSI, MSISDN,\n",
+          "  phone numbers or named customers.\n",
+          "- \"Failing\" / \"worst\" elements: element_status with state IN ('down','degraded'), ordered by state severity\n",
+          "  (down first) then rca_score DESC, then n_impacted_cells DESC.\n",
+          "\n",
+          "Detections and KPI windows have several generator runs: default to source_run = 'stream' (the live feed) unless the\n",
+          "user asks about history.\n",
+          "\n",
+          "SMS drafts are drafts: never describe one as sent. Drafts \"waiting for approval\" / \"pending\" are the CURRENT draft\n",
+          "of each open incident: incident_ai_summary.sms_draft_status = 'draft' (one per open incident).\n",
+          "customer_sms_drafts is the full draft history (several per incident, including superseded ones): use it only for\n",
+          "history questions such as \"how many drafts were written\".\n"
+        ]
+      }
+    ],
+    "example_question_sqls": [
+      {
+        "id": "00230b729fba1a9151798df356c4afe2",
+        "question": [
+          "Show the top-3 suspects of every open incident"
+        ],
+        "sql": [
+          "SELECT incident_id, region_code, detected_ts, suspect_1_id, round(suspect_1_score, 2) AS suspect_1_score,\n",
+          "       suspect_2_id, round(suspect_2_score, 2) AS suspect_2_score, suspect_3_id,\n",
+          "       round(suspect_3_score, 2) AS suspect_3_score, n_impacted_cells\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.open_incidents ORDER BY detected_ts"
+        ]
+      },
+      {
+        "id": "0349848b839d93cadfc7f85850376079",
+        "question": [
+          "What is the time to detect for each open incident?"
+        ],
+        "sql": [
+          "SELECT incident_id, region_code, suspect_1_id, first_impact_signal_ts, first_detection_ts,\n",
+          "       time_to_detect_s, round(time_to_detect_s / 60, 1) AS time_to_detect_min, detected_within_5min\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times\n",
+          "ORDER BY first_impact_signal_ts"
+        ]
+      },
+      {
+        "id": "27808cf1380ffd93235c7cabfecced80",
+        "question": [
+          "Which cell sites are down?"
+        ],
+        "sql": [
+          "SELECT s.element_id, n.name, s.region_code, s.n_desc_cells, s.n_impacted_cells, s.open_incident_id\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.element_status s JOIN telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes n ON n.element_id = s.element_id\n",
+          "WHERE s.element_type = 'SITE' AND s.state = 'down' ORDER BY s.region_code, s.element_id"
+        ]
+      },
+      {
+        "id": "604704b74c36ab9893993017236290c4",
+        "question": [
+          "What is the scored detection SLA of the live feed?"
+        ],
+        "sql": [
+          "SELECT n_incidents, impact_detected_pct, impact_median_ttd_s, impact_p90_ttd_s, impact_within_5min_pct,\n",
+          "       root_localised_pct, localised_within_5min_pct\n",
+          "FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary\n",
+          "WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"
+        ]
+      },
+      {
+        "id": "a45207a1f87694b643125b88bba740e3",
+        "question": [
+          "What share of open incidents was detected within 5 minutes, and what is the MTTD?"
+        ],
+        "sql": [
+          "SELECT count(*) AS n_incidents,\n",
+          "       round(100 * avg(CASE WHEN detected_within_5min THEN 1 ELSE 0 END), 1) AS pct_detected_within_5min,\n",
+          "       round(avg(time_to_detect_s), 1) AS mttd_s\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times"
+        ]
+      },
+      {
+        "id": "a5ea0132062c23f5e17bf2d0da98df80",
+        "question": [
+          "How many subscribers are impacted by open incidents, by region?"
+        ],
+        "sql": [
+          "SELECT a.region_code, count(DISTINCT a.incident_id) AS open_incidents,\n",
+          "       sum(a.est_affected_subscribers) AS est_affected_subscribers, sum(o.n_impacted_cells) AS impacted_cells\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.incident_ai_summary a JOIN telco_netmon_febar_catalog.netmon_noc.open_incidents o ON o.incident_id = a.incident_id\n",
+          "GROUP BY a.region_code ORDER BY est_affected_subscribers DESC"
+        ]
+      },
+      {
+        "id": "afeb7806e36dce604ba8c1dc6aba72b8",
+        "question": [
+          "What does the AI say caused each open incident and what should we do next?"
+        ],
+        "sql": [
+          "SELECT a.incident_id, a.region_code, o.suspect_1_id, a.likely_root_cause, a.fault_hypothesis, a.confidence,\n",
+          "       a.summary, a.next_steps_json\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.incident_ai_summary a\n",
+          "JOIN telco_netmon_febar_catalog.netmon_noc.open_incidents o ON o.incident_id = a.incident_id ORDER BY o.detected_ts"
+        ]
+      },
+      {
+        "id": "dddca1d87bc79814f485993517dfc9e9",
+        "question": [
+          "What are the top failing network elements right now?"
+        ],
+        "sql": [
+          "SELECT element_id, element_type, region_code, state, round(rca_score, 2) AS rca_score, n_impacted_cells,\n",
+          "       n_desc_cells, open_incident_id, suspect_rank\n",
+          "FROM telco_netmon_febar_catalog.netmon_noc.element_status\n",
+          "WHERE state IN ('down', 'degraded')\n",
+          "ORDER BY CASE state WHEN 'down' THEN 0 ELSE 1 END, rca_score DESC NULLS LAST, n_impacted_cells DESC\n",
+          "LIMIT 10"
+        ]
+      }
+    ],
+    "join_specs": [
+      {
+        "id": "014a68209cea862106b43a15be804080",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.open_incidents",
+          "alias": "open_incidents"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes",
+          "alias": "silver_topology_nodes"
+        },
+        "sql": [
+          "`open_incidents`.`suspect_1_id` = `silver_topology_nodes`.`element_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+        ]
+      },
+      {
+        "id": "0f22587c2a2255c8b68e8251c80886ed",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.gold_impact_detections",
+          "alias": "gold_impact_detections"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes",
+          "alias": "silver_topology_nodes"
+        },
+        "sql": [
+          "`gold_impact_detections`.`element_id` = `silver_topology_nodes`.`element_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+        ]
+      },
+      {
+        "id": "652111d38fce8b9f675204c8dad67d04",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.open_incidents",
+          "alias": "open_incidents"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.incident_detection_times",
+          "alias": "incident_detection_times"
+        },
+        "sql": [
+          "`open_incidents`.`incident_id` = `incident_detection_times`.`incident_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_ONE_TO_ONE--"
+        ]
+      },
+      {
+        "id": "7c523072cdd87f104a477bd5d9e4fc7d",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_alarms",
+          "alias": "silver_alarms"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes",
+          "alias": "silver_topology_nodes"
+        },
+        "sql": [
+          "`silver_alarms`.`element_id` = `silver_topology_nodes`.`element_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+        ]
+      },
+      {
+        "id": "b72a77b0b7a5115e1dea5ce9b9eda73e",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.element_status",
+          "alias": "element_status"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes",
+          "alias": "silver_topology_nodes"
+        },
+        "sql": [
+          "`element_status`.`element_id` = `silver_topology_nodes`.`element_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_ONE_TO_ONE--"
+        ]
+      },
+      {
+        "id": "c43b66da1c4aa0e819ef0646f619bab0",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.customer_sms_drafts",
+          "alias": "customer_sms_drafts"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.open_incidents",
+          "alias": "open_incidents"
+        },
+        "sql": [
+          "`customer_sms_drafts`.`incident_id` = `open_incidents`.`incident_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+        ]
+      },
+      {
+        "id": "e4516d735280f3d7870de0f17e3e1fd8",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.element_status",
+          "alias": "element_status"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.open_incidents",
+          "alias": "open_incidents"
+        },
+        "sql": [
+          "`element_status`.`open_incident_id` = `open_incidents`.`incident_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+        ]
+      },
+      {
+        "id": "e7cd8cbeeafcfe390760b0cffb5b1ea7",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.gold_cell_health_5m",
+          "alias": "gold_cell_health_5m"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes",
+          "alias": "silver_topology_nodes"
+        },
+        "sql": [
+          "`gold_cell_health_5m`.`cell_id` = `silver_topology_nodes`.`element_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+        ]
+      },
+      {
+        "id": "eca2d8659501c5a645d1eb40b3c2a1c6",
+        "left": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.open_incidents",
+          "alias": "open_incidents"
+        },
+        "right": {
+          "identifier": "telco_netmon_febar_catalog.netmon_noc.incident_ai_summary",
+          "alias": "incident_ai_summary"
+        },
+        "sql": [
+          "`open_incidents`.`incident_id` = `incident_ai_summary`.`incident_id`",
+          "--rt=FROM_RELATIONSHIP_TYPE_ONE_TO_ONE--"
+        ]
+      }
+    ],
+    "sql_snippets": {
+      "filters": [
+        {
+          "id": "2bb2b9bbf9e6e94a998e9e64a3cece28",
+          "sql": [
+            "eval_ttd_summary.source_run = 'stream' AND eval_ttd_summary.event_class = 'fault' AND eval_ttd_summary.fault_type = 'ALL'"
+          ],
+          "display_name": "scorecard headline"
+        },
+        {
+          "id": "4bcbc35556f0f2a100d5ec317beefddb",
+          "sql": [
+            "element_status.state IN ('down', 'degraded')"
+          ],
+          "display_name": "failing elements"
+        },
+        {
+          "id": "e18f04d0cb31a89e221082441ab10241",
+          "sql": [
+            "gold_impact_detections.source_run = 'stream'"
+          ],
+          "display_name": "live feed"
+        }
+      ],
+      "expressions": [
+        {
+          "id": "45499957029eaa62eff64599bf6510bf",
+          "alias": "detected_sydney_time",
+          "sql": [
+            "from_utc_timestamp(open_incidents.detected_ts, 'Australia/Sydney')"
+          ],
+          "display_name": "detected (Sydney time)"
+        }
+      ],
+      "measures": [
+        {
+          "id": "00c4ca1000627b7042d70131018c8dc0",
+          "alias": "mttd_s",
+          "sql": [
+            "avg(incident_detection_times.time_to_detect_s)"
+          ],
+          "display_name": "MTTD (s)"
+        },
+        {
+          "id": "88498415adebb275159603be3e1cf66b",
+          "alias": "pct_detected_within_5min",
+          "sql": [
+            "100 * avg(CASE WHEN incident_detection_times.detected_within_5min THEN 1 ELSE 0 END)"
+          ],
+          "display_name": "% detected within 5 min"
+        },
+        {
+          "id": "d8ac8658b25465aeecdc33df0d191082",
+          "alias": "est_affected_subscribers",
+          "sql": [
+            "sum(incident_ai_summary.est_affected_subscribers)"
+          ],
+          "display_name": "estimated affected subscribers"
+        }
+      ]
+    }
+  },
+  "benchmarks": {
+    "questions": [
+      {
+        "id": "f8c1a9b2772f5e6918133542801a971f",
+        "question": [
+          "How many incidents are open?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT count(*) AS open_incidents FROM telco_netmon_febar_catalog.netmon_noc.open_incidents"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "e0a1f8188b18e5b2ddbaf3f600fe5f1a",
+        "question": [
+          "What is the average time to detect across open incidents in seconds?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT round(avg(time_to_detect_s), 1) AS mttd_s FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "d5eb8c250dc6dbcd1e92f28c15582a43",
+        "question": [
+          "What is the scored share of faults detected within 5 minutes on the live feed?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT impact_within_5min_pct FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type = 'ALL'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "c9ad45368ba672095e082aee99a20573",
+        "question": [
+          "Which element types does the aggregation router AGG-NSW-04 serve directly?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT element_type, count(*) AS n FROM telco_netmon_febar_catalog.netmon_noc.silver_topology_nodes WHERE parent_id = 'AGG-NSW-04' GROUP BY element_type"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "c2b599f95b5aed6fdecc2c6015486c70",
+        "question": [
+          "What is the scored median time to detect per fault type on the live feed?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT fault_type, impact_median_ttd_s FROM telco_netmon_febar_catalog.netmon_eval.eval_ttd_summary WHERE source_run = 'stream' AND event_class = 'fault' AND fault_type <> 'ALL' ORDER BY fault_type"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "bd8fe9c9adef4db30e4c7d17ba4ec4b4",
+        "question": [
+          "How many customer-impact detections did the live feed produce per signal source?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT signal_source, count(*) AS n_detections FROM telco_netmon_febar_catalog.netmon_noc.gold_impact_detections WHERE source_run = 'stream' GROUP BY signal_source ORDER BY signal_source"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "9f60b9f9993d5cebc32629a8b9592ef7",
+        "question": [
+          "List the top-3 root-cause suspects with scores for the incident whose top suspect is SITE-NSW-00105"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT incident_id, suspect_1_id, suspect_1_score, suspect_2_id, suspect_2_score, suspect_3_id, suspect_3_score FROM telco_netmon_febar_catalog.netmon_noc.open_incidents WHERE suspect_1_id = 'SITE-NSW-00105'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "9c93f232b1d58c62bbe0c0ec6d2af05d",
+        "question": [
+          "How many SMS drafts are waiting for approval?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT count(*) AS n_drafts FROM telco_netmon_febar_catalog.netmon_noc.incident_ai_summary WHERE sms_draft_status = 'draft'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "8cc547c4646bc2365941065fa7d6d695",
+        "question": [
+          "How many estimated subscribers are affected in NSW?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT sum(est_affected_subscribers) AS est_affected_subscribers FROM telco_netmon_febar_catalog.netmon_noc.incident_ai_summary WHERE region_code = 'NSW'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "88f6a7373ecb7a5cc2e33ae0970ece10",
+        "question": [
+          "How many open incidents are there per region?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT region_code, count(*) AS open_incidents FROM telco_netmon_febar_catalog.netmon_noc.open_incidents GROUP BY region_code ORDER BY region_code"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "88160f1060a5ebbc88c5c47308e96918",
+        "question": [
+          "What fault does the AI assistant suspect for the North Queensland incident?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT incident_id, likely_root_cause, fault_hypothesis FROM telco_netmon_febar_catalog.netmon_noc.incident_ai_summary WHERE region_code = 'NQL'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "80f7acfbf0f16601463cd248b1d71e2f",
+        "question": [
+          "What is the most likely failing element of incident RCA-c7276c3238a27971?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT suspect_1_id, suspect_1_type, suspect_1_score FROM telco_netmon_febar_catalog.netmon_noc.open_incidents WHERE incident_id = 'RCA-c7276c3238a27971'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "575d470d408aa07eba72aeac0d97a61b",
+        "question": [
+          "What percentage of open incidents were detected within 5 minutes?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT round(100 * avg(CASE WHEN detected_within_5min THEN 1 ELSE 0 END), 1) AS pct_within_5min FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "553a7e6f3b292da50644cf6259ac6158",
+        "question": [
+          "Which backhaul links are the top suspect of an open incident?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT incident_id, suspect_1_id FROM telco_netmon_febar_catalog.netmon_noc.open_incidents WHERE suspect_1_type = 'BACKHAUL_LINK' ORDER BY incident_id"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "50864326e0a27a47064362351202e89e",
+        "question": [
+          "Which region has the most estimated affected subscribers?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT region_code, sum(est_affected_subscribers) AS est_affected_subscribers FROM telco_netmon_febar_catalog.netmon_noc.incident_ai_summary GROUP BY region_code ORDER BY est_affected_subscribers DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "41a6b59e44c0018115a5e89d7c9aeef5",
+        "question": [
+          "List the cell sites that are down"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT element_id FROM telco_netmon_febar_catalog.netmon_noc.element_status WHERE element_type = 'SITE' AND state = 'down' ORDER BY element_id"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "32f16a217c86dc114ca3d87c162856e6",
+        "question": [
+          "Which incident took the longest to detect?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT incident_id, time_to_detect_s FROM telco_netmon_febar_catalog.netmon_noc.incident_detection_times ORDER BY time_to_detect_s DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "11b31c9bb10cecf7a9bf45a3a8c19a15",
+        "question": [
+          "How many network elements are down, by element type?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT element_type, count(*) AS n_down FROM telco_netmon_febar_catalog.netmon_noc.element_status WHERE state = 'down' GROUP BY element_type ORDER BY n_down DESC"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```

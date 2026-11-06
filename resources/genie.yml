@@ -13,3 +13,28 @@ resources:
         root-cause summaries and SMS drafts, and detection KPIs (time to detect, share within 5 minutes).
       warehouse_id: ${var.warehouse_id}
       file_path: genie/noc_space.geniespace.json
+      # NOC roles (workspace groups created by the governance job) may open and ask the space; what they can
+      # see is decided by Unity Catalog per user (row filters, grants), not by this permission.
+      permissions:
+        - group_name: noc_national
+          level: CAN_RUN
+        - group_name: noc_region_nsw
+          level: CAN_RUN
+        - group_name: noc_region_vic
+          level: CAN_RUN
+        - group_name: noc_region_qld
+          level: CAN_RUN
+        - group_name: noc_region_wa
+          level: CAN_RUN
+        - group_name: noc_region_sa
+          level: CAN_RUN
+        - group_name: noc_region_tas
+          level: CAN_RUN
+        - group_name: noc_region_act
+          level: CAN_RUN
+        - group_name: noc_region_nt
+          level: CAN_RUN
+        - group_name: noc_region_nql
+          level: CAN_RUN
+        - group_name: noc_region_pil
+          level: CAN_RUN

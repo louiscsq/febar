@@ -32,8 +32,29 @@ resources:
             name: noc_genie
             space_id: ${resources.genie_spaces.noc_genie.id}
             permission: CAN_RUN
+      # NOC roles may open the app; their data scope comes from UC (see the identity notes above).
       permissions:
-        - group_name: users
+        - group_name: noc_national
+          level: CAN_USE
+        - group_name: noc_region_nsw
+          level: CAN_USE
+        - group_name: noc_region_vic
+          level: CAN_USE
+        - group_name: noc_region_qld
+          level: CAN_USE
+        - group_name: noc_region_wa
+          level: CAN_USE
+        - group_name: noc_region_sa
+          level: CAN_USE
+        - group_name: noc_region_tas
+          level: CAN_USE
+        - group_name: noc_region_act
+          level: CAN_USE
+        - group_name: noc_region_nt
+          level: CAN_USE
+        - group_name: noc_region_nql
+          level: CAN_USE
+        - group_name: noc_region_pil
           level: CAN_USE
 
   jobs:
