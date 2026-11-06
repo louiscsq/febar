@@ -122,6 +122,8 @@ def conform(df: pd.DataFrame, ddl: str) -> pd.DataFrame:
             out[name] = pd.to_numeric(x, errors="coerce").astype("Int64")
         elif typ == "TIMESTAMP":
             out[name] = pd.to_datetime(x, utc=True)
+        elif typ == "BOOLEAN":
+            out[name] = x.astype(object).where(x.notna(), None).map(lambda v: v if v is None else bool(v))
         else:
             out[name] = x.astype(object).where(x.notna(), None).map(lambda v: v if v is None else str(v))
     return out

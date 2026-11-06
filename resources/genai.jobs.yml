@@ -1,0 +1,103 @@
+# Step 4: Gen AI NOC assistant and customer SMS drafts (docs/genai_assistant.md). Serverless jobs; every LLM call
+# goes to the AI-Gateway-governed endpoint (netmon_pipeline.genai.gateway, applied by
+# scripts/genai_configure_gateway.py) with the job's own identity.
+resources:
+  jobs:
+    # Evaluation set: grounded contexts (netmon_genai) and ground-truth labels (netmon_eval, scoring only).
+    genai_build_evalset:
+      name: banksia-genai-build-evalset
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: genai_schema, default: "${resources.schemas.netmon_genai.name}"}
+        - {name: eval_schema, default: "${resources.schemas.netmon_eval.name}"}
+        - {name: train_run, default: "${var.rca_train_run}"}
+        - {name: holdout_run, default: "${var.rca_holdout_run}"}
+        - {name: dev_start, default: "2026-10-14"}
+        - {name: model_name, default: rca_ranker}
+      environments: &genai_envs
+        - environment_key: genai
+          spec:
+            client: "4"
+            dependencies:
+              - ../dist/*.whl
+              - scikit-learn==1.7.2
+              - mlflow[databricks]>=3.4
+              - databricks-sdk>=0.81
+              - pydantic>=2
+              - psycopg[binary]>=3.2
+      tasks:
+        - task_key: build_evalset
+          environment_key: genai
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../notebooks/08_genai_build_evalset.py
+
+    # MLflow GenAI evaluation of one split (dev: iterate; holdout: once, refuses to re-run unless force=true).
+    genai_evaluate:
+      name: banksia-genai-evaluate
+      max_concurrent_runs: 1
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: genai_schema, default: "${resources.schemas.netmon_genai.name}"}
+        - {name: eval_schema, default: "${resources.schemas.netmon_eval.name}"}
+        - {name: split, default: dev}
+        - {name: limit, default: "0"}
+        - {name: judges, default: "true"}
+        - {name: max_workers, default: "8"}
+        - {name: force, default: "false"}
+        - {name: experiment, default: /Shared/banksia_netmon/noc_assistant}
+      environments: *genai_envs
+      tasks:
+        - task_key: evaluate
+          environment_key: genai
+          timeout_seconds: 7200
+          notebook_task:
+            notebook_path: ../notebooks/09_genai_evaluate.py
+
+    # Live: summarise newly opened incidents (and incidents whose suspects changed), draft SMS, publish to UC and
+    # Lakebase. Triggered when netmon_rca.open_incidents changes (each scoring run's MERGE), so the LLM is only paid
+    # for when there is something new; unchanged incidents are skipped (no LLM call).
+    genai_assistant:
+      name: banksia-genai-assistant
+      max_concurrent_runs: 1
+      trigger:
+        pause_status: UNPAUSED
+        table_update:
+          table_names:
+            - ${var.catalog}.${resources.schemas.netmon_rca.name}.open_incidents
+          condition: ANY_UPDATED
+          min_time_between_triggers_seconds: 60
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: genai_schema, default: "${resources.schemas.netmon_genai.name}"}
+        - {name: model_name, default: rca_ranker}
+        - {name: max_incidents, default: "50"}
+        - {name: force, default: "false"}
+        - {name: sync_lakebase, default: "true"}
+        - {name: experiment, default: /Shared/banksia_netmon/noc_assistant}
+      environments: *genai_envs
+      tasks:
+        - task_key: summarise
+          environment_key: genai
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../notebooks/10_genai_assistant.py
+
+    # Lakebase read-back of the assistant's latest summaries with psycopg + OAuth (what the step-5 app does).
+    genai_lakebase_check:
+      name: banksia-genai-lakebase-check
+      parameters:
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: genai_schema, default: "${resources.schemas.netmon_genai.name}"}
+        - {name: rca_schema, default: "${resources.schemas.netmon_rca.name}"}
+        - {name: instance, default: "${resources.database_instances.netmon_lakebase.name}"}
+        - {name: database, default: "${var.lakebase_database}"}
+        - {name: n_lookups, default: "300"}
+      environments: *genai_envs
+      tasks:
+        - task_key: lakebase
+          environment_key: genai
+          notebook_task:
+            notebook_path: ../notebooks/11_genai_lakebase_check.py
