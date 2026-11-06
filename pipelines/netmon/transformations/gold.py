@@ -140,7 +140,9 @@ def impact_signals():
             "landed_ts", "evidence_ts", "_file_modification_time", "source_run", "record_id")
     )
     alarm = (
-        spark.readStream.table(f"{S.silver}.silver_alarms").where("is_service_down")
+        # skipChangeCommits: see silver.append_stream (replaced runs' superseded alarms are deleted once)
+        spark.readStream.option("skipChangeCommits", "true").table(f"{S.silver}.silver_alarms")
+        .where("is_service_down")
         .selectExpr(
             "sha2(concat('alarm|', record_id), 256) AS detection_id", "'alarm' AS signal_source",
             "element_id", "element_type", "CASE WHEN element_type = 'CELL' THEN element_id END AS cell_id",
