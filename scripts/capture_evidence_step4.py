@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from capture_evidence import Runner, md_table  # noqa: E402
+from capture_evidence_step3 import ALARM_COUNTS_SQL  # noqa: E402
 
 from netmon_pipeline.genai import gateway  # noqa: E402
 
@@ -381,47 +382,107 @@ update started. A `TABLE` trigger is the table-update trigger on `netmon_rca.ope
     d.write()
 
 
+RERUN_REASON = ("PR #6: run-unique alarm IDs. The holdout's fault alarms had been dropped upstream by a cross-run ID "
+                "collision (09_holdout_alarm_gap.md); holdout_1m was re-ingested with corrected alarms and the ranker "
+                "retrained (v5) on corrected training data. Prompts frozen at noc_summary_v3 / sms_v1; nothing tuned.")
+
+
+def _active_alarm_breakdown(d: Doc, split: str, sfx: str, label: str) -> None:
+    d.query(f"{label}: assistant vs ranker by whether the context has an active alarm", f"""
+        SELECT CAST(get_json_object(c.context_json, '$.alarm_summary.n_active') AS INT) > 0 AS context_has_active_alarm,
+               l.fault_type, count(*) AS n, round(100 * avg(CAST(r.root_agreement AS INT)), 1) AS llm_pct,
+               round(100 * avg(CAST(r.ranker_top1_agreement AS INT)), 1) AS ranker_pct,
+               sum(CAST(r.llm_vs_ranker = 'changed_correct_to_wrong' AS INT)) AS changed_correct_to_wrong,
+               sum(CAST(r.llm_vs_ranker = 'uncertain_on_correct' AS INT)) AS uncertain_on_correct,
+               sum(CAST(r.llm_vs_ranker = 'changed_to_correct' AS INT)) AS changed_to_correct
+        FROM {G}.genai_eval_results_{split}{sfx} r JOIN {G}.genai_eval_contexts{sfx} c USING (eval_id)
+        JOIN {E}.genai_eval_labels{sfx} l USING (eval_id)
+        GROUP BY GROUPING SETS ((1), (1, 2)) ORDER BY 1, 2 NULLS FIRST""")
+
+
 def alarm_gap(r: Runner) -> None:
-    B, S = f"{CAT}.netmon_bronze", f"{CAT}.netmon_silver"
     d = Doc(r, "09_holdout_alarm_gap.md", "Holdout finding: incident alarms lost upstream, and what it does to the LLM", """
-The holdout evaluation (`04_evaluation.md`) shows the assistant **losing** accuracy against the ranker. Root cause found
-afterwards (analysis only; nothing was re-run or tuned on the holdout): the generator derives incident alarm IDs from
-the batch incident ID (`netmon_datagen.faults`: `opaque_id("ALM", incident_id, n)`, with `incident_id` = `INC-00001`,
-`INC-00002`, … in every batch run). The holdout's fault alarms therefore reuse the alarm IDs of `history_1m` (and of
-the step-2 `history` run), and the silver layer's cross-run deduplication (`dropDuplicatesWithinWatermark` on
-`record_id`) drops them as redeliveries. Background alarm IDs include the run seed and survive. Result: the alarms
-that corroborate a fault are missing for much of the holdout, while noise alarms on neighbouring elements remain.
-The step-3 ranker's holdout features had the same gap (it still scored 93.2 % top-1 from KPIs); the dev days are
-almost unaffected. This is a step-1/2 defect, recorded here and in the PR as a follow-up; it was not fixed in step 4
-because fixing it means regenerating and re-ingesting the holdout, which changes step 3's published holdout result.""")
-    d.query("Alarms per run: bronze (delivered) vs silver (after dedupe)", f"""
-        SELECT b._source_run AS run, count(*) AS bronze_rows, count(DISTINCT b.record_id) AS bronze_distinct_ids,
-               count(DISTINCT s.record_id) AS in_silver
-        FROM {B}.bronze_alarms b LEFT JOIN {S}.silver_alarms s ON s.record_id = b.record_id AND s.source_run = b._source_run
-        WHERE b._source_run IN ('history_1m', 'holdout_1m') GROUP BY 1 ORDER BY 1""")
-    d.query("Holdout alarm IDs that already exist in silver under an earlier run", f"""
-        SELECT s.source_run AS earlier_run, count(*) AS holdout_rows_with_same_record_id
-        FROM {B}.bronze_alarms b JOIN {S}.silver_alarms s ON s.record_id = b.record_id AND s.source_run <> 'holdout_1m'
-        WHERE b._source_run = 'holdout_1m' GROUP BY 1 ORDER BY 1""")
+**Status: resolved in PR #6** (resolution at the end; old vs new results in `10_holdout_rerun.md` and
+`evidence/step3/08_alarm_id_fix.md`). The finding below is rebuilt from the snapshots taken before the fix
+(`*_pr5` tables = the state of main 58004a7), so it reads exactly as it was found.
+
+The holdout evaluation showed the assistant **losing** accuracy against the ranker. Root cause found afterwards
+(analysis only; nothing was re-run or tuned on the holdout at the time): the generator derived incident alarm IDs from
+the batch incident ID (`opaque_id("ALM", incident_id, n)`, with `incident_id` = `INC-00001`, `INC-00002`, … in every
+batch run). The holdout's fault alarms therefore reused the alarm IDs of `history_1m`, and the silver layer's
+cross-run deduplication (`dropDuplicatesWithinWatermark` on `record_id`) dropped them as redeliveries (dedupe state is
+only evicted when a later batch advances the watermark, so the holdout batch was checked against `history_1m`'s keys).
+`history_1m` lost 90 alarm IDs to the step-2 `history` run the same way. Background alarm IDs included the run seed
+and survived. Result: the alarms that corroborate a fault were missing for much of the holdout, while noise alarms on
+neighbouring elements remained.""")
+    d.query("Alarms per run before the fix (snapshot)", f"SELECT * FROM {E}.alarm_counts_pr5 ORDER BY run",
+            "`removed_by_dedupe` should equal `injected_duplicates`; `missing_ids_held_by_other_run` = distinct IDs "
+            "absent from silver whose ID is in silver under another run.")
     for split in ("dev", "holdout"):
-        d.query(f"{split.upper()}: assistant vs ranker by whether the context has an active alarm", f"""
-            SELECT CAST(get_json_object(c.context_json, '$.alarm_summary.n_active') AS INT) > 0 AS context_has_active_alarm,
-                   l.fault_type, count(*) AS n, round(100 * avg(CAST(r.root_agreement AS INT)), 1) AS llm_pct,
-                   round(100 * avg(CAST(r.ranker_top1_agreement AS INT)), 1) AS ranker_pct,
-                   sum(CAST(r.llm_vs_ranker = 'changed_correct_to_wrong' AS INT)) AS changed_correct_to_wrong,
-                   sum(CAST(r.llm_vs_ranker = 'uncertain_on_correct' AS INT)) AS uncertain_on_correct,
-                   sum(CAST(r.llm_vs_ranker = 'changed_to_correct' AS INT)) AS changed_to_correct
-            FROM {G}.genai_eval_results_{split} r JOIN {G}.genai_eval_contexts c USING (eval_id)
-            JOIN {E}.genai_eval_labels l USING (eval_id)
-            GROUP BY GROUPING SETS ((1), (1, 2)) ORDER BY 1, 2 NULLS FIRST""")
-    d.text("Reading", """
-- On dev, 340 of 346 contexts carry an active alarm and the assistant matches or beats the ranker.
-- On the holdout, about half the contexts carry no active alarm (cell outages: about a third have one). Without the
-  root's own alarm, the prompt's "alarms + impact pattern agree" reading fails: the assistant answers `uncertain` on
-  correct ranker answers, or follows a surviving noise alarm on a neighbouring backhaul link.
+        _active_alarm_breakdown(d, split, "_pr5", f"{split.upper()} (before the fix)")
+    d.text("Reading (before the fix)", """
+- On dev, 340 of 346 contexts carried an active alarm and the assistant matched or beat the ranker.
+- On the holdout, about half the contexts carried no active alarm (cell outages: about a third had one). Without the
+  root's own alarm, the prompt's "alarms + impact pattern agree" reading fails: the assistant answered `uncertain` on
+  correct ranker answers, or followed a surviving noise alarm on a neighbouring backhaul link.
 - The lesson holds beyond this defect: OSS alarm feeds do drop and lag in real networks. The ranker, trained on KPIs
-  and alarms, degrades gracefully; the LLM, told to look for corroborating alarms, does not. Keep the ranker as the
-  system of record and treat the assistant as an explainer (see docs/genai_assistant.md, Results and Known limits).""")
+  and alarms, degrades gracefully; the LLM, told to look for corroborating alarms, does not.""")
+    d.text("Resolution (PR #6)", """
+- **Fix**: alarm and change IDs hash a run key (`GeneratorConfig.run_id`, the landing sub-directory = `source_run`);
+  event-time ties are broken by the run-independent key, so a new run id changes only IDs
+  (`docs/data_model.md`, "IDs across runs"; tests in `tests/test_run_unique_ids.py`, including a regression that
+  replays the original drop through the dedupe reference model).
+- **Data**: `history_1m` and `holdout_1m` regenerated (same seeds and windows), verified to differ from the ingested
+  files only in IDs, and their alarm / DQ-log / change-calendar feeds swapped in by `banksia-netmon-replace-run-feeds`
+  (no full refresh). Every run now loses exactly its injected duplicates (table below).
+- **Step 3**: training data was affected, so the ranker was retrained once with the frozen design (v5) and the holdout
+  re-scored once (`evidence/step3/08_alarm_id_fix.md`).
+- **Step 4**: evaluation set rebuilt; dev and the holdout re-run once with the frozen prompts (`force=true`, reason
+  recorded on the MLflow run): `10_holdout_rerun.md`.""")
+    d.query("Alarms per run after the fix (live)", f"""
+        SELECT n.run, o.silver_rows AS silver_before, n.silver_rows AS silver_after, n.injected_duplicates,
+               o.removed_by_dedupe AS dedupe_removed_before, n.removed_by_dedupe AS dedupe_removed_after,
+               n.distinct_ids_missing_from_silver AS missing_after
+        FROM ({ALARM_COUNTS_SQL}) n JOIN {E}.alarm_counts_pr5 o USING (run) ORDER BY n.run""")
+    _active_alarm_breakdown(d, "holdout", "", "HOLDOUT (after the fix)")
+    d.write()
+
+
+def rerun_doc(r: Runner) -> None:
+    d = Doc(r, "10_holdout_rerun.md", "PR #6: step-4 evaluation re-run after the alarm ID fix (old vs new)", f"""
+Prompts frozen at `noc_summary_v3` / `sms_v1`, same scorers, judges and code. The evaluation set was rebuilt
+(`banksia-genai-build-evalset`) from the corrected data and the retrained ranker v5, then dev was re-run and the
+holdout re-run **once** with `force=true`. Re-run reason recorded on the MLflow run (tag `holdout_rerun_reason`) and in
+the result tables (`rerun_reason`): "{RERUN_REASON}"
+
+Old = the published PR #5 results (snapshots `genai_eval_summary_<split>_pr5`, ranker v4, alarms missing on the
+holdout); new = this run. Both the inputs (alarms) and the ranker changed, so a difference is not attributable to the
+assistant alone. Nothing was tuned on either result.""")
+    for split in ("holdout", "dev"):
+        _, o = r.sql(f"SELECT * FROM {G}.genai_eval_summary_{split}_pr5 WHERE `group` = 'ALL_WITH_CASE'")
+        cols, n = r.sql(f"SELECT * FROM {G}.genai_eval_summary_{split} WHERE `group` = 'ALL_WITH_CASE'")
+        oc, _ = r.sql(f"SELECT * FROM {G}.genai_eval_summary_{split}_pr5 LIMIT 0")
+        if not n:
+            d.text(split.upper(), "(not evaluated)")
+            continue
+        om, nm = dict(zip(oc, o[0], strict=True)) if o else {}, dict(zip(cols, n[0], strict=True))
+        keys = [*METRICS, "n_scored_incidents", "ranker_top1_all_scored_pct", "llm_root_agreement_all_scored_pct",
+                "mlflow_run_id", "noc_prompt_version", "sms_prompt_version", "rerun_reason"]
+        body = "| metric | old (PR #5) | new (PR #6) |\n|---|---|---|\n" + "\n".join(
+            f"| {k} | {om.get(k, '')} | {nm.get(k, '')} |" for k in keys if k in nm or k in om)
+        d.text(f"{split.upper()}: overall, old vs new", body)
+        sel = ", ".join(f"o.{c} AS old_{c}, n.{c} AS new_{c}" for c in
+                        ("n", "llm_root_agreement_pct", "ranker_top1_agreement_pct", "answered_pct",
+                         "changed_correct_to_wrong", "uncertain_on_correct"))
+        d.query(f"{split.upper()}: by fault type, old vs new", f"""
+            SELECT coalesce(n.`group`, o.`group`) AS fault_type, {sel}
+            FROM (SELECT * FROM {G}.genai_eval_summary_{split}_pr5 WHERE `group` <> 'ALL_WITH_CASE') o
+            FULL OUTER JOIN (SELECT * FROM {G}.genai_eval_summary_{split} WHERE `group` <> 'ALL_WITH_CASE') n
+              ON n.`group` = o.`group` ORDER BY CAST(coalesce(n.n, o.n) AS INT) DESC""")
+    d.query("HOLDOUT (new): every case where the assistant departs from the ranker", f"""
+        SELECT eval_id, fault_type, root_element_ids, ranker_top1, llm_root, llm_vs_ranker, confidence,
+               fault_hypothesis FROM {G}.genai_eval_results_holdout
+        WHERE llm_vs_ranker <> 'same' ORDER BY llm_vs_ranker, fault_type, eval_id""")
     d.write()
 
 
@@ -438,7 +499,7 @@ def main() -> None:
     wsid = workspace_id(w)
     steps = {"gateway": lambda: gateway_doc(r, w), "log": lambda: inference_log(r, wsid),
              "examples": lambda: examples(r), "evaluation": lambda: evaluation_doc(r), "outputs": lambda: outputs(r, w),
-             "cost": lambda: cost(r, wsid), "runs": lambda: runs(r, w), "gap": lambda: alarm_gap(r)}
+             "cost": lambda: cost(r, wsid), "runs": lambda: runs(r, w), "gap": lambda: alarm_gap(r), "rerun": lambda: rerun_doc(r)}
     for k, f in steps.items():
         if a.only and k not in a.only.split(","):
             continue

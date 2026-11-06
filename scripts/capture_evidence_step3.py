@@ -125,7 +125,9 @@ published region-wide `eval_rca_baseline` is shown as a secondary framing.
 **Splits.**
 - **Holdout** = `holdout_1m`: a fresh run generated after the design was frozen (new seed 4242 for faults,
   noise and defects, same network, 2026-10-17 … 10-18), through the unchanged step-2 pipeline, evaluated once
-  with the frozen champion v{h['model_version']} (evaluation MLflow run `{h['mlflow_run_id']}`).
+  with the frozen champion v{h['model_version']} (evaluation MLflow run `{h['mlflow_run_id']}`). This is the one
+  re-score after the PR #6 alarm ID fix (corrected holdout, champion retrained on corrected data with the frozen
+  design); the published v4 result and the comparison are in `08_alarm_id_fix.md`.
 - **Dev** = the last two days of `history_1m` (2026-10-14 … 10-15). They were seen while the design was
   iterated, so they are **not** a holdout.
 - **Validation** (2026-10-13) chose the calibration and the threshold.
@@ -150,7 +152,7 @@ Scored incidents only (customer-impacting, uncensored faults); n = incidents."""
                 "valid root? Ground truth supplies only the region, the impact start and the root list. "
                 "`oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), "
                 "on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job "
-                "`banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.")
+                f"`banksia-rca-any-alert-metric` on the frozen champion v{h['model_version']}'s scores; nothing retrained.")
         d.query(f"{label}: early catch (signed times), model vs heuristic on the same cases vs step-2 localisation",
                 f"""
             SELECT fault_type, n, model_localised_pct, model_within_5min_pct, model_pre_impact_n,

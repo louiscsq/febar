@@ -1,6 +1,6 @@
 # Registered model in Unity Catalog
 
-Captured 2026-11-05 17:34 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
+Captured 2026-11-06 08:03 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
 
 ## Registered model
 
@@ -12,7 +12,7 @@ Captured 2026-11-05 17:34 UTC from workspace profile `febar` by `scripts/capture
   "aliases": [
     {
       "alias": "champion",
-      "version": 4
+      "version": 5
     }
   ]
 }
@@ -22,6 +22,13 @@ Captured 2026-11-05 17:34 UTC from workspace profile `febar` by `scripts/capture
 
 ```json
 [
+  {
+    "version": 5,
+    "status": "ModelVersionInfoStatus.READY",
+    "run_id": "24cf7981a0304b0f8e51eb7b0a2943fc",
+    "created": "2026-11-06T07:25:26.918000+00:00",
+    "storage_location": "s3://telco-netmon-febar-ext-s3-049629455384-rs1bkj/models/7af9e89c-d6dc-466e-9e62-64d6afd9db38/versions/1d15ad46-d3c1-4db0-9b07-1b43b5843000"
+  },
   {
     "version": 4,
     "status": "ModelVersionInfoStatus.READY",
@@ -57,10 +64,10 @@ Captured 2026-11-05 17:34 UTC from workspace profile `febar` by `scripts/capture
 
 ```json
 {
-  "alert_threshold": "0.32",
+  "alert_threshold": "0.27",
   "dev_top1_pct": "94.1",
-  "holdout_eval_run_id": "b678bdd4d2c84591bdc4e1bfec61d5c2",
-  "holdout_top1_pct": "93.2",
+  "holdout_eval_run_id": "d58a5f8893df4d37b7835be9877811df",
+  "holdout_top1_pct": "94.7",
   "train_run": "history_1m"
 }
 ```
