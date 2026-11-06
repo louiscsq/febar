@@ -260,3 +260,21 @@ def test_an_alarmed_impacted_element_stays_in_its_own_cluster():
     bh1 = next(c for c, v in by_case.items() if "BH-1" in v)
     assert "CELL-3a" not in by_case[bh1]
     assert any("CELL-3a" in v for v in by_case.values())
+
+
+def test_any_alert_at_sla_uses_no_footprint_matching(state):
+    f = _scored_frame(state)
+    out = evaluate.case_outputs(f)
+    inc = labels.prepare_incidents(gt_df())
+    a = evaluate.any_alert_at_sla(out, inc, threshold=0.5)
+    assert a["any_alert_correct"].all() and a["evaluated_at_s"].iloc[0] >= 300 and a["n_region_alerts"].iloc[0] >= 1
+    # the footprint plays no part: emptying it changes nothing (rank_incidents would then find no output)
+    no_fp = inc.assign(footprint=[[] for _ in range(len(inc))])
+    pd.testing.assert_frame_equal(evaluate.any_alert_at_sla(out, no_fp, 0.5), a)
+    assert not evaluate.rank_incidents(out, no_fp)["has_output"].any()
+    # an alert naming the wrong element does not count; no alert above the threshold means a miss
+    wrong = f.assign(score=np.where(f["element_id"] == "AGG-1", 0.9, 0.1))
+    assert not evaluate.any_alert_at_sla(evaluate.case_outputs(wrong), inc, 0.5)["any_alert_correct"].any()
+    assert evaluate.any_alert_at_sla(out, inc, 0.95)["n_region_alerts"].eq(0).all()
+    s = evaluate.any_alert_summary(a, evaluate.rank_incidents(out, inc))
+    assert s.loc[0, "any_alert_correct_pct"] == 100.0 and s.loc[0, "matched_top1_pct"] == 100.0

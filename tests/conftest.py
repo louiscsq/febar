@@ -13,6 +13,14 @@ import pytest
 from netmon_datagen.batch import generate_history
 from netmon_datagen.config import DQConfig, FaultConfig, GeneratorConfig
 
+# Step-4 tests call the traced assistant with a fake endpoint: keep MLflow tracing off (no local trace store).
+os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
+os.environ.setdefault("MLFLOW_TRACKING_URI", "file:" + os.path.join(os.environ.get("TMPDIR", "/tmp"), "netmon-mlruns"))
+with contextlib.suppress(ImportError):
+    import mlflow
+
+    mlflow.tracing.disable()
+
 START = "2026-09-04"  # Friday: a 3-day window covers weekday and weekend
 DAYS = 3
 

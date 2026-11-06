@@ -20,6 +20,7 @@ the **same cases**.
 |---|---|---|---|---|
 | **top-1 accuracy** | 337 | **93.2 %** | 78.3 % | |
 | **top-3 accuracy** | 337 | **95.3 %** | 80.7 % | |
+| any live alert correct at the SLA moment (non-oracle: no footprint matching, score ≥ threshold) | 337 | 81.0 % (slow backhaul 9.4 %) | | |
 | localised within 5 min (signed times) | 337 | **80.4 %** | 76.9 % | 65.6 % |
 | pre-impact catches (alarm before impact start) | 337 | 35 | | |
 | median time to correct localisation (signed) | 337 | 106 s | 116 s | 76 s (clipped at 0 by step 2) |
@@ -38,7 +39,8 @@ the **same cases**.
   - Alert precision: lower than step 2's.
   - Slow backhaul: never localised within 5 minutes.
 - **Dev** (the old "test" days of `history_1m`, 2026-10-14 … 10-15, seen during design, so not a holdout,
-  n = 355): top-1 94.1 % vs 80.8 %; top-3 96.6 % vs 83.9 %; within 5 min 83.7 %.
+  n = 355): top-1 94.1 % vs 80.8 %; top-3 96.6 % vs 83.9 %; within 5 min 83.7 %; any live alert correct at the
+  SLA moment 83.9 %.
 - **Live `stream` run** (n = 26): top-1 84.6 % vs 73.1 %.
 - **Live open incidents** in Lakebase: 17, each with the true root of an in-flight fault as suspect #1.
 - **Lakebase** PK lookup: p50 2.9 ms / p95 9.8 ms.
@@ -48,7 +50,7 @@ the **same cases**.
 | file | content |
 |---|---|
 | [`01_training_run.md`](01_training_run.md) | training MLflow run ID, experiment, parameters (incl. embargo rule), all metrics (val / dev), artifacts; rows / positives / cases per split (train / val / dev); case labels per split; permutation feature importance; validation-day alert precision |
-| [`02_evaluation.md`](02_evaluation.md) | evaluation protocol; **holdout** and **dev**: top-1 / top-3 by fault type with n (model vs heuristic on the same cases, step 2's published framing as a secondary column), early catch with signed times and pre-impact counts (model vs heuristic vs step-2 localisation), every slow-backhaul incident, alert-level precision; validation day; live run; step 2's published baseline per run; holdout top-1 misses |
+| [`02_evaluation.md`](02_evaluation.md) | evaluation protocol; **holdout** and **dev**: top-1 / top-3 by fault type with n (model vs heuristic on the same cases, step 2's published framing as a secondary column), the non-oracle "any live alert correct at the SLA moment" companion next to the matched top-1, early catch with signed times and pre-impact counts (model vs heuristic vs step-2 localisation), every slow-backhaul incident, alert-level precision; validation day; live run; step 2's published baseline per run; holdout top-1 misses |
 | [`03_registered_model.md`](03_registered_model.md) | UC registered model, versions, `champion` alias (v4), version tags (threshold, dev and holdout top-1, holdout evaluation run), signature |
 | [`04_serving_endpoint.md`](04_serving_endpoint.md) | endpoint state and config (serverless, scale to zero, v4); smoke test on a fresh-holdout backhaul case: request / response, endpoint vs batch scores and ground truth; client-side latency |
 | [`05_lakebase.md`](05_lakebase.md) | Lakebase Provisioned instance; both synced tables (source, PK, TRIGGERED, state, last synced commit); latency check (p50 / p95 / p99 / max); row counts and sample rows read back from Postgres; PK lookup plan |
@@ -69,6 +71,9 @@ the **same cases**.
 5. Bundle deploy with `rca_model_version=4`: endpoint `banksia-rca-ranker` READY on v4.
 6. `banksia-rca-score-live` (v4) → `MERGE` + TRIGGERED Lakebase sync; then `banksia-rca-lakebase-check`.
 7. This capture (all files regenerated).
+8. Step 4 (PR #5) follow-up to the PR #4 review: job `banksia-rca-any-alert-metric` computed the non-oracle
+   companion metric on the frozen v4 scores (nothing retrained), and `02_evaluation.md` was regenerated
+   (`--only evaluation`, 2026-11-05 23:47 UTC). The other files are unchanged.
 
 ## Limitations recorded
 

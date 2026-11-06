@@ -1,0 +1,19 @@
+# Lakebase synced table for the step-5 app: the assistant's latest summary + SMS draft per open incident.
+# Delta netmon_genai.incident_ai_latest (Change Data Feed on, MERGEd by notebooks/10_genai_assistant.py) ->
+# Postgres database `netmon_serving` on the step-3 Lakebase instance, schema `netmon_genai`, table
+# `lb_incident_ai_latest` (PK incident_id). TRIGGERED: the assistant job starts a sync after every MERGE (as step 3's
+# scoring job does for its tables). Registered in the project catalog: no CREATE CATALOG on this metastore.
+resources:
+  synced_database_tables:
+    lb_incident_ai_latest:
+      name: ${var.catalog}.${resources.schemas.netmon_genai.name}.lb_incident_ai_latest
+      database_instance_name: ${resources.database_instances.netmon_lakebase.name}
+      logical_database_name: ${var.lakebase_database}
+      spec:
+        source_table_full_name: ${var.catalog}.${resources.schemas.netmon_genai.name}.incident_ai_latest
+        primary_key_columns: [incident_id]
+        scheduling_policy: TRIGGERED
+        create_database_objects_if_missing: true
+        new_pipeline_spec:
+          storage_catalog: ${var.catalog}
+          storage_schema: ${resources.schemas.netmon_genai.name}

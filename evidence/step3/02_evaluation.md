@@ -1,6 +1,6 @@
 # Evaluation vs the step-2 localiser: fresh holdout and dev
 
-Captured 2026-11-05 17:34 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
+Captured 2026-11-05 23:47 UTC from workspace profile `febar` by `scripts/capture_evidence_step3.py`.
 
 **How it is scored (GT-free first, ground truth after).** Every case of the run is scored by the frozen model
 (`evaluate.case_outputs`: ID / feature columns and the score only). The ranked outputs are then attributed to
@@ -46,6 +46,29 @@ SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_
 | AMF_OVERLOAD | 17.0 | 100.0 | 100.0 | 100.0 | 100.0 | 100.0 | 100.0 |
 | BUSHFIRE_GRID_OUTAGE | 1.0 | 0.0 | 0.0 | 100.0 | 0.0 | 0.0 | 0.0 |
 | LONG_HAUL_FIBRE_CUT | 1.0 | 100.0 | 100.0 | 100.0 | 100.0 | 0.0 | 0.0 |
+
+_8 row(s)_
+
+## HOLDOUT (holdout_1m, untouched): non-oracle companion, any live alert correct at the SLA decision time
+
+No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a valid root? Ground truth supplies only the region, the impact start and the root list. `oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job `banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.
+
+```sql
+SELECT fault_type, n, any_alert_correct_pct, matched_top1_pct AS oracle_matched_top1_pct,
+                   median_region_alerts FROM telco_netmon_febar_catalog.netmon_rca.rca_eval_holdout_any_alert_summary
+            ORDER BY fault_type = 'ALL' DESC, n DESC
+```
+
+| fault_type | n | any_alert_correct_pct | oracle_matched_top1_pct | median_region_alerts |
+|---|---|---|---|---|
+| ALL | 337 | 81.0 | 93.2 | 5.0 |
+| CELL_OUTAGE | 187 | 95.2 | 95.2 | 5.0 |
+| BACKHAUL_DEGRADATION | 53 | 9.4 | 86.8 | 5.0 |
+| AGG_ROUTER_FAILURE | 40 | 87.5 | 87.5 | 3.0 |
+| SITE_POWER_OUTAGE | 38 | 97.4 | 97.4 | 5.0 |
+| AMF_OVERLOAD | 17 | 100.0 | 100.0 | 1.0 |
+| BUSHFIRE_GRID_OUTAGE | 1 | 0.0 | 0.0 | 5.0 |
+| LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 | 5.0 |
 
 _8 row(s)_
 
@@ -175,6 +198,28 @@ SELECT fault_type, n, model_top1_pct, heuristic_same_cases_top1_pct, model_top3_
 | AGG_ROUTER_FAILURE | 30.0 | 93.3 | 96.7 | 100.0 | 100.0 | 83.3 | 100.0 |
 | AMF_OVERLOAD | 18.0 | 100.0 | 100.0 | 100.0 | 100.0 | 100.0 | 100.0 |
 | LONG_HAUL_FIBRE_CUT | 1.0 | 100.0 | 100.0 | 100.0 | 100.0 | 0.0 | 100.0 |
+
+_7 row(s)_
+
+## DEV (history_1m 10-14 … 10-15, seen during design): non-oracle companion, any live alert correct at the SLA decision time
+
+No footprint matching: at the first decision time >= impact start + 5 min (up to 15 min), is any live alert of the incident's region (a case whose top-1 calibrated score >= the threshold) naming a valid root? Ground truth supplies only the region, the impact start and the root list. `oracle_matched_top1_pct` is the top-1 above (the case picked by footprint overlap, no threshold), on the same incidents. `median_region_alerts` = live alerts in the region at that minute. Job `banksia-rca-any-alert-metric` on the frozen v4 scores; nothing retrained.
+
+```sql
+SELECT fault_type, n, any_alert_correct_pct, matched_top1_pct AS oracle_matched_top1_pct,
+                   median_region_alerts FROM telco_netmon_febar_catalog.netmon_rca.rca_eval_dev_any_alert_summary
+            ORDER BY fault_type = 'ALL' DESC, n DESC
+```
+
+| fault_type | n | any_alert_correct_pct | oracle_matched_top1_pct | median_region_alerts |
+|---|---|---|---|---|
+| ALL | 355 | 83.9 | 94.1 | 6.0 |
+| CELL_OUTAGE | 205 | 97.1 | 97.1 | 7.0 |
+| BACKHAUL_DEGRADATION | 55 | 12.7 | 78.2 | 5.0 |
+| SITE_POWER_OUTAGE | 46 | 97.8 | 97.8 | 6.0 |
+| AGG_ROUTER_FAILURE | 30 | 93.3 | 93.3 | 2.0 |
+| AMF_OVERLOAD | 18 | 100.0 | 100.0 | 1.0 |
+| LONG_HAUL_FIBRE_CUT | 1 | 100.0 | 100.0 | 2.0 |
 
 _7 row(s)_
 

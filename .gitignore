@@ -12,3 +12,7 @@ node_modules/
 dist/
 build/
 /data/local/
+
+# local MLflow tracking store / traces (traces live in the workspace experiment)
+mlflow.db
+mlruns/

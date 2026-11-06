@@ -92,3 +92,31 @@ different, weaker framing.
 See [`docs/rca_model.md`](docs/rca_model.md) for features, labels, split, model choice, the evaluation protocol,
 results against the step-2 localiser, serving and the Lakebase design, and [`evidence/step3/`](evidence/step3/)
 for the captured run.
+
+## Gen AI NOC assistant and customer SMS drafts (step 4)
+
+For an open incident, an LLM (`databricks-gpt-5-4-mini`, Databricks Foundation Model API) drafts a root-cause
+summary with evidence, runbook next steps and customer impact for the NOC, plus one proactive outage SMS per affected
+region for human approval (never sent by the system). The context is assembled only from the build's own tables
+(the ranker's top-3 and their signals, topology, alarms, KPI deviation, subscriber counts by region and segment), with
+no per-subscriber data and no ground truth (both tested). Calls go through AI Gateway (PII guardrails, output safety,
+rate limits, usage tracking), are MLflow traced and are checked by deterministic guards: the root cause must be a
+suspect or "uncertain", unknown element IDs are scrubbed, and SMS rules are enforced. Results land in Unity Catalog
+(`netmon_genai`) and in Lakebase for the topology app (`src/netmon_pipeline/genai/`).
+
+```bash
+python scripts/genai_configure_gateway.py --profile febar --no-inference-table
+databricks bundle run -p febar genai_build_evalset && databricks bundle run -p febar genai_evaluate --params split=dev
+databricks bundle run -p febar genai_assistant      # also triggered by every open_incidents update
+```
+
+On step 3's dev days the assistant's root cause agrees with ground truth on **97.1 %** of evaluated incidents (the
+ranker's top-1 alone: 96.5 %; it fixed 3 ranker misses and broke none). On the fresh holdout it **loses** accuracy:
+**82.0 % against 97.2 %**. Most of the gap traces to an upstream defect found after the run: incident alarm IDs repeat
+across batch runs, so silver drops about 20 % of the holdout's alarms. The ranker copes from KPIs; the assistant,
+looking for corroborating alarms, abstains or blames a neighbour. The ranker therefore stays the system of record.
+No hallucinated root survives the guard. SMS drafts are 100 % rule-compliant (98 % at the model's first try). About
+6.5 s and 5.6 k tokens per incident. 6 of 6 live guardrail tests (prompt injection, PII leaks) were blocked or
+neutralised.
+
+See [`docs/genai_assistant.md`](docs/genai_assistant.md) and [`evidence/step4/`](evidence/step4/).
