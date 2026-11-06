@@ -7,7 +7,8 @@
 # MAGIC | stage | what | when |
 # MAGIC |---|---|---|
 # MAGIC | `functions` | `01_functions.sql`: IMSI / MSISDN column-mask functions and the regional row-filter function | before the pipeline runs (its tables declare `MASK` / `ROW FILTER` on them) |
-# MAGIC | `policies` | NOC groups and persona service principals, `02_noc_views.sql` region-filtered serving views, `03_grants_*.sql` role grants, `04_comments_tags.sql` | after the pipeline has created its tables |
+# MAGIC | `policies` | NOC groups and persona service principals, `02_noc_views.sql` region-filtered serving views, `05_serving_views.sql` (step 5), `03_grants_*.sql` role grants, `04_comments_tags.sql` | after the pipeline has created its tables |
+# MAGIC | `serving_views` | only `05_serving_views.sql`: the region-filtered incident / element-status / Gen AI views read by the step-5 Genie space and app | after steps 3 and 4 have created their tables |
 # MAGIC | `all` | both | |
 # MAGIC
 # MAGIC **Groups.** `noc_national`, `noc_region_<code>` (one per region) and `pii_privileged` are created as
@@ -31,12 +32,13 @@ from databricks.sdk.service import iam
 
 for k, v in {"catalog": "", "raw_schema": "netmon_raw", "bronze_schema": "netmon_bronze",
              "silver_schema": "netmon_silver", "gold_schema": "netmon_gold", "eval_schema": "netmon_eval",
-             "gov_schema": "netmon_gov", "noc_schema": "netmon_noc", "volume": "landing", "stage": "all",
+             "gov_schema": "netmon_gov", "noc_schema": "netmon_noc", "rca_schema": "netmon_rca",
+             "genai_schema": "netmon_genai", "volume": "landing", "stage": "all",
              "owner_in_national": "true"}.items():
     dbutils.widgets.text(k, v)
 p = {k: dbutils.widgets.get(k) for k in ["catalog", "raw_schema", "bronze_schema", "silver_schema", "gold_schema",
-                                         "eval_schema", "gov_schema", "noc_schema", "volume", "stage",
-                                         "owner_in_national"]}
+                                         "eval_schema", "gov_schema", "noc_schema", "rca_schema", "genai_schema",
+                                         "volume", "stage", "owner_in_national"]}
 assert p["catalog"], "catalog is required"
 stage = p["stage"]
 
@@ -55,6 +57,8 @@ SUBS = {
     "gold_schema": q(p["catalog"], p["gold_schema"]),
     "eval_schema": q(p["catalog"], p["eval_schema"]),
     "noc_schema": q(p["catalog"], p["noc_schema"]),
+    "rca_schema": q(p["catalog"], p["rca_schema"]),
+    "genai_schema": q(p["catalog"], p["genai_schema"]),
     "landing_volume": q(p["catalog"], p["raw_schema"], p["volume"]),
 }
 SQL_DIR = os.path.join(os.getcwd(), "sql")
@@ -112,6 +116,18 @@ if stage in ("functions", "all"):
 
 # COMMAND ----------
 
+# MAGIC %md ## Stage `serving_views` (step 5): region-filtered views for the Genie space and the topology app
+# MAGIC
+# MAGIC The existing role grants cover them (SELECT on the whole NOC schema), so no grant changes are needed.
+
+# COMMAND ----------
+
+if stage == "serving_views":
+    run("05_serving_views.sql")
+    display(spark.sql(f"SHOW VIEWS IN {SUBS['noc_schema']}"))
+
+# COMMAND ----------
+
 # MAGIC %md ## Stage `policies`: groups, personas, grants, comments and tags
 
 # COMMAND ----------
@@ -150,6 +166,7 @@ if stage in ("policies", "all"):
         add_member(groups["noc_national"], w.current_user.me().id)
 
     run("02_noc_views.sql")
+    run("05_serving_views.sql")
 
     # Converge every managed principal (all NOC / PII groups AND every persona) to its declared role:
     # revoke whatever any earlier run granted on any netmon securable, then apply the role grants. A
