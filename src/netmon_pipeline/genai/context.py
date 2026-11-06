@@ -187,6 +187,9 @@ def _suspects(inp: IncidentRef, rows: pd.DataFrame, tree: _Tree, impacted: set[s
     for rank, (eid, etype, score) in enumerate(inp.suspects, start=1):
         r = by_el.loc[eid] if eid in by_el.index else None
         signals = {k: (None if r is None else _num(r.get(col), _digits(k))) for k, col in SUSPECT_SIGNALS.items()}
+        for k in signals:
+            if k.startswith("n_") and signals[k] is not None:
+                signals[k] = int(round(signals[k]))  # counts as integers (also: `168.0` read as a phone number)
         if signals.get("in_maintenance") is not None:
             signals["in_maintenance"] = bool(signals["in_maintenance"])
         anc = tree.chain(eid)[1:]

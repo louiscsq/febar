@@ -31,6 +31,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--no-judges", action="store_true")
+    ap.add_argument("--ranker-misses", action="store_true",
+                    help="dev cases where the ranker's top-1 is wrong (+ --limit random others): does the LLM fix or break?")
     ap.add_argument("--experiment", default="/Shared/banksia_netmon/noc_assistant")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
@@ -38,7 +40,15 @@ def main() -> None:
     sql = service.warehouse_sql(ws, a.warehouse)
     ctx = sql(f"SELECT * FROM {a.catalog}.netmon_genai.genai_eval_contexts WHERE split = 'dev'")
     lab = sql(f"SELECT * FROM {a.catalog}.netmon_eval.genai_eval_labels WHERE split = 'dev'")
-    if a.limit:
+    if a.ranker_misses:
+        miss = set(lab.loc[lab["has_case_output"].astype(str).str.lower().eq("true")
+                           & lab["ranker_hit_at_1"].astype(str).str.lower().eq("false"), "eval_id"])
+        rest = ctx[~ctx["eval_id"].isin(miss)]
+        ctx = ctx[ctx["eval_id"].isin(miss)]
+        if a.limit:
+            ctx = ctx._append(rest.sample(n=min(a.limit, len(rest)), random_state=a.seed))
+        ctx = ctx.sort_values("eval_id")
+    elif a.limit:
         ctx = ctx.sample(n=min(a.limit, len(ctx)), random_state=a.seed).sort_values("eval_id")
     mlflow.set_tracking_uri(f"databricks://{a.profile}")
     mlflow.set_experiment(a.experiment)
