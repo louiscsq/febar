@@ -1,6 +1,6 @@
 # Auth and governance: who reads what, and what a regional user sees
 
-Captured 2026-11-06 11:37 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
+Captured 2026-11-06 12:29 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
 
 **Identities.**
 
@@ -84,7 +84,7 @@ _1 row(s)_
 {
   "request": "GET /api/me",
   "http_status": 200,
-  "latency_ms": 1670,
+  "latency_ms": 1944,
   "body": {
     "user": "louis.chen@databricks.com",
     "name": "Louis Chen",
@@ -108,7 +108,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents",
   "http_status": 200,
-  "latency_ms": 1006,
+  "latency_ms": 1009,
   "body": {
     "n": 17,
     "regions": [
@@ -143,7 +143,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents/RCA-27ed3e8af852d33a  (a VIC incident)",
   "http_status": 200,
-  "latency_ms": 1874,
+  "latency_ms": 1956,
   "body": {
     "incident_id": "RCA-27ed3e8af852d33a",
     "region_code": "VIC"
@@ -155,7 +155,7 @@ _1 row(s)_
 {
   "request": "GET /api/regions/VIC/topology",
   "http_status": 200,
-  "latency_ms": 1448,
+  "latency_ms": 1682,
   "body": {
     "region": "VIC",
     "n_elements": 685
@@ -167,7 +167,7 @@ _1 row(s)_
 {
   "request": "GET /api/kpis",
   "http_status": 200,
-  "latency_ms": 2378,
+  "latency_ms": 2497,
   "body": {
     "operational": [
       {
@@ -207,10 +207,10 @@ _1 row(s)_
 {
   "request": "POST /api/genie/ask {How many open incidents are there per region?}",
   "http_status": 200,
-  "latency_ms": 15190,
+  "latency_ms": 13784,
   "body": {
     "text": [
-      "There are **17** open incidents across the regions visible in this data: **NSW** has **9**, **VIC** has **7**, and **NQL** has **1**. **NSW** has the highest count, while **NQL** has the lowest."
+      "There are **3 regions** with open incidents in the visible data: **NSW has 9**, **VIC has 7**, and **NQL has 1**. **NSW** has the highest count, and incident volume drops sharply outside NSW and VIC."
     ],
     "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code` ASC",
     "columns": [
@@ -249,7 +249,7 @@ SELECT region_code, count(*) AS n FROM telco_netmon_febar_catalog.netmon_noc.ope
 
 _3 row(s)_
 
-**Membership switched**: capturing user removed from `noc_national` and added to `noc_region_nsw` (SCIM PATCH on the workspace groups). The app reported region scope ['NSW'] after 285 s (UC membership propagation + the app's 5-minute scope cache).
+**Membership switched**: capturing user removed from `noc_national` and added to `noc_region_nsw` (SCIM PATCH on the workspace groups). The app reported region scope ['NSW'] after 282 s (UC membership propagation + the app's 5-minute scope cache).
 
 ```sql
 SELECT is_member('noc_national') AS in_noc_national, is_member('noc_region_nsw') AS in_noc_region_nsw
@@ -267,7 +267,7 @@ _1 row(s)_
 {
   "request": "GET /api/me",
   "http_status": 200,
-  "latency_ms": 1253,
+  "latency_ms": 1074,
   "body": {
     "user": "louis.chen@databricks.com",
     "name": "Louis Chen",
@@ -288,7 +288,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents",
   "http_status": 200,
-  "latency_ms": 1138,
+  "latency_ms": 1074,
   "body": {
     "n": 9,
     "regions": [
@@ -313,7 +313,7 @@ _1 row(s)_
 {
   "request": "GET /api/incidents/RCA-27ed3e8af852d33a  (a VIC incident)",
   "http_status": 404,
-  "latency_ms": 1189,
+  "latency_ms": 1175,
   "body": {
     "error": "no open incident RCA-27ed3e8af852d33a in your regions"
   }
@@ -324,7 +324,7 @@ _1 row(s)_
 {
   "request": "GET /api/regions/VIC/topology",
   "http_status": 403,
-  "latency_ms": 1169,
+  "latency_ms": 1048,
   "body": {
     "error": "region VIC is not in your NOC scope ['NSW']"
   }
@@ -335,7 +335,7 @@ _1 row(s)_
 {
   "request": "GET /api/kpis",
   "http_status": 200,
-  "latency_ms": 3152,
+  "latency_ms": 2624,
   "body": {
     "operational": [
       {
@@ -363,12 +363,12 @@ _1 row(s)_
 {
   "request": "POST /api/genie/ask {How many open incidents are there per region?}",
   "http_status": 200,
-  "latency_ms": 19030,
+  "latency_ms": 14920,
   "body": {
     "text": [
-      "In the visible result, **NSW** has **9 open incidents**. Based on the data shown, the highest count is **NSW with 9 open incidents**."
+      "In the visible results, **NSW** has **9 open incidents**. Based on the returned data, **NSW** is the highest-count region in the regions you can see."
     ],
-    "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\n  AND `status` = 'open'\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code`",
+    "sql": "SELECT `region_code`, COUNT(*) AS `open_incidents`\nFROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents`\nWHERE `region_code` IS NOT NULL\nGROUP BY `region_code`\nORDER BY `open_incidents` DESC, `region_code`",
     "columns": [
       "region_code",
       "open_incidents"
@@ -397,7 +397,7 @@ _1 row(s)_
 
 ## Restored
 
-Membership restored (back in `noc_national`, out of `noc_region_nsw`):
+Membership restored (back in `noc_national`, out of `noc_region_nsw`); visible to UC after 292 s:
 
 ```sql
 SELECT is_member('noc_national') AS in_noc_national, is_member('noc_region_nsw') AS in_noc_region_nsw
@@ -405,7 +405,7 @@ SELECT is_member('noc_national') AS in_noc_national, is_member('noc_region_nsw')
 
 | in_noc_national | in_noc_region_nsw |
 |---|---|
-| false | true |
+| true | false |
 
 _1 row(s)_
 
@@ -415,10 +415,10 @@ _1 row(s)_
 {
   "request": "POST /api/genie/ask {List the IMSI and MSISDN of the subscribers on SITE-NSW-00105}",
   "http_status": 200,
-  "latency_ms": 9752,
+  "latency_ms": 10273,
   "body": {
     "text": [
-      "I can\u2019t provide IMSI or MSISDN because this space has no per-subscriber data, and requests for subscriber identifiers are out of scope here. I can only fetch network/incident data such as site status, impacted cells, incidents, or estimated affected subscribers for `SITE-NSW-00105`."
+      "I can\u2019t provide IMSI or MSISDN because this space has no per-subscriber data, and those identifiers are not in the available tables. The closest available data is aggregate impact such as affected subscriber estimates or impacted cells for incidents involving that site."
     ],
     "sql": null,
     "columns": [],

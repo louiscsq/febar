@@ -1,6 +1,6 @@
 # Databricks App: deployment status, resources and logs
 
-Captured 2026-11-06 11:35 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
+Captured 2026-11-06 12:26 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
 
 `banksia-noc-topology` deployed by the bundle (`resources/app.yml`, source `app/`, `app/app.yaml`). Status and configuration from
 `GET /api/2.0/apps/banksia-noc-topology`; deployments from `.../deployments`; logs from `databricks apps logs` (client IP addresses
@@ -62,7 +62,7 @@ removed).
   ],
   "default_source_code_path": "/Workspace/Users/louis.chen@databricks.com/.bundle/banksia_netmon/dev/files/app",
   "create_time": "2026-11-06T10:54:23Z",
-  "update_time": "2026-11-06T11:14:25Z",
+  "update_time": "2026-11-06T11:54:50Z",
   "creator": "louis.chen@databricks.com"
 }
 ```
@@ -71,11 +71,12 @@ removed).
 
 | deployment_id | create_time | mode | state | message | source_code_path |
 |---|---|---|---|---|---|
+| 01f1d9d8df511be4a4c671c168ae205a | 2026-11-06T11:54:50Z | SNAPSHOT | SUCCEEDED | App started successfully | /Workspace/Users/louis.chen@databricks.com/.bundle/banksia_netmon/dev/files/app |
 | 01f1d9d339b71d2b903b6973593577db | 2026-11-06T11:14:25Z | SNAPSHOT | SUCCEEDED | App started successfully | /Workspace/Users/louis.chen@databricks.com/.bundle/banksia_netmon/dev/files/app |
 | 01f1d9d2441312d3a6c289bc81bf717d | 2026-11-06T11:07:33Z | SNAPSHOT | SUCCEEDED | App started successfully | /Workspace/Users/louis.chen@databricks.com/.bundle/banksia_netmon/dev/files/app |
 | 01f1d9d0e60b1638abcbcbf2972724bd | 2026-11-06T10:57:46Z | SNAPSHOT | SUCCEEDED | App started successfully | /Workspace/Users/louis.chen@databricks.com/.bundle/banksia_netmon/dev/files/app |
 
-_3 row(s)_
+_4 row(s)_
 
 ## Live checks through the Apps proxy
 
@@ -85,15 +86,15 @@ _3 row(s)_
 {
   "request": "GET /api/health",
   "http_status": 200,
-  "latency_ms": 1028,
+  "latency_ms": 1115,
   "body": {
     "status": "ok",
     "lakebase": {
       "pg_user": "23923ae9-3de4-453b-b13f-b61f7ba84868",
-      "server_time": "2026-11-06T11:35:58.843621+00:00",
+      "server_time": "2026-11-06T12:26:51.420798+00:00",
       "open_incidents": 17
     },
-    "lakebase_ms": 7.0
+    "lakebase_ms": 11.1
   }
 }
 ```
@@ -102,9 +103,9 @@ End-to-end latency measured from the capturing laptop (includes the internet rou
 
 | endpoint | n | p50_ms | p95_ms | max_ms |
 |---|---|---|---|---|
-| /api/incidents?region=NSW | 20 | 1048 | 1056 | 1057 |
-| /api/incidents/RCA-c7276c3238a27971 | 20 | 1049 | 1087 | 1841 |
-| /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 | 20 | 1571 | 1581 | 1582 |
+| /api/incidents?region=NSW | 20 | 1050 | 1126 | 1309 |
+| /api/incidents/RCA-c7276c3238a27971 | 20 | 1056 | 1840 | 2271 |
+| /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 | 20 | 1572 | 1694 | 3670 |
 
 _3 row(s)_
 
@@ -112,73 +113,74 @@ Server-side time inside the app for the same calls (from the app's own request l
 
 | endpoint (path) | n | p50_ms | p95_ms | max_ms |
 |---|---|---|---|---|
-| /api/incidents | 38 | 10 | 13 | 47 |
-| /api/incidents/RCA-c7276c3238a27971 | 43 | 21 | 26 | 1720 |
-| /api/regions/NSW/topology | 43 | 29 | 33 | 36 |
+| /api/incidents | 24 | 12 | 13 | 14 |
+| /api/incidents/RCA-c7276c3238a27971 | 30 | 26 | 957 | 2498 |
+| /api/me | 10 | 1 | 1 | 840 |
+| /api/regions/NSW/topology | 44 | 33 | 39 | 126 |
 
-_3 row(s)_
+_4 row(s)_
 
 ## App logs (last 60 lines)
 
 ```text
-2026-11-06T11:36:42Z [APP] 2026-11-06 11:36:42,653 INFO noc_app GET /api/regions/NSW/topology -> 200 in 30 ms user=louis.chen@databricks.com
-2026-11-06T11:36:42Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:43Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:42 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:44Z [APP] 2026-11-06 11:36:44,225 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
-2026-11-06T11:36:44Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:45Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:44 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:45Z [APP] 2026-11-06 11:36:45,795 INFO noc_app GET /api/regions/NSW/topology -> 200 in 29 ms user=louis.chen@databricks.com
-2026-11-06T11:36:45Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:46Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:45 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:47Z [APP] 2026-11-06 11:36:47,364 INFO noc_app GET /api/regions/NSW/topology -> 200 in 32 ms user=louis.chen@databricks.com
-2026-11-06T11:36:47Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:48Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:47 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:48Z [APP] 2026-11-06 11:36:48,938 INFO noc_app GET /api/regions/NSW/topology -> 200 in 29 ms user=louis.chen@databricks.com
-2026-11-06T11:36:48Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:49Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:48 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:50Z [APP] 2026-11-06 11:36:50,509 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:36:50Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:51Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:50 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:52Z [APP] 2026-11-06 11:36:52,084 INFO noc_app GET /api/regions/NSW/topology -> 200 in 29 ms user=louis.chen@databricks.com
-2026-11-06T11:36:52Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:52Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:52 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:53Z [APP] 2026-11-06 11:36:53,661 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:36:53Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:54Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:53 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:55Z [APP] 2026-11-06 11:36:55,232 INFO noc_app GET /api/regions/NSW/topology -> 200 in 30 ms user=louis.chen@databricks.com
-2026-11-06T11:36:55Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:56Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:55 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:56Z [APP] 2026-11-06 11:36:56,809 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
-2026-11-06T11:36:56Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:57Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:56 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:58Z [APP] 2026-11-06 11:36:58,374 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:36:58Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:36:59Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:58 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:36:59Z [APP] 2026-11-06 11:36:59,949 INFO noc_app GET /api/regions/NSW/topology -> 200 in 31 ms user=louis.chen@databricks.com
-2026-11-06T11:36:59Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:00Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:36:59 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:01Z [APP] 2026-11-06 11:37:01,521 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:37:01Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:02Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:01 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:03Z [APP] 2026-11-06 11:37:03,091 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:37:03Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:03Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:03 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:04Z [APP] 2026-11-06 11:37:04,667 INFO noc_app GET /api/regions/NSW/topology -> 200 in 27 ms user=louis.chen@databricks.com
-2026-11-06T11:37:04Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:05Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:04 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:06Z [APP] 2026-11-06 11:37:06,236 INFO noc_app GET /api/regions/NSW/topology -> 200 in 29 ms user=louis.chen@databricks.com
-2026-11-06T11:37:06Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:07Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:06 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:07Z [APP] 2026-11-06 11:37:07,809 INFO noc_app GET /api/regions/NSW/topology -> 200 in 27 ms user=louis.chen@databricks.com
-2026-11-06T11:37:07Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:08Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:07 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:09Z [APP] 2026-11-06 11:37:09,385 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:37:09Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:10Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:09 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:10Z [APP] 2026-11-06 11:37:10,959 INFO noc_app GET /api/regions/NSW/topology -> 200 in 34 ms user=louis.chen@databricks.com
-2026-11-06T11:37:10Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:11Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:10 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
-2026-11-06T11:37:12Z [APP] 2026-11-06 11:37:12,533 INFO noc_app GET /api/regions/NSW/topology -> 200 in 28 ms user=louis.chen@databricks.com
-2026-11-06T11:37:12Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
-2026-11-06T11:37:13Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:11:37:12 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:37Z [APP] 2026-11-06 12:27:37,053 INFO noc_app GET /api/regions/NSW/topology -> 200 in 35 ms user=louis.chen@databricks.com
+2026-11-06T12:27:37Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:37Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:37 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:38Z [APP] 2026-11-06 12:27:38,611 INFO noc_app GET /api/regions/NSW/topology -> 200 in 39 ms user=louis.chen@databricks.com
+2026-11-06T12:27:38Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:39Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:38 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:40Z [APP] 2026-11-06 12:27:40,283 INFO noc_app GET /api/regions/NSW/topology -> 200 in 36 ms user=louis.chen@databricks.com
+2026-11-06T12:27:40Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:41Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:40 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:41Z [APP] 2026-11-06 12:27:41,878 INFO noc_app GET /api/regions/NSW/topology -> 200 in 35 ms user=louis.chen@databricks.com
+2026-11-06T12:27:41Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:42Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:41 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:43Z [APP] 2026-11-06 12:27:43,405 INFO noc_app GET /api/regions/NSW/topology -> 200 in 35 ms user=louis.chen@databricks.com
+2026-11-06T12:27:43Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:44Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:43 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:44Z [APP] 2026-11-06 12:27:44,942 INFO noc_app GET /api/regions/NSW/topology -> 200 in 38 ms user=louis.chen@databricks.com
+2026-11-06T12:27:44Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:45Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:44 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:46Z [APP] 2026-11-06 12:27:46,472 INFO noc_app GET /api/regions/NSW/topology -> 200 in 37 ms user=louis.chen@databricks.com
+2026-11-06T12:27:46Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:47Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:46 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:48Z [APP] 2026-11-06 12:27:48,053 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
+2026-11-06T12:27:48Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:48Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:48 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:49Z [APP] 2026-11-06 12:27:49,620 INFO noc_app GET /api/regions/NSW/topology -> 200 in 40 ms user=louis.chen@databricks.com
+2026-11-06T12:27:49Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:50Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:49 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:51Z [APP] 2026-11-06 12:27:51,188 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
+2026-11-06T12:27:51Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:51Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:51 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:52Z [APP] 2026-11-06 12:27:52,970 INFO noc_app GET /api/regions/NSW/topology -> 200 in 126 ms user=louis.chen@databricks.com
+2026-11-06T12:27:52Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:53Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:52 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:56Z [APP] 2026-11-06 12:27:56,460 INFO noc_app GET /api/regions/NSW/topology -> 200 in 37 ms user=louis.chen@databricks.com
+2026-11-06T12:27:56Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:57Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:56 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:58Z [APP] 2026-11-06 12:27:58,051 INFO noc_app GET /api/regions/NSW/topology -> 200 in 39 ms user=louis.chen@databricks.com
+2026-11-06T12:27:58Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:27:58Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:58 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:27:59Z [APP] 2026-11-06 12:27:59,625 INFO noc_app GET /api/regions/NSW/topology -> 200 in 39 ms user=louis.chen@databricks.com
+2026-11-06T12:27:59Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:00Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:27:59 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:28:01Z [APP] 2026-11-06 12:28:01,186 INFO noc_app GET /api/regions/NSW/topology -> 200 in 36 ms user=louis.chen@databricks.com
+2026-11-06T12:28:01Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:01Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:28:01 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:28:02Z [APP] 2026-11-06 12:28:02,857 INFO noc_app GET /api/regions/NSW/topology -> 200 in 36 ms user=louis.chen@databricks.com
+2026-11-06T12:28:02Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:03Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:28:02 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:28:04Z [APP] 2026-11-06 12:28:04,362 INFO noc_app GET /api/regions/NSW/topology -> 200 in 39 ms user=louis.chen@databricks.com
+2026-11-06T12:28:04Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:05Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:28:04 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:28:05Z [APP] 2026-11-06 12:28:05,878 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
+2026-11-06T12:28:05Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:06Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:28:05 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:28:07Z [APP] 2026-11-06 12:28:07,470 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
+2026-11-06T12:28:07Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:08Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:28:07 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
+2026-11-06T12:28:09Z [APP] 2026-11-06 12:28:09,016 INFO noc_app GET /api/regions/NSW/topology -> 200 in 33 ms user=louis.chen@databricks.com
+2026-11-06T12:28:09Z [APP] INFO:     <ip>:0 - "GET /api/regions/NSW/topology?incident_id=RCA-c7276c3238a27971 HTTP/1.1" 200 OK
+2026-11-06T12:28:09Z [HTTP] <ip> - 6016306480479573@7474648429104135 [06/Nov/2026:12:28:08 +0000] "GET /api/regions/NSW/topology HTTP/1.1" 200 41736 "-" "python-httpx/0.28.1"
 ```

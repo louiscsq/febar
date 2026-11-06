@@ -124,3 +124,46 @@ No hallucinated root survives the guard. SMS drafts are 100 % rule-compliant (98
 neutralised.
 
 See [`docs/genai_assistant.md`](docs/genai_assistant.md) and [`evidence/step4/`](evidence/step4/).
+
+## Genie space and NOC topology app (step 5)
+
+A **Genie space** for the NOC (`resources/genie.yml`, defined in `src/netmon_pipeline/genie_space.py`) answers questions
+about open incidents, the failing element and its top-3 suspects, element health, customer impact by region and the
+detection KPIs over region-filtered `netmon_noc` views: Genie queries as the asking user, so a regional analyst only
+sees their region and nobody sees IMSI / MSISDN. Its 18-question benchmark scores 17 / 18 on the final run by Genie's grader
+(15–17 across four runs; misses and variance in `evidence/step5/README.md`).
+
+The **Databricks App** `banksia-noc-topology` (`app/`, FastAPI + a static page) draws the region's network from core to
+cells with live health and pinpoints the failing element of the selected incident on a tree and on a map of Australia.
+It shows detection time, time to detect, impacted counts, the ranker's scores and the Gen AI summary, lets the operator
+approve or reject the SMS draft (written to Lakebase, never sent) and asks Genie. Hot-path reads and the write go to
+Lakebase as the app's service principal; Unity Catalog reads and Genie run as the signed-in user.
+
+`evidence/step5/03_trace_site_power_outage.md` follows one real fault (SITE-NSW-00105, a site power outage) from the
+raw file in the Volume to the operator's screen and a Genie answer. Impact was detected 124 s after it started (against
+ground truth) and suspect 1 was right. See [`docs/architecture.md`](docs/architecture.md),
+[`docs/genie_space.md`](docs/genie_space.md), [`docs/topology_app.md`](docs/topology_app.md) and
+[`evidence/step5/`](evidence/step5/).
+
+## How to run / repo map
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e ".[dev,rca,genai,app,spark-tests]"
+.venv/bin/python -m pytest -q && .venv/bin/ruff check .
+databricks bundle validate -t dev -p febar && databricks bundle deploy -t dev -p febar
+# then the run books in docs/pipeline.md (step 2), docs/rca_model.md (3), docs/genai_assistant.md (4),
+# docs/topology_app.md (5: governance stage=serving_views, noc_topology, app_lakebase_grants)
+```
+
+| path | what |
+|---|---|
+| `src/netmon_datagen/` | synthetic network, telemetry, faults and ground truth |
+| `pipelines/netmon/`, `src/netmon_pipeline/` | Lakeflow pipeline and its tested Python rules / detection / scoring |
+| `governance/` | UC functions, region-filtered views (incl. step-5 serving views), grants, tags |
+| `src/netmon_pipeline/rca/`, `notebooks/03-07` | root-cause ranker: features, training, evaluation, live scoring |
+| `src/netmon_pipeline/genai/`, `notebooks/08-11` | Gen AI NOC assistant and SMS drafts |
+| `src/netmon_pipeline/genie_space.py`, `resources/genie*` | the Genie space as code |
+| `app/` | the Databricks App (FastAPI backend, static UI, `app.yaml`) |
+| `resources/*.yml`, `databricks.yml` | the bundle: pipeline, jobs, schemas, Lakebase, serving, Genie, app |
+| `scripts/` | evidence capture, Genie benchmark, end-to-end trace, local helpers |
+| `docs/`, `evidence/` | design docs per step; captured text evidence per step |

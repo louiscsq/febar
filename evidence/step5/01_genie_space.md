@@ -1,6 +1,6 @@
 # Genie space: deployed configuration
 
-Captured 2026-11-06 11:32 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
+Captured 2026-11-06 12:26 UTC from workspace profile `febar` by `scripts/capture_evidence_step5.py`.
 
 The NOC Genie space as deployed by the bundle (`resources/genie.yml`, body generated from
 `src/netmon_pipeline/genie_space.py`), read back from the Genie API (`GET /api/2.0/genie/spaces/{id}` with
@@ -111,12 +111,12 @@ history questions such as "how many drafts were written".
 | principal | display_name | levels |
 |---|---|---|
 | noc_region_nt | NULL | CAN_RUN |
+| louis.chen@databricks.com | Louis Chen | CAN_MANAGE, CAN_MANAGE |
 | noc_region_nql | NULL | CAN_RUN |
 | noc_region_act | NULL | CAN_RUN |
 | noc_region_nsw | NULL | CAN_RUN |
 | noc_national | NULL | CAN_RUN |
 | noc_region_qld | NULL | CAN_RUN |
-| louis.chen@databricks.com | Louis Chen | CAN_MANAGE, CAN_MANAGE |
 | noc_region_pil | NULL | CAN_RUN |
 | noc_region_tas | NULL | CAN_RUN |
 | noc_region_wa | NULL | CAN_RUN |

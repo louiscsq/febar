@@ -58,14 +58,19 @@ and that "waiting for approval" means the current draft per open incident.
 18 questions with expected SQL (`genie_space.BENCHMARKS`), graded by Genie's own eval-run against the expected
 result. Two runs are committed:
 
-| run | GOOD | needs review | bad | notes |
-|---|---|---|---|---|
-| 1 (`02a_genie_benchmark_run1.md`) | 17 / 18 | 0 | 1 | "How many SMS drafts are waiting for approval?" counted all 68 historical drafts (`customer_sms_drafts`) instead of the 17 current ones: a real ambiguity, fixed by an instruction line |
-| 2, final (`02_genie_benchmark.md`) | 16 / 18 | 1 | 1 | the SMS question now passes; two answers the grader marks down are right on inspection: an unrounded average (165.83 vs 165.8, `NEEDS_REVIEW`) and the element types under a router without the count column (`BAD`) |
+| run | GOOD | notes |
+|---|---|---|
+| 1 (`02a_genie_benchmark_run1.md`) | 17 / 18 | "How many SMS drafts are waiting for approval?" counted all 68 historical drafts (`customer_sms_drafts`) instead of the 17 current ones: a real ambiguity, fixed by an instruction line (passes in every run since) |
+| final (`02_genie_benchmark.md`) | **17 / 18** | the miss: the element types under router AGG-NSW-04 came back without the count column (`RESULT_MISSING_COLUMNS`); the type itself is right |
 
-So 16 / 18 (89 %) by Genie's strict grader on the final run, 18 / 18 answer-correct on manual review of that run. Genie
-is not deterministic: the two marked-down questions passed in run 1. Four benchmark questions are close paraphrases of
-a trusted example SQL; the other 14 are not.
+Genie is not deterministic: the four runs after the fix scored 16, 16, 15 and 17 out of 18. Questions that failed
+at least once in those runs:
+
+- the unrounded average time to detect (165.83 vs 165.8; correct);
+- the router question above;
+- the scored median TTD per fault type: correct values plus an extra `ALL` roll-up row, a real partial miss.
+
+Four of the benchmark questions are close paraphrases of a trusted example SQL; the other 14 are not.
 
 ## Known limits
 

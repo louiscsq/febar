@@ -1,6 +1,6 @@
 # End-to-end trace: SITE-NSW-00105 site power outage (Sydney)
 
-Captured 2026-11-06 11:24 UTC from workspace profile `febar` by `scripts/trace_end_to_end.py --incident RCA-c7276c3238a27971`. Every block below is the real output of that hop; nothing is hand-edited.
+Captured 2026-11-06 12:24 UTC from workspace profile `febar` by `scripts/trace_end_to_end.py --incident RCA-c7276c3238a27971`. Every block below is the real output of that hop; nothing is hand-edited.
 
 **The fault.** Incident `RCA-c7276c3238a27971` in `NSW`, live feed (`source_run = 'stream'`). The root-cause ranker's
 suspect 1 is `SITE-NSW-00105` (SITE). The trace starts from the first customer-impact detection on that
@@ -201,7 +201,7 @@ _5 row(s)_
       "n_case_candidates": 8.0
     }
   },
-  "latency_ms": 360,
+  "latency_ms": 317,
   "response_top3": [
     {
       "element_id": "SITE-NSW-00105",
@@ -263,7 +263,16 @@ _1 row(s)_
 
 `netmon_app.sms_draft_reviews` (written by the app; empty until reviewed):
 
-_(no result set)_
+| review_id | decision | reviewed_by | reviewed_at | app_identity | sent_at | send_channel |
+|---|---|---|---|---|---|---|
+| fd9a1e73-9484-47e2-8873-4c2cc84ff6d1 | approved | louis.chen@databricks.com | 2026-11-06 11:34:39.669590+00:00 | 23923ae9-3de4-453b-b13f-b61f7ba84868 | NULL | none |
+| d5ad9173-d6f9-4574-8904-7e38147bb00b | rejected | louis.chen@databricks.com | 2026-11-06 11:34:40.732659+00:00 | 23923ae9-3de4-453b-b13f-b61f7ba84868 | NULL | none |
+| c6f091c9-935c-4586-8517-2aca204a1c56 | approved | louis.chen@databricks.com | 2026-11-06 12:07:00.793266+00:00 | 23923ae9-3de4-453b-b13f-b61f7ba84868 | NULL | none |
+| af760062-71a0-4b8d-a1da-dbb991aaf363 | rejected | louis.chen@databricks.com | 2026-11-06 12:07:01.838380+00:00 | 23923ae9-3de4-453b-b13f-b61f7ba84868 | NULL | none |
+| 79a18bba-9cf1-42a6-a065-97d712d7afae | approved | louis.chen@databricks.com | 2026-11-06 12:11:37.081845+00:00 | 23923ae9-3de4-453b-b13f-b61f7ba84868 | NULL | none |
+| d459d2cb-ac32-4bc5-8e1a-1f04e4099f5a | rejected | louis.chen@databricks.com | 2026-11-06 12:11:38.117726+00:00 | 23923ae9-3de4-453b-b13f-b61f7ba84868 | NULL | none |
+
+_6 row(s)_
 
 ## 7. Gen AI NOC summary and customer SMS draft (Unity Catalog)
 
@@ -301,7 +310,7 @@ identity and on-behalf-of token to the app). Incident panel (`GET /api/incidents
 ```json
 {
   "http_status": 200,
-  "latency_ms": 2864,
+  "latency_ms": 3857,
   "body": {
     "incident_id": "RCA-c7276c3238a27971",
     "region_code": "NSW",
@@ -436,9 +445,9 @@ identity and on-behalf-of token to the app). Incident panel (`GET /api/incidents
       "text": "Banksia Mobile: Sorry, no mobile service in Sydney and NSW. We'll update you as soon as we can.",
       "draft_status": "draft",
       "draft_sha256": "69bb4b6cfb851b899d55b5c8f5ff44a582a8a244ab3d09ef9b9022524ded7242",
-      "decision": "pending",
-      "reviewed_by": null,
-      "reviewed_at": null,
+      "decision": "rejected",
+      "reviewed_by": "louis.chen@databricks.com",
+      "reviewed_at": "2026-11-06T12:11:38.117726+00:00",
       "sent": false,
       "note": "Draft only: this system never sends messages."
     }
@@ -451,7 +460,7 @@ Topology for the incident (`GET /api/regions/NSW/topology?incident_id=RCA-c7276c
 ```json
 {
   "http_status": 200,
-  "latency_ms": 1870,
+  "latency_ms": 1571,
   "body (trimmed to the highlighted elements)": {
     "region": "NSW",
     "incident_id": "RCA-c7276c3238a27971",
@@ -562,15 +571,18 @@ Question: *For the open incident whose top suspect is SITE-NSW-00105: what is th
 ```json
 {
   "http_status": 200,
-  "latency_ms": 20160,
+  "latency_ms": 18901,
   "answer_text": [
-    "For open incident **RCA-c7276c3238a27971**, the failing element is **SITE-NSW-00105** and the failing element type is **SITE**. The detection time for incident **RCA-c7276c3238a27971** was **162.4 seconds** (**2.7 minutes**), which is **within 5 minutes**, and the estimated affected subscribers for incident **RCA-c7276c3238a27971** is **420**."
+    "For open incident **RCA-c7276c3238a27971** in region **NSW**, the failing element is **SITE-NSW-00105** with element type **SITE** and top-suspect score **1.0**. Detection took **162.4 seconds** (**2.7 minutes**), which is **within 5 minutes**, and the estimated affected subscribers count is **420**."
   ],
   "columns": [
     "incident_id",
     "region_code",
-    "failing_element",
+    "failing_element_id",
     "failing_element_type",
+    "failing_element_score",
+    "first_impact_signal_ts",
+    "first_detection_ts",
     "time_to_detect_s",
     "time_to_detect_min",
     "detected_within_5min",
@@ -582,20 +594,23 @@ Question: *For the open incident whose top suspect is SITE-NSW-00105: what is th
       "NSW",
       "SITE-NSW-00105",
       "SITE",
+      "1.0",
+      "2026-10-09T00:08:00.000Z",
+      "2026-10-09T00:10:42.359Z",
       "162.4",
       "2.7",
       "true",
       "420"
     ]
   ],
-  "conversation_id": "01f1d9d4c2381c75a354cb03e9e5c91c"
+  "conversation_id": "01f1d9dd0e481308af759b51ceb0c93a"
 }
 ```
 
 SQL Genie generated and ran:
 
 ```sql
-SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`suspect_1_id` AS `failing_element`, `o`.`suspect_1_type` AS `failing_element_type`, `idt`.`time_to_detect_s`, ROUND(try_divide(`idt`.`time_to_detect_s`,60), 1) AS `time_to_detect_min`, `idt`.`detected_within_5min`, `ias`.`est_affected_subscribers` FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o` JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times` AS `idt` ON `o`.`incident_id` = `idt`.`incident_id` JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `ias` ON `o`.`incident_id` = `ias`.`incident_id` WHERE `o`.`suspect_1_id` = 'SITE-NSW-00105'
+SELECT `o`.`incident_id`, `o`.`region_code`, `o`.`suspect_1_id` AS `failing_element_id`, `o`.`suspect_1_type` AS `failing_element_type`, `o`.`suspect_1_score` AS `failing_element_score`, `d`.`first_impact_signal_ts`, `d`.`first_detection_ts`, `d`.`time_to_detect_s`, ROUND(try_divide(`d`.`time_to_detect_s`,60), 1) AS `time_to_detect_min`, `d`.`detected_within_5min`, `a`.`est_affected_subscribers` FROM `telco_netmon_febar_catalog`.`netmon_noc`.`open_incidents` AS `o` LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_detection_times` AS `d` ON `o`.`incident_id` = `d`.`incident_id` LEFT JOIN `telco_netmon_febar_catalog`.`netmon_noc`.`incident_ai_summary` AS `a` ON `o`.`incident_id` = `a`.`incident_id` WHERE `o`.`suspect_1_id` = 'SITE-NSW-00105'
 ```
 
 ## 10. Unity Catalog lineage linking the tables
@@ -622,16 +637,16 @@ SELECT source_table_full_name AS source, target_table_full_name AS target, entit
 | telco_netmon_febar_catalog.netmon_silver.silver_topology_nodes | telco_netmon_febar_catalog.netmon_gold.gold_element_impact_5m | PIPELINE | 2026-11-06T09:45:49.141Z | 24 |
 | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | PIPELINE | 2026-10-08T17:33:58.190Z | 4 |
 | telco_netmon_febar_catalog.netmon_silver.silver_kpis | telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | PIPELINE | 2026-11-06T09:45:40.154Z | 1028 |
-| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | NULL | 2026-11-06T11:08:15.194Z | 20 |
-| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | JOB | 2026-11-06T10:25:33.003Z | 1 |
-| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | NULL | 2026-11-06T10:43:19.987Z | 27 |
-| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | JOB | 2026-11-06T10:25:34.015Z | 1 |
-| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T11:08:06.451Z | 21 |
-| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T10:25:36.519Z | 1 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T11:08:06.451Z | 21 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T10:25:36.519Z | 1 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | NULL | 2026-11-06T10:43:19.987Z | 48 |
-| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | JOB | 2026-11-06T10:25:32.051Z | 1 |
+| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | NULL | 2026-11-06T12:11:04.636Z | 35 |
+| telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_noc.element_status | JOB | 2026-11-06T11:54:25.003Z | 2 |
+| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | NULL | 2026-11-06T12:07:51.475Z | 59 |
+| telco_netmon_febar_catalog.netmon_genai.incident_ai_latest | telco_netmon_febar_catalog.netmon_noc.incident_ai_summary | JOB | 2026-11-06T11:54:26.306Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T11:54:29.412Z | 2 |
+| telco_netmon_febar_catalog.netmon_gold.gold_impact_detections | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T12:11:48.160Z | 53 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | NULL | 2026-11-06T12:11:48.160Z | 53 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.incident_detection_times | JOB | 2026-11-06T11:54:29.412Z | 2 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | NULL | 2026-11-06T12:12:22.106Z | 109 |
+| telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_noc.open_incidents | JOB | 2026-11-06T11:54:23.534Z | 2 |
 | telco_netmon_febar_catalog.netmon_rca.element_status | telco_netmon_febar_catalog.netmon_rca.lb_element_status | PIPELINE | 2026-11-05T15:05:21.413Z | 1 |
 | telco_netmon_febar_catalog.netmon_rca.open_incidents | telco_netmon_febar_catalog.netmon_rca.lb_open_incidents | PIPELINE | 2026-11-05T15:05:20.243Z | 1 |
 | telco_netmon_febar_catalog.netmon_bronze.bronze_kpis | telco_netmon_febar_catalog.netmon_silver.silver_kpis | PIPELINE | 2026-11-06T09:45:22.241Z | 619 |
@@ -689,4 +704,4 @@ SELECT incident_id, event_class, fault_type, root_element_ids, impact_start_ts, 
 
 _1 row(s)_
 
-Ground-truth time to detect = first detection available (00:10:42) - true impact start (00:08:38) = **124 s** (5-minute SLA: met). The incident is `is_censored` when the live run ended before the fault cleared; censored incidents are excluded from the scored KPIs (`eval_ttd_summary`), which is why this open incident is not in that scorecard.
+Ground-truth time to detect = first detection available (00:10:42) - true impact start (00:08:38) = **124 s** (5-minute SLA: met), against the operational time to detect of 162 s shown by the app and Genie, which can only start at the first anomaly visible in the telemetry (a lower bound when a fault ramps up slowly before any KPI rule fires). The incident is `is_censored` when the live run ended before the fault cleared; censored incidents are excluded from the scored KPIs (`eval_ttd_summary`), which is why this open incident is not in that scorecard.
