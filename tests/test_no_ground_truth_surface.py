@@ -102,3 +102,47 @@ def test_api_responses_carry_no_ground_truth(path):
     assert r.status_code == 200, r.text
     assert not _hits(r.text), _hits(r.text)
     assert "scorecard" not in r.text
+
+
+POISONED_GENIE = {
+    "conversation_id": "c1", "message_id": "m1", "status": "COMPLETED",
+    "text": [f"From {CAT}.netmon_eval.eval_ttd_summary: the median backhaul time to detect is 559 s."],
+    "sql": f"SELECT fault_type, impact_median_ttd_s FROM {CAT}.netmon_eval.eval_ttd_summary",
+    "description": "Reads netmon_eval.eval_gt_incidents and eval_ttd_summary",
+    "columns": ["fault_type", "impact_median_ttd_s", "source"],
+    "rows": [["BACKHAUL_DEGRADATION", 559.0, "netmon_eval.eval_ttd_summary"]], "row_count": 1,
+}
+
+
+@pytest.mark.parametrize("field", ["all", "sql", "text", "description", "rows"])
+def test_genie_ask_never_passes_ground_truth_through(field):
+    """POST /api/genie/ask with a Genie that (wrongly) answers from the eval schema: the response exposes none of it."""
+    clean = {"conversation_id": "c1", "message_id": "m1", "status": "COMPLETED", "text": ["2 sites are down."],
+             "sql": f"SELECT element_id FROM {CAT}.netmon_noc.element_status", "description": "Sites down",
+             "columns": ["element_id"], "rows": [["SITE-NSW-00002"]], "row_count": 1}
+    ans = dict(POISONED_GENIE) if field == "all" else {**clean, field: POISONED_GENIE[field]}
+    if field == "rows":
+        ans["columns"] = POISONED_GENIE["columns"]
+    s = NocService(settings(), FakeStore(), FakeWarehouse(), FakeGenie(ans))
+    c = TestClient(create_app(lambda: s))
+    r = c.post("/api/genie/ask", json={"question": "How fast do we detect backhaul faults?"},
+               headers={"x-forwarded-email": "lead@banksia.example", "x-forwarded-access-token": "tok-national"})
+    assert r.status_code == 200, r.text
+    assert not _hits(r.text), _hits(r.text)
+    body = r.json()
+    assert body["withheld"] is True and body["sql"] is None and body["rows"] == [] and "559" not in r.text
+    assert "fault_type" not in r.text
+
+
+def test_genie_ask_clean_answer_is_returned_with_label_columns_dropped():
+    ans = {"conversation_id": "c1", "message_id": "m1", "status": "COMPLETED", "text": ["2 sites are down."],
+           "sql": f"SELECT element_id, fault_type FROM {CAT}.netmon_noc.element_status",
+           "columns": ["element_id", "fault_type"], "rows": [["SITE-NSW-00002", "SITE_POWER_OUTAGE"]], "row_count": 1}
+    s = NocService(settings(), FakeStore(), FakeWarehouse(), FakeGenie(ans))
+    c = TestClient(create_app(lambda: s))
+    r = c.post("/api/genie/ask", json={"question": "Which sites are down?"},
+               headers={"x-forwarded-email": "lead@banksia.example", "x-forwarded-access-token": "tok-national"})
+    body = r.json()
+    assert r.status_code == 200 and "withheld" not in body
+    assert body["columns"] == ["element_id"] and body["rows"] == [["SITE-NSW-00002"]]
+    assert body["text"] == ["2 sites are down."] and "netmon_noc.element_status" in body["sql"]

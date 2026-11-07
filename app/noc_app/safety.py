@@ -52,3 +52,35 @@ def scrub_table(columns: list[str], rows: list[list]) -> tuple[list[str], list[l
     """Drop forbidden columns from a tabular result (e.g. a Genie query result)."""
     keep = [i for i, c in enumerate(columns) if not is_forbidden(c)]
     return [columns[i] for i in keep], [[scrub(r[i]) for i in keep] for r in rows]
+
+
+# A Genie answer may only draw on the NOC serving schema (`netmon_noc`, region-filtered views). The space's data
+# sources hold nothing else, so in normal operation nothing matches; if an answer ever names another netmon schema,
+# an evaluation / label table or ground truth (in its SQL, text, description or result values), the whole answer is
+# withheld rather than partially redacted: a figure computed from ground truth is a leak even with its source removed.
+_NON_SERVING_SOURCE = re.compile(
+    r"\bnetmon_(?!noc\b)[a-z]+\b|\b(?:genai_)?eval_[a-z0-9_]+|\brca_training_[a-z_]+|\bbronze_g[t]_[a-z_]+|"
+    r"\bground[ _]truth\b", re.I)
+WITHHELD_TEXT = ("This answer referred to data outside the NOC serving views (evaluation or ground-truth tables) and "
+                 "was withheld.")
+
+
+def references_non_serving_data(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        return any(references_non_serving_data(k) or references_non_serving_data(v) for k, v in obj.items())
+    if isinstance(obj, (list, tuple)):
+        return any(references_non_serving_data(v) for v in obj)
+    return isinstance(obj, str) and bool(_NON_SERVING_SOURCE.search(obj))
+
+
+def scrub_genie_answer(ans: dict) -> dict:
+    """What the app returns for a Genie answer: forbidden columns dropped, raw identifiers redacted, and the whole
+    answer withheld if any part of it refers to non-serving (evaluation / ground-truth) data."""
+    ans = dict(ans or {})
+    if references_non_serving_data(ans):
+        return {"conversation_id": ans.get("conversation_id"), "message_id": ans.get("message_id"),
+                "status": ans.get("status"), "text": [WITHHELD_TEXT], "sql": None, "description": None,
+                "columns": [], "rows": [], "row_count": 0, "error": None, "withheld": True}
+    cols, rows = scrub_table(list(ans.get("columns") or []), list(ans.get("rows") or []))
+    out = scrub({k: v for k, v in ans.items() if k not in ("columns", "rows")})
+    return {**out, "columns": cols, "rows": rows}

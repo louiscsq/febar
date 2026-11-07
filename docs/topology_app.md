@@ -75,6 +75,10 @@ and the assistant's outputs, the UC reads are the `netmon_noc` views (never `sil
 schema (`tests/test_no_ground_truth_surface.py` scans the app's SQL, sources and every API response). On top of that, `safety.scrub` drops any IMSI / MSISDN / subscriber-key column and
 every ground-truth label column (step 3's `LABEL_COLUMNS`) at any depth of every response, Genie results included, and
 redacts raw IMSI- or MSISDN-shaped strings (`tests/test_app_api_safety.py` poisons every source with them).
+A Genie answer goes through `safety.scrub_genie_answer`: label columns are dropped from its result table, and if its
+SQL, text, description or result values refer to anything outside the `netmon_noc` serving views (another netmon
+schema, an evaluation or label table, ground truth), the whole answer is withheld rather than partly redacted
+(`tests/test_no_ground_truth_surface.py` poisons the fake Genie with `netmon_eval` / `eval_ttd_summary` in each field).
 
 **Trust boundary: forwarded headers.** A Databricks App is reachable only through the Apps proxy, which authenticates
 the browser session and sets `x-forwarded-email`, `x-forwarded-preferred-username` and the downscoped

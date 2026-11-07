@@ -19,7 +19,7 @@ from typing import Any
 from . import topology
 from . import warehouse as wh
 from .lakebase import Store, draft_sha256, new_review_id
-from .safety import scrub
+from .safety import scrub_genie_answer
 from .warehouse import TTLCache, Warehouse
 
 DECISIONS = {"approve": "approved", "reject": "rejected"}
@@ -241,4 +241,4 @@ class NocService:
             raise BadRequest("questions are limited to 500 characters")
         if not user.token:
             raise Unauthorized("Ask Genie runs as the signed-in user; no user token was forwarded")
-        return scrub(self.genie.ask(user.token, q, conversation_id))
+        return scrub_genie_answer(self.genie.ask(user.token, q, conversation_id))
