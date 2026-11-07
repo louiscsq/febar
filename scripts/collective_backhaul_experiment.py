@@ -6,6 +6,8 @@ and evidence/step6/.
     python scripts/collective_backhaul_experiment.py score --reading dev        # after the freeze commit
     python scripts/collective_backhaul_experiment.py score --reading holdout    # ONCE: the detector holdout reading
     python scripts/collective_backhaul_experiment.py score --reading stream     # the old live run (3 faults)
+    python scripts/collective_backhaul_experiment.py rescore --reading holdout --note "..."  # stored detections only
+    python scripts/collective_backhaul_experiment.py verify                     # nothing existing changed
 
 Protocol. `calibrate` sweeps a declared grid on the history_1m dev days (the RCA's dev split, 2026-10-14 .. 10-15),
 applies the declared selection rule and writes evidence/step6/01_calibration.md. The chosen thresholds are then frozen in
@@ -178,11 +180,12 @@ def fetch_incidents(wh: Warehouse, run: str) -> list[dict]:
 
 def fetch_before(wh: Warehouse, run: str) -> dict[tuple[str, str], float | None]:
     """Published step-2 metric (a): first per-cell / alarm detection on the incident's footprint, as an availability
-    time (impact_start + the published, 0-clipped impact_ttd_s: the clip does not change which detector is first)."""
-    df = wh.frame(f"SELECT source_run, incident_id, impact_start_ts, impact_ttd_s FROM {INCIDENT_DETECTION} "
+    time (impact_start + the published, 0-clipped impact_ttd_s: the clip does not change which detector is first).
+    Undetected incidents (`impact_detected` false) are None: the MV's `greatest(NULL, 0)` gives them impact_ttd_s = 0."""
+    df = wh.frame(f"SELECT source_run, incident_id, impact_detected, impact_start_ts, impact_ttd_s FROM {INCIDENT_DETECTION} "
                   f"WHERE source_run = '{run}'")
-    return {(r.source_run, r.incident_id): (None if pd.isna(r.impact_ttd_s)
-                                            else pd.Timestamp(r.impact_start_ts).timestamp() + float(r.impact_ttd_s))
+    return {(r.source_run, r.incident_id): (pd.Timestamp(r.impact_start_ts).timestamp() + float(r.impact_ttd_s)
+                                            if bool(r.impact_detected) and not pd.isna(r.impact_ttd_s) else None)
             for r in df.itertuples()}
 
 
@@ -497,6 +500,51 @@ same grouping to today's per-cell KPI detections on the link's cells (labelled b
     (OUT / name.replace(".md", ".json")).write_text(json.dumps(summary, indent=1, default=str))
 
 
+def rescore(wh: Warehouse, reading: str, note: str) -> None:
+    """Re-score a reading from its STORED detections (the experiment table): no detection is recomputed and no KPI /
+    health data of the run is read again. Used once, for the holdout, after the baseline-lookup fix in `fetch_before`."""
+    run, lo, hi = READINGS[reading]
+    tab = wh.frame(f"SELECT freeze_sha, element_id, signal_start_ts, signal_end_ts, available_ts, in_maintenance, "
+                   f"w_prb_util_pct FROM {EXPERIMENT_TABLE} WHERE reading = '{reading}'")
+    if tab.empty:
+        sys.exit(f"no stored detections for {reading}")
+    sha = tab.freeze_sha.iloc[0]
+    tab["s0"], tab["s1"], tab["av"] = _secs(tab.signal_start_ts), _secs(tab.signal_end_ts), _secs(tab.available_ts)
+    dets = [{"source_run": run, "element_id": r.element_id, "signal_start_s": r.s0, "signal_end_s": r.s1,
+             "available_s": r.av, "in_maintenance": bool(r.in_maintenance),
+             "w_prb_util_pct": None if pd.isna(r.w_prb_util_pct) else float(r.w_prb_util_pct)} for r in tab.itertuples()]
+    ctx = Context(wh, reading)
+    ev = evaluate(ctx, dets)
+    cell_fa, cell_alerts = percell_false_alarms(ctx, fetch_percell(wh, reading))
+    name = {"dev": "02b_dev_rescore.md", "holdout": "03b_holdout_rescore.md", "stream": "04b_stream_rescore.md"}[reading]
+    d = Doc(f"Step 6: {reading} reading re-scored from its stored detections", f"""
+- reading `{reading}` (`{run}`, {lo} .. {hi}); {len(dets)} detections read back from `{EXPERIMENT_TABLE}`, as written by the
+  single scoring run with the rule frozen at `{sha}`. **No detection was recomputed and no KPI / health row of `{run}` was
+  read again.** Only the scoring changed.
+- {note.strip()}
+- scored incidents: {len(ctx.scored)}; healthy link-days: {ctx.link_days:.1f}.
+""")
+    d.h(f"Time to detect, {FAULT} (n = {len(ctx.scored)})", "Undetected incidents count against 'within 5 min' but not in "
+        "the percentiles.")
+    d.table(*ttd_table(ev["rows"]))
+    d.h("Per incident")
+    d.table(["incident_id", "link", "n_cells", "before_ttd_s", "collective_ttd_s", "combined_ttd_s"],
+            [[r["incident_id"], r["root_element_id"], r["n_desc_cells"], _r(r["before_ttd_s"]),
+              _r(r["collective_ttd_s"]), _r(r["combined_ttd_s"])] for r in ev["rows"]])
+    d.h("False-alarm cost (does not use the per-cell first detection, so unchanged by the fix)")
+    d.table(["measure", "collective", "per-cell KPI rules (today), grouped per link"],
+            [[k, ev["fa"][k], cell_fa.get(k)] for k in ev["fa"]])
+    d.table(["measure", "value"], [["collective false alarms on a link with no per-cell alert within 10 min (new pages)",
+                                    added_pages(ev["alerts"], cell_alerts)]])
+    d.h("Collective alerts that are true positives, by fault type")
+    d.table(["fault_type", "collective TP alerts"], other_fault_tp(ev["alerts"]) or [["(none)", 0]])
+    d.write(name)
+    (OUT / name.replace(".md", ".json")).write_text(json.dumps(
+        {"reading": reading, "freeze_sha": sha, "ttd": ttd_table(ev["rows"])[1], "fa": ev["fa"], "percell_fa": cell_fa,
+         "added_pages": added_pages(ev["alerts"], cell_alerts), "other_tp": other_fault_tp(ev["alerts"])},
+        indent=1, default=str))
+
+
 def mirror_check_stats(wh: Warehouse, reading: str, stats: pd.DataFrame) -> tuple[list[str], list[list]]:
     """Recompute the parent-minute statistic in Python (`windows.parent_health`) from the raw cell windows of one
     hour (12:00 UTC on the first day; 2 h into the 6-hour stream) and compare it with the SQL statistic."""
@@ -549,9 +597,34 @@ def mirror_check_stats(wh: Warehouse, reading: str, stats: pd.DataFrame) -> tupl
     return ["check", "value"], rows
 
 
+def verify(wh: Warehouse, since: str) -> None:
+    """Evidence that the experiment changed nothing that existed: only the new table was written since `since`, the
+    published step-2 backhaul numbers are unchanged, and the experiment table holds exactly one row set per reading."""
+    d = Doc("Step 6: nothing existing changed", f"""
+Checks after the three readings. `since` = {since} (before this step's first query).""")
+    for title, sql in [
+        ("Tables / views in the netmon_* schemas altered since the step began",
+         f"SELECT table_schema, table_name, table_type, last_altered FROM {CAT}.information_schema.tables "
+         f"WHERE table_schema LIKE 'netmon%' AND last_altered >= '{since}' ORDER BY 1, 2"),
+        ("Published step-2 BACKHAUL_DEGRADATION figures (eval_ttd_summary), unchanged",
+         f"SELECT source_run, n_incidents, impact_median_ttd_s, impact_p90_ttd_s, impact_within_5min_pct, "
+         f"median_evidence_lag_s FROM {CAT}.netmon_eval.eval_ttd_summary WHERE fault_type = '{FAULT}' ORDER BY 1"),
+        ("Experiment table: one row set per reading, all from the frozen rule",
+         f"SELECT reading, freeze_sha, count(*) AS n_detections, count(DISTINCT detection_id) AS n_ids, "
+         f"min(scored_at) AS first_scored, max(scored_at) AS last_scored FROM {EXPERIMENT_TABLE} GROUP BY 1, 2 ORDER BY 1"),
+    ]:
+        df = wh.frame(sql)
+        d.h(title)
+        d.sql(sql)
+        d.table(list(df.columns), df.astype(object).where(df.notna(), None).values.tolist())
+    d.write("05_no_change.md")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["calibrate", "score"])
+    ap.add_argument("command", choices=["calibrate", "score", "rescore", "verify"])
+    ap.add_argument("--note", default="", help="rescore: why the reading is re-scored")
+    ap.add_argument("--since", default="2026-11-07T00:00:00Z", help="verify: start of this step")
     ap.add_argument("--reading", choices=list(READINGS))
     ap.add_argument("--replace", action="store_true", help="re-score dev or stream (never the holdout)")
     ap.add_argument("--profile", default="febar")
@@ -560,6 +633,12 @@ def main() -> None:
     wh = Warehouse(a.profile, a.warehouse)
     if a.command == "calibrate":
         calibrate(wh)
+    elif a.command == "verify":
+        verify(wh, a.since)
+    elif a.command == "rescore":
+        if not a.reading or not a.note:
+            ap.error("rescore needs --reading and --note")
+        rescore(wh, a.reading, a.note)
     else:
         if not a.reading:
             ap.error("score needs --reading")
