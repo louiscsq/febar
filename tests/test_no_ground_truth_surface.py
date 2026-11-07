@@ -32,7 +32,8 @@ GT = re.compile(r"netmon_eval|\{eval\}|eval_schema|eval_ttd_summary|eval_gt_inci
 ALLOWED = {"scripts/trace_end_to_end.py", "scripts/capture_evidence.py", "scripts/capture_evidence_step3.py",
            "scripts/capture_evidence_step4.py", "scripts/capture_evidence_step5.py",
            "scripts/genai_eval_local.py", "scripts/genai_early_example.py",
-           "scripts/collective_backhaul_experiment.py"}  # step 6 offline experiment: scores against ground truth
+           "scripts/collective_backhaul_experiment.py",  # step 6 offline experiment: scores against ground truth
+           "scripts/capture_cost_step6.py"}  # reads the pipeline event log (netmon_eval) for the live update's duration
 
 
 def _hits(text: str) -> list[str]:
