@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import re
 import subprocess
 import sys
 import time
@@ -599,6 +600,92 @@ def mirror_check_stats(wh: Warehouse, reading: str, stats: pd.DataFrame) -> tupl
     return ["check", "value"], rows
 
 
+# Published step 2-5 headline evidence: every committed (query, output table) pair in these files is re-run and compared.
+PUBLISHED_EVIDENCE = ["evidence/step2/02_expectations.md", "evidence/step2/03_row_counts.md",
+                      "evidence/step2/05_time_to_detect.md", "evidence/step3/01_training_run.md",
+                      "evidence/step3/02_evaluation.md", "evidence/step3/07_pr3_review_notes.md",
+                      "evidence/step3/08_alarm_id_fix.md", "evidence/step4/04_evaluation.md",
+                      "evidence/step4/07_latency_cost.md", "evidence/step4/09_holdout_alarm_gap.md",
+                      "evidence/step4/10_holdout_rerun.md"]
+_NOT_REPLAYABLE = re.compile(r"information_schema|system\.|event_log|current_timestamp|current_date|now\(\)|"
+                             r"\bDESCRIBE\b|\bSHOW\b|eval_collective_backhaul_experiment", re.I)
+PUBLISHED_TABLE_SCHEMAS = ("netmon_eval", "netmon_rca", "netmon_genai")
+# result / summary tables only: raw logs, ground truth, features and serving outputs are not "published results"
+PUBLISHED_TABLE_RE = re.compile(r"^(eval_(ttd_summary|incident_detection|detection_precision|alert_precision|rca_baseline|"
+                                r"dq_capture)|rca_eval_.*|rca_(holdout|training)_runs|rca_feature_importance|"
+                                r"genai_eval_(summary|results)_.*|alarm_counts_pr5)(_pr5)?$")
+
+
+def committed_query_tables(path: Path) -> list[tuple[str, str, list[str]]]:
+    """(heading, sql, table lines) for every ```sql block that is directly followed by a markdown table."""
+    lines, out, heading, i = path.read_text().splitlines(), [], "", 0
+    while i < len(lines):
+        if lines[i].startswith("#"):
+            heading = lines[i].lstrip("# ").strip()
+        if lines[i].strip() == "```sql":
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "```":
+                j += 1
+            sql = "\n".join(lines[i + 1:j])
+            k = j + 1
+            while k < len(lines) and not lines[k].strip():
+                k += 1
+            tab = []
+            while k < len(lines) and lines[k].startswith("|"):
+                tab.append(lines[k])
+                k += 1
+            if tab:
+                out.append((heading, sql, tab))
+            i = k
+            continue
+        i += 1
+    return out
+
+
+def compare_published(r) -> tuple[list[list], list[str]]:
+    """Re-run each replayable committed query and compare its rows with the committed table (as rendered by
+    capture_evidence.md_table, the function that wrote them)."""
+    rows, diffs = [], []
+    for f in PUBLISHED_EVIDENCE:
+        for heading, sql, tab in committed_query_tables(ROOT / f):
+            if _NOT_REPLAYABLE.search(sql) or not re.match(r"\s*(WITH|SELECT)\b", sql, re.I):
+                rows.append([f, heading[:70], "skipped (not replayable: system / time-dependent / non-SELECT)", "", ""])
+                continue
+            try:
+                cols, data = r.sql(sql)
+            except RuntimeError as e:
+                rows.append([f, heading[:70], f"error: {str(e).splitlines()[0][:80]}", "", ""])
+                continue
+            now = [ln for ln in md_table(cols, data).splitlines() if ln.startswith("|")]
+            committed_body, now_body = tab[2:], now[2:]
+            same_header = tab[0] == now[0]
+            missing = [x for x in committed_body if x not in now_body]
+            extra = [x for x in now_body if x not in committed_body]
+            if same_header and not missing and not extra:
+                status = "identical"
+            elif same_header and not missing:
+                runs = sorted({x.split("|")[1].strip() for x in extra})
+                status = f"every committed row unchanged; +{len(extra)} rows (first column: {', '.join(runs)[:60]})"
+            else:
+                status = "DIFFERENT"
+                # a file captured before PR #6: is it the pre-fix published state, kept in the `_pr5` snapshot tables?
+                pr5 = re.sub(r"\b(netmon_(?:eval|rca|genai)\.(?:eval|rca_eval|genai_eval)_[a-z_]+?)(\s|$|\))", r"\1_pr5\2", sql)
+                if pr5 != sql:
+                    try:
+                        c5, d5 = r.sql(pr5)
+                        snap = [ln for ln in md_table(c5, d5).splitlines() if ln.startswith("|")]
+                        if snap[0] == tab[0] and sorted(snap[2:]) == sorted(committed_body):
+                            status = "DIFFERENT from now; identical to the pre-PR-6 snapshot (`_pr5` tables)"
+                    except RuntimeError:
+                        pass
+            rows.append([f, heading[:70], status, len(committed_body), len(now_body)])
+            if status.startswith("DIFFERENT"):
+                diffs.append(f"### {f}: {heading}\n\ncommitted rows not in the current output:\n\n"
+                             + "\n".join([tab[0], tab[1], *missing]) + "\n\ncurrent rows not in the committed table:\n\n"
+                             + "\n".join([now[0], now[1], *extra]) + "\n")
+    return rows, diffs
+
+
 def verify(wh: Warehouse, since: str) -> None:
     """Evidence that the experiment changed nothing that existed: only the new table was written since `since`, the
     published step-2 backhaul numbers are unchanged, and the experiment table holds exactly one row set per reading."""
@@ -623,10 +710,47 @@ Checks after the three readings. `since` = {since} (before this step's first que
         d.h(title)
         d.sql(sql)
         d.table(list(df.columns), df.astype(object).where(df.notna(), None).values.tolist())
+    # complete published step 2-5 result set: deterministic content hashes, row counts, last change
+    tabs = wh.frame(f"SELECT table_schema, table_name, table_type, last_altered FROM {CAT}.information_schema.tables "
+                    f"WHERE table_schema IN {PUBLISHED_TABLE_SCHEMAS} ORDER BY 1, 2")
+    tabs = tabs[tabs.table_name.str.match(PUBLISHED_TABLE_RE.pattern)]
+    hrows = []
+    for t in tabs.itertuples():
+        h = wh.frame(f"SELECT count(*) AS n, sha2(concat_ws('\\n', array_sort(collect_list(to_json(struct(*))))), 256) AS h "
+                     f"FROM {CAT}.{t.table_schema}.{t.table_name}")
+        hrows.append([f"{t.table_schema}.{t.table_name}", t.table_type, str(t.last_altered), int(h.n[0]), h.h[0][:16],
+                      "yes" if pd.Timestamp(t.last_altered) >= pd.Timestamp(since) else "no"])
+    d.h("Every published step 2-5 result table: content hash and last change",
+        f"""All {len(hrows)} result / summary tables of netmon_eval, netmon_rca and netmon_genai (the published scorecards,
+including the `_pr5` copies of the pre-PR-6 results). `sha2` over the sorted JSON of every row is a deterministic content
+hash, recorded here so that any later change is detectable. **No pre-step-6 hash snapshot exists**, so the before/after
+check for this step is (a) `last_altered` (no table was changed since {since}) and (b) the replay of the committed
+evidence below.""")
+    d.table(["table", "type", "last_altered", "rows", "sha2 (first 16 hex)", f"altered since {since}"], hrows)
+    from capture_evidence import Runner
+    rows, diffs = compare_published(Runner(PROFILE, WAREHOUSE))
+    d.h("Committed step 2-4 headline evidence replayed against the current tables",
+        """Before = the tables committed in evidence/step2..4 (the published numbers; no separate pre-step-6 snapshot was
+taken, so the committed evidence is the reference). After = the same SQL re-run now, rendered by the same function. Step 5's
+headline is the Genie benchmark (evidence/step5/02*): answers of a live LLM, not a table, so it cannot be replayed
+deterministically; the serving views it reads sit on the tables hashed above.""")
+    d.table(["file", "section", "status", "committed rows", "current rows"], rows)
+    n_id = sum(x[2] == "identical" for x in rows)
+    n_sup = sum(str(x[2]).startswith("every committed") for x in rows)
+    n_diff = sum(str(x[2]).startswith("DIFFERENT") for x in rows)
+    d.text(f"**Replayed: {n_id} identical, {n_sup} with every committed row unchanged plus rows of runs added after that "
+           f"file was captured, {n_diff} different** (listed below; see the README for why each one differs).")
+    if diffs:
+        d.h("Differences (explained in the README)")
+        d.text("\n".join(diffs))
     d.write("05_no_change.md")
 
 
+PROFILE, WAREHOUSE = "febar", "d7fa853ab15b20a3"
+
+
 def main() -> None:
+    global PROFILE, WAREHOUSE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["calibrate", "score", "rescore", "verify"])
     ap.add_argument("--note", default="", help="rescore: why the reading is re-scored")
@@ -636,6 +760,7 @@ def main() -> None:
     ap.add_argument("--profile", default="febar")
     ap.add_argument("--warehouse", default="d7fa853ab15b20a3")
     a = ap.parse_args()
+    PROFILE, WAREHOUSE = a.profile, a.warehouse
     wh = Warehouse(a.profile, a.warehouse)
     if a.command == "calibrate":
         calibrate(wh)
