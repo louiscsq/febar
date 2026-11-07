@@ -11,8 +11,8 @@ sweet spot for the Databricks platform.
 The two Australian incidents that shaped the requirements:
 
 - **Telstra, July 2026:** customers' web searches detected the outage after about 99 minutes. The earliest alarms
-existed but weren't shown in 24x7 tooling.
-- **Optus, September 2025:** the NOC had no alarms for failed 000 calls.
+existed but weren't shown in 24x7 tooling. ([independent findings report](https://www.telstra.com.au/content/dam/tcom/dynamic-media-projects/luke-campbell/TAPFindingsforTelstraOutage.pdf))
+- **Optus, September 2025:** the NOC had no alarms for failed 000 calls. ([summary with citations](https://en.wikipedia.org/wiki/2025_Optus_emergency_calling_outage))
 
 Both are failures of *detection and triage*, not of repair. So the build targets two NOC KPIs:
 
@@ -32,7 +32,7 @@ Both are failures of *detection and triage*, not of repair. So the build targets
 | **LLM restricted to the ranker's top 3 suspects, or "uncertain"**                                                                                                          | Free-form LLM diagnosis                          | An LLM inventing an element in a live NOC is dangerous. A guard turns any invented element into "uncertain", never into a guess.                                                     | The assistant can't outperform the ranker on cause. It scores 97.5% vs 98.8%; its value is speed of understanding.     |
 | **SMS drafts need a person's approval, with no send path** (enforced by a database constraint)                                                                             | Auto-send                                        | Regulator-facing customer comms; a wrong message is worse than a slow one. It's better to have a person in the loop to review each message before it's sent.                         | A person stays in the loop.                                                                                            |
 | **Governance:** IMSI/MSISDN masks, regional row filters, and a privileged group that can only unmask                                                                       | View-level security only                         | Regional NOC teams are a real org pattern. Subscriber identifiers are personal information under Australian privacy law.                                                             | The workspace couldn't apply groups the usual way, so service accounts stand in for groups. This is documented.        |
-| **Lakebase for the app's operational reads**                                                                                                                               | Querying the SQL warehouse directly              | The app needs millisecond reads: about 12–36 ms p50 inside the app, against seconds from a warehouse. SMS approvals need transactional writes.                                       | A sync to maintain; data can lag Delta by a short interval.                                                            |
+| **Lakebase for the app's operational reads**                                                                                                                               | Querying the SQL warehouse directly              | The app needs millisecond reads: server-side p50 of 12–36 ms per API call (`evidence/step5/04_app_deployment.md`), against seconds from a warehouse. SMS approvals need transactional writes.                                       | A sync to maintain; data can lag Delta by a short interval.                                                            |
 | **Genie on masked, region-filtered views only**                                                                                                                            | Genie on the raw gold tables                     | Genie runs as the user, so the same masks and filters apply. It never sees the evaluation (ground-truth) tables.                                                                     | Some questions need curated example SQL. Genie still varies run to run (16–18 of 18).                                  |
 
 
@@ -100,7 +100,8 @@ tracking; MLflow tracing is on; and every request and response is logged.
 
 ## 6. Known limits and what I'd do next
 
-- **Slow backhaul degradation isn't caught within 5 minutes** (median about 10 min, ramp of 10–30 min).
+- **Slow backhaul degradation isn't caught within 5 minutes** (ramp of 10–30 min). The deployed per-cell path has a median of about 9.4 min (562 s); the offline experiment below
+  brings it to about 5.5 min (332 s) but isn't deployed.
   - **Why:** detection works cell by cell, and early in the ramp each cell degrades only a little, so none crosses
   its threshold on its own.
   - **What I added:** detect impact from the *customers attached to the cells behind each link*. Roll cell
