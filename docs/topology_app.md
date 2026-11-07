@@ -49,7 +49,7 @@ App: `banksia-noc-topology`, https://banksia-noc-topology-7474648429104135.aws.d
 
 | data | read from | why |
 |---|---|---|
-| open incidents + top-3 suspects, element status, AI summary + SMS draft | **Lakebase** (`netmon_rca.lb_open_incidents`, `lb_element_status`, `netmon_genai.lb_incident_ai_latest`) | changes every scoring / assistant run, read on every click: millisecond Postgres lookups (server-side p50 10–29 ms per API call, `04_app_deployment.md`) with no warehouse to keep warm |
+| open incidents + top-3 suspects, element status, AI summary + SMS draft | **Lakebase** (`netmon_rca.lb_open_incidents`, `lb_element_status`, `netmon_genai.lb_incident_ai_latest`) | changes every scoring / assistant run, read on every click: millisecond Postgres lookups (server-side p50 12–36 ms per API call, `04_app_deployment.md`) with no warehouse to keep warm |
 | SMS approve / reject | **Lakebase** write (`netmon_app.sms_draft_reviews`) | an operational, transactional write with who / when; Delta is not an OLTP store |
 | region scope, network inventory (names, hierarchy, coordinates) | SQL warehouse, **as the user** | reference data that changes with network builds, not by the minute (cached 15 min per region); reading it as the user is also how Unity Catalog's row filter decides the user's regions |
 | operational detection timing, KPI tiles | SQL warehouse, as the user | analytics over gold detections (operational, no ground truth); seconds are fine |
