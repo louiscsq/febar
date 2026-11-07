@@ -26,10 +26,6 @@ remuneration report](https://www.telstra.com.au/content/dam/tcom/about-us/invest
 | Subscriber privacy                                                      | IMSI and MSISDN masked for operators, and regional NOC teams see only their own region                                                           |
 
 
-**What it's worth:** an estimated **A$4m per year** (range A$2–8m) for an operator of this scale, from faster repair, fewer
-complaint calls and lower major-outage exposure. See [`docs/value_model.md`](docs/value_model.md). The assumptions are
-stated and conservative.
-
 **Known limit, stated plainly:** slowly degrading backhaul links (ramping over 10–30 minutes) are the one fault type
 we don't catch within 5 minutes. On the deployed per-cell path the median is about 9.4 minutes (562 s). An offline
 link-level experiment cuts that to about 5.5 minutes (332 s), with 17.0% caught within 5 minutes and no extra false
