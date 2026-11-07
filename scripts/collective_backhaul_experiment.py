@@ -614,6 +614,10 @@ Checks after the three readings. `since` = {since} (before this step's first que
         ("Experiment table: one row set per reading, all from the frozen rule",
          f"SELECT reading, freeze_sha, count(*) AS n_detections, count(DISTINCT detection_id) AS n_ids, "
          f"min(scored_at) AS first_scored, max(scored_at) AS last_scored FROM {EXPERIMENT_TABLE} GROUP BY 1, 2 ORDER BY 1"),
+        ("Experiment table history (every write; the holdout was written once)",
+         f"SELECT version, timestamp, operation, operationMetrics.numOutputRows AS rows_written, "
+         f"operationMetrics.numDeletedRows AS rows_deleted, operationMetrics.numTargetRowsInserted AS rows_merged, "
+         f"operationParameters.predicate AS predicate FROM (DESCRIBE HISTORY {EXPERIMENT_TABLE}) ORDER BY version"),
     ]:
         df = wh.frame(sql)
         d.h(title)
