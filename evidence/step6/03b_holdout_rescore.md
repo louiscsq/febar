@@ -8,6 +8,30 @@ Generated 2026-11-07 02:09 UTC by `scripts/collective_backhaul_experiment.py`.
 - Why: the as-run file (03_holdout_reading.md) took the per-cell first detection from eval_incident_detection.impact_ttd_s, which is 0 for an undetected incident (greatest(NULL, 0) = 0), so INC-00204, detected by neither detector, counted as a per-cell detection at 0 s. Fixed in fetch_before (commit after 03); the detections and the false-alarm figures are unaffected. The 60 s watermark sensitivity in 03 has the same issue in its before / combined rows (its collective-alone rows are unaffected) and is not recomputed here, since that would re-read the run's health data.
 - scored incidents: 53; healthy link-days: 195.6.
 
+## What changed versus the as-run file (03_holdout_reading.md)
+
+Detections are identical (the same 5421 stored rows). What changed is the per-cell **before** arm for one incident,
+INC-00204, which neither detector catches. It was counted as a per-cell detection at 0 s. Because the combined
+**after** arm (whichever of per-cell and collective is first) takes the per-cell time, **the after arm changed
+too**: median 331 -> 332 s, p90 461.2 -> 467.1 s, within 5 min 18.9 % -> 17.0 %, detected 53 -> 52. The before arm
+moved from 559 to 562 s, 807.6 to 810.3 s and 9.4 to 7.5 %. The median gain went from 189 to 190 s (n 53 -> 52).
+**The collective-alone rows and the link <= 6 cells rows are unchanged**: INC-00204's link has 9 cells. The
+false-alarm figures do not use the per-cell first detection and are unchanged. In 03, the 60 s watermark
+sensitivity's before / after rows carry the same error; its collective-alone rows do not.
+
+| subset | detector | as run (03): detected / median / p90 / within 5 min | re-scored (03b) | changed |
+|---|---|---|---|---|
+| all | before: per-cell (published metric a) | 53 / 559.0 s / 807.6 s / 9.4 % | 52 / 562.0 s / 810.3 s / 7.5 % | **yes** |
+| all | collective alone | 52 / 333.5 s / 1038.8 s / 9.4 % | 52 / 333.5 s / 1038.8 s / 9.4 % | no |
+| all | after: per-cell + collective (first of) | 53 / 331.0 s / 461.2 s / 18.9 % | 52 / 332.0 s / 467.1 s / 17.0 % | **yes** |
+| link <= 6 cells | before: per-cell (published metric a) | 22 / 557.5 s / 774.4 s / 4.5 % | 22 / 557.5 s / 774.4 s / 4.5 % | no |
+| link <= 6 cells | collective alone | 22 / 330.0 s / 3114.8 s / 13.6 % | 22 / 330.0 s / 3114.8 s / 13.6 % | no |
+| link <= 6 cells | after: per-cell + collective (first of) | 22 / 330.0 s / 589.1 s / 18.2 % | 22 / 330.0 s / 589.1 s / 18.2 % | no |
+| link > 6 cells | before: per-cell (published metric a) | 31 / 559.0 s / 813.0 s / 12.9 % | 30 / 562.0 s / 819.8 s / 9.7 % | **yes** |
+| link > 6 cells | collective alone | 30 / 335.5 s / 384.3 s / 6.5 % | 30 / 335.5 s / 384.3 s / 6.5 % | no |
+| link > 6 cells | after: per-cell + collective (first of) | 31 / 331.0 s / 381.0 s / 19.4 % | 30 / 333.0 s / 384.3 s / 16.1 % | **yes** |
+| all | median gain, before - after (s) | 53 / 189.0 s / 379.0 s / NULL | 52 / 190.0 s / 380.5 s / NULL | **yes** |
+
 ## Time to detect, BACKHAUL_DEGRADATION (n = 53)
 
 Undetected incidents count against 'within 5 min' but not in the percentiles.

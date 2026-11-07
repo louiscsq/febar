@@ -315,6 +315,9 @@ independent noise by about √N. A shift of a few ms that all of the link's cell
    too (only 3 scored backhaul faults).
 4. A scoring bug in the *before* lookup (below) was fixed after the holdout run. The holdout was re-scored once
    **from its stored detections** (nothing recomputed, no holdout data re-read): `03b_holdout_rescore.md`.
+   The detections are identical. The *before* arm and, through it, the combined *after* arm changed:
+   after median 331 -> 332 s, p90 461.2 -> 467.1 s, within 5 min 18.9 % -> 17.0 %; before 559 -> 562 s,
+   807.6 -> 810.3 s, 9.4 -> 7.5 %. Collective-alone and false-alarm figures are unchanged.
 
 **Results**, `BACKHAUL_DEGRADATION`, TTD = availability − impact start, ground truth used for scoring only. *Before*
 = the published step-2 metric (a), the first per-cell KPI or alarm detection on the footprint. *After* = whichever of
