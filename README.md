@@ -1,9 +1,3 @@
-<!--
-DRAFT for Louis to review and rewrite in his own words.
-Replaces the top of README.md, everything above "## Data generator".
-Numbers come from evidence/step2–step5. Re-check them against the final merged evidence before submitting.
--->
-
 # Banksia Mobile NOC: detect customer impact in minutes, not hours
 
 **Customer:** the Network Operations Centre (NOC) of a tier-1 Australian mobile operator. "Banksia Mobile" is fictional
