@@ -178,3 +178,137 @@ def baseline_window(valid_date_ordinal: int) -> tuple[int, int]:
     """Inclusive range of local-date ordinals feeding the baseline used on local date `valid_date`:
     strictly earlier local days."""
     return valid_date_ordinal - BASELINE_LOOKBACK_DAYS, valid_date_ordinal - 1
+
+
+# ---------------------------------------------------------------------------------------------------
+# Collective (parent-level) degradation: an OFFLINE experiment detector, not wired into the pipeline.
+#
+# The per-cell rules need +40 ms / +1.5 pp, which a slow backhaul ramp reaches only ~8-9 min after impact
+# start. Averaging the cells behind one parent (a backhaul link) shrinks the noise by about sqrt(N), so a
+# much smaller shift is significant when it is shared by the link's cells. The statistic per
+# source_run x minute x parent comes from `windows.parent_health_sql` / `windows.parent_health` (on-time
+# cell windows only, active_users-weighted, hard-rule / maintenance / no-baseline cells excluded).
+# See docs/pipeline.md, "Collective backhaul detector (offline experiment)".
+# ---------------------------------------------------------------------------------------------------
+
+COLLECTIVE_METRICS = ("latency_ms", "packet_loss_pct", "session_drop_rate_pct")  # all "higher is worse"
+CONSISTENCY_Z = 1.0  # a reporting cell "agrees" with the shift when its own z exceeds this
+HARD_RULE_NAMES = tuple(r.name for r in HARD_RULES)
+
+
+@dataclass(frozen=True)
+class CollectiveRule:
+    """A parent-minute qualifies when, for at least one metric m in `COLLECTIVE_METRICS`:
+    weighted mean z_m > `z` AND weighted mean delta_m > floor_m AND the fraction of reporting cells with
+    z_m > `CONSISTENCY_Z` >= `min_consistency`; and reporting cells / descendant cells >= `min_reporting_share`.
+    It fires (one detection row) on a minute that qualifies together with the `persist - 1` minutes before it
+    (consecutive window_start minutes, all present). No ground truth is an input."""
+
+    name: str
+    z: float
+    floors: tuple[tuple[str, float], ...]  # (metric, minimum weighted-mean delta vs baseline), per metric
+    min_consistency: float
+    min_reporting_share: float
+    persist: int
+
+    def floor(self, metric: str) -> float:
+        return dict(self.floors)[metric]
+
+    def metric_sql(self, m: str) -> str:
+        return (f"(coalesce(wz_{m} > {self.z}, false) AND coalesce(wdelta_{m} > {self.floor(m)}, false) "
+                f"AND coalesce(frac_z1_{m} >= {self.min_consistency}, false))")
+
+    @property
+    def sql(self) -> str:
+        """SQL predicate on one parent-minute row of `windows.parent_health_sql` (per-minute qualification)."""
+        any_metric = " OR ".join(self.metric_sql(m) for m in COLLECTIVE_METRICS)
+        return f"(coalesce(reporting_share >= {self.min_reporting_share}, false) AND ({any_metric}))"
+
+    def metrics_sql(self) -> str:
+        """SQL array<string> of the metrics that qualify on the row."""
+        items = ", ".join(f"CASE WHEN {self.metric_sql(m)} THEN '{m}' END" for m in COLLECTIVE_METRICS)
+        return f"filter(array({items}), x -> x IS NOT NULL)"
+
+    # --- Python mirror -------------------------------------------------------------------------------
+    def qualifying_metrics(self, row: dict) -> list[str]:
+        share = row.get("reporting_share")
+        if share is None or share < self.min_reporting_share:
+            return []
+        out = []
+        for m in COLLECTIVE_METRICS:
+            z, dl, fr = row.get(f"wz_{m}"), row.get(f"wdelta_{m}"), row.get(f"frac_z1_{m}")
+            if None not in (z, dl, fr) and z > self.z and dl > self.floor(m) and fr >= self.min_consistency:
+                out.append(m)
+        return out
+
+    def qualifies(self, row: dict) -> bool:
+        return bool(self.qualifying_metrics(row))
+
+    def fires(self, rows: list[dict]) -> list[dict]:
+        """Python mirror of `collective_detections_sql`: the rows (parent-minutes) on which the rule fires.
+        `rows`: parent_health rows with source_run, parent_id, window_start_s."""
+        q = {(r["source_run"], r["parent_id"], r["window_start_s"]) for r in rows if self.qualifies(r)}
+        out = []
+        for r in rows:
+            k = (r["source_run"], r["parent_id"], r["window_start_s"])
+            if k in q and all((k[0], k[1], k[2] - 60 * i) in q for i in range(1, self.persist)):
+                out.append(r)
+        return out
+
+    def qualifies_frame(self, df):
+        """Vectorised `qualifies` over a pandas frame of parent-minute rows (the calibration sweep)."""
+        import numpy as np
+
+        ok = np.zeros(len(df), dtype=bool)
+        for m in COLLECTIVE_METRICS:
+            ok |= ((df[f"wz_{m}"] > self.z) & (df[f"wdelta_{m}"] > self.floor(m))
+                   & (df[f"frac_z1_{m}"] >= self.min_consistency)).fillna(False).to_numpy(dtype=bool)
+        return ok & (df["reporting_share"] >= self.min_reporting_share).fillna(False).to_numpy(dtype=bool)
+
+    def fires_frame(self, df):
+        """Vectorised `fires`: boolean mask over `df` (source_run, parent_id, window_start_s, ...)."""
+        import pandas as pd
+
+        q = pd.Series(self.qualifies_frame(df), index=df.index)
+        keys = pd.MultiIndex.from_arrays([df["source_run"], df["parent_id"], df["window_start_s"]])
+        qset = pd.Series(q.to_numpy(), index=keys)
+        qset = qset[qset]
+        out = q.copy()
+        for i in range(1, self.persist):
+            prev = pd.MultiIndex.from_arrays([df["source_run"], df["parent_id"], df["window_start_s"] - 60 * i])
+            out &= prev.isin(qset.index)
+        return out.to_numpy(dtype=bool)
+
+
+def collective_detection_id(source_run: str, parent_id: str, window_start_iso: str) -> str:
+    """Python mirror of the SQL `detection_id` (sha2 of 'collective|run|parent|window_start')."""
+    import hashlib
+
+    return hashlib.sha256(f"collective|{source_run}|{parent_id}|{window_start_iso}".encode()).hexdigest()
+
+
+def collective_detections_sql(rule: CollectiveRule, stats_sql: str) -> str:
+    """Detections over the parent-minute statistic `stats_sql` (a SELECT from `windows.parent_health_sql`).
+    Persistence: the minute and the `persist - 1` minutes before it all qualify (a RANGE frame over minute
+    indices, so a missing minute breaks the run). Timing: a detection is available when its own minute's
+    aggregate is (`available_ts`), never earlier than the earlier minutes it needs."""
+    p = rule.persist
+    return f"""
+    WITH s AS ({stats_sql}),
+    q AS (SELECT *, {rule.sql} AS qualifies, {rule.metrics_sql()} AS qualifying_metrics,
+                 CAST(unix_timestamp(window_start) / 60 AS BIGINT) AS minute_idx FROM s),
+    r AS (SELECT *,
+                 sum(CAST(qualifies AS INT)) OVER w AS n_qualified_in_frame,
+                 max(available_ts) OVER w AS frame_available_ts
+          FROM q
+          WINDOW w AS (PARTITION BY source_run, parent_id ORDER BY minute_idx
+                       RANGE BETWEEN {p - 1} PRECEDING AND CURRENT ROW))
+    SELECT sha2(concat('collective|', source_run, '|', parent_id, '|',
+                       date_format(window_start, "yyyy-MM-dd'T'HH:mm:ss'Z'")), 256) AS detection_id,
+           'collective' AS signal_source, '{rule.name}' AS rule_name, source_run, parent_id AS element_id,
+           parent_type AS element_type, window_start AS signal_start_ts, window_end AS signal_end_ts,
+           qualifying_metrics, n_desc_cells, n_reporting_cells, reporting_share, n_hard_rule_cells,
+           n_maintenance_cells, in_maintenance,
+           {", ".join(f"wz_{m}, wdelta_{m}, frac_z1_{m}" for m in COLLECTIVE_METRICS)},
+           w_prb_util_pct, max_used_evidence_ts, frame_available_ts AS available_ts
+    FROM r WHERE qualifies AND n_qualified_in_frame >= {p}"""
