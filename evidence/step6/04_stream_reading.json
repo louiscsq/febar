@@ -1,0 +1,250 @@
+{
+ "reading": "stream",
+ "freeze_sha": "e866511994f49fcf0084c994228221f6eb52af9a",
+ "head_sha": "c2de6c1c3cd0fdb7945e7bfca982a11c20b8056c",
+ "ttd": [
+  [
+   "all",
+   3,
+   "before: per-cell (published metric a)",
+   3,
+   807.9,
+   826.5,
+   0.0
+  ],
+  [
+   "all",
+   3,
+   "collective alone",
+   3,
+   326.0,
+   354.0,
+   33.3
+  ],
+  [
+   "all",
+   3,
+   "after: per-cell + collective (first of)",
+   3,
+   326.0,
+   354.0,
+   33.3
+  ],
+  [
+   "link <= 6 cells",
+   1,
+   "before: per-cell (published metric a)",
+   1,
+   587.2,
+   587.2,
+   0.0
+  ],
+  [
+   "link <= 6 cells",
+   1,
+   "collective alone",
+   1,
+   267.0,
+   267.0,
+   100.0
+  ],
+  [
+   "link <= 6 cells",
+   1,
+   "after: per-cell + collective (first of)",
+   1,
+   267.0,
+   267.0,
+   100.0
+  ],
+  [
+   "link > 6 cells",
+   2,
+   "before: per-cell (published metric a)",
+   2,
+   819.5,
+   828.9,
+   0.0
+  ],
+  [
+   "link > 6 cells",
+   2,
+   "collective alone",
+   2,
+   343.5,
+   357.5,
+   0.0
+  ],
+  [
+   "link > 6 cells",
+   2,
+   "after: per-cell + collective (first of)",
+   2,
+   343.5,
+   357.5,
+   0.0
+  ],
+  [
+   "all",
+   3,
+   "median gain, before - after (s)",
+   3,
+   470.2,
+   479.5,
+   null
+  ]
+ ],
+ "fa": {
+  "n_alerts": 9,
+  "n_fault_tp": 3,
+  "n_censored": 5,
+  "n_planned_suppressed": 0,
+  "n_false_alarms": 1,
+  "n_unexplained": 1,
+  "n_red_herring": 0,
+  "n_planned_unsuppressed": 0,
+  "healthy_link_days": 29.95,
+  "false_alarms_per_100_link_days": 3.34,
+  "unexplained_per_100_link_days": 3.34,
+  "unexplained_busy_hour": 1,
+  "unexplained_near_traffic_surge": 0,
+  "unexplained_near_other_incident": 0
+ },
+ "percell_fa": {
+  "n_alerts": 95,
+  "n_fault_tp": 29,
+  "n_censored": 16,
+  "n_planned_suppressed": 0,
+  "n_false_alarms": 50,
+  "n_unexplained": 50,
+  "n_red_herring": 0,
+  "n_planned_unsuppressed": 0,
+  "healthy_link_days": 29.95,
+  "false_alarms_per_100_link_days": 166.93,
+  "unexplained_per_100_link_days": 166.93,
+  "unexplained_busy_hour": 0,
+  "unexplained_near_traffic_surge": 0,
+  "unexplained_near_other_incident": 0
+ },
+ "added_pages": 0,
+ "other_tp": [
+  [
+   "BACKHAUL_DEGRADATION",
+   3
+  ]
+ ],
+ "mirror": [
+  [
+   "SQL detections (table rows)",
+   532
+  ],
+  [
+   "distinct detection_id",
+   532
+  ],
+  [
+   "Python mirror detections",
+   532
+  ],
+  [
+   "in SQL only",
+   0
+  ],
+  [
+   "in Python only",
+   0
+  ]
+ ],
+ "wm60": [
+  [
+   "all",
+   3,
+   "before: per-cell (published metric a)",
+   3,
+   807.9,
+   826.5,
+   0.0
+  ],
+  [
+   "all",
+   3,
+   "collective alone",
+   3,
+   266.0,
+   294.0,
+   66.7
+  ],
+  [
+   "all",
+   3,
+   "after: per-cell + collective (first of)",
+   3,
+   266.0,
+   294.0,
+   66.7
+  ],
+  [
+   "link <= 6 cells",
+   1,
+   "before: per-cell (published metric a)",
+   1,
+   587.2,
+   587.2,
+   0.0
+  ],
+  [
+   "link <= 6 cells",
+   1,
+   "collective alone",
+   1,
+   207.0,
+   207.0,
+   100.0
+  ],
+  [
+   "link <= 6 cells",
+   1,
+   "after: per-cell + collective (first of)",
+   1,
+   207.0,
+   207.0,
+   100.0
+  ],
+  [
+   "link > 6 cells",
+   2,
+   "before: per-cell (published metric a)",
+   2,
+   819.5,
+   828.9,
+   0.0
+  ],
+  [
+   "link > 6 cells",
+   2,
+   "collective alone",
+   2,
+   283.5,
+   297.5,
+   50.0
+  ],
+  [
+   "link > 6 cells",
+   2,
+   "after: per-cell + collective (first of)",
+   2,
+   283.5,
+   297.5,
+   50.0
+  ],
+  [
+   "all",
+   3,
+   "median gain, before - after (s)",
+   3,
+   530.2,
+   539.5,
+   null
+  ]
+ ]
+}

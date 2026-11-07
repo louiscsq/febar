@@ -11,6 +11,7 @@ grants, tags) is applied by code in `governance/`. Proof that all of this ran on
 - [Expectations policy](#expectations-policy)
 - [Windowing, watermarks and the 5-minute latency budget](#windowing-watermarks-and-the-5-minute-latency-budget)
 - [Detection and evaluation](#detection-and-evaluation)
+- [Collective backhaul detector (offline experiment)](#collective-backhaul-detector-offline-experiment)
 - [Governance](#governance)
 - [Deploy and run](#deploy-and-run)
 - [Known limitations](#known-limitations)
@@ -272,6 +273,101 @@ The 15-minute history cannot meet a 5-minute SLA by construction: evidence only 
 period closes and is delivered 30–240 s later. Its TTD is reported for completeness; the SLA is measured
 on the 1-minute stream.
 
+## Collective backhaul detector (offline experiment)
+
+Step 6 question: does rolling cell health up to the backhaul link, weighted by the customers attached to it, detect
+slow `BACKHAUL_DEGRADATION` faults earlier than the per-cell rules, and at what false-alarm cost? Evidence:
+[`evidence/step6/`](../evidence/step6/). **Offline only:** nothing here is read by the pipeline, the eval MVs, the
+`impact_signals` union, the RCA ranker, Lakebase, the app or Genie. No published table was altered (`05_no_change.md`:
+`last_altered` of the 89 published result tables). As a **partial retrospective check** against the committed step 2–4
+evidence (multiset row comparison; step 5 not replayed, no pre-step snapshot existed): 54 tables identical, 10 unchanged
+plus rows of later runs, and 5 that differ for reasons that predate step 6 (evidence README).
+
+**Why slow backhaul is late today.** A backhaul ramp reaches the per-cell floors (+40 ms latency, +1.5 pp loss) only
+when about 30 % of its full intensity has built up on one cell, about 8–9 minutes after impact start. The per-minute
+noise is about 3 ms / 0.013 pp, so the floors sit far beyond it. Averaging N cells that share a link shrinks
+independent noise by about √N. A shift of a few ms that all of the link's cells share is then already significant.
+
+**Design** (`windows.parent_health(_sql)`, `detection.CollectiveRule`, `collective_eval`, all with tests):
+
+- Input: `gold_cell_health_1m` (on-time 1-minute cell windows), topology, change calendar. A cell window is
+  **used** in its link-minute only if it holds no late record, its evidence arrived by window_end + watermark (a
+  streaming aggregate would have dropped it), no hard rule fired (outages are not soft degradation and are already
+  detected per cell), it is not in a change window (site, link or router), and it has a baseline. Silent cells are
+  simply not reporting.
+- Statistic per `source_run × minute × link`: the `active_users`-weighted mean (weight ≥ 1, so a night-time cell
+  still counts) of per-cell z and Δ vs baseline for latency, loss and drop; `n_reporting_cells` / descendant cells
+  (`reporting_share`); for each metric the share of reporting cells with z > 1 (the **consistency guard**, so one
+  cell cannot carry the mean).
+- Rule: for any metric, weighted z > T **and** weighted Δ > floor **and** consistency ≥ c, with
+  `reporting_share ≥ 0.8`, on `persist` consecutive minutes. SQL (`collective_detections_sql`, a RANGE frame over
+  minute indices) and a Python mirror (scalar and vectorised). `detection_id = sha2('collective|run|link|minute')`.
+- **Timing under the late-data rule:** a link-minute is available at **max(window_end + 120 s, latest evidence_ts of
+  the cell windows used)**. 120 s is the watermark of `gold_cell_health_1m`, the table actually read. A detection is
+  available when its own (latest) minute is. There is no record-level timing in any headline figure.
+
+**Protocol** (as for the RCA model, [`docs/rca_model.md`](rca_model.md)):
+
+1. Calibrate on the `history_1m` **dev days only** (2026-10-14 .. 10-15, the RCA dev split). The script declared a
+   180-configuration grid and a selection rule before the sweep: ≤ 1 false alarm per 100 healthy link-days, ≥ 90 %
+   detected, then the lowest median TTD (`01_calibration.md`).
+2. **Freeze** in `detection.COLLECTIVE_BACKHAUL` (z 2.5; floors 3 ms / 0.1286 pp / 0.0643 pp; consistency 0.6;
+   share 0.8; persist 2), commit `e866511`, pushed before any other run was read.
+3. Score `holdout_1m` **once** as a separately declared detector-holdout reading. The detector had never touched
+   that run; it is a separate reading from the RCA model's use of the same run. Score the old live `stream` run
+   too (only 3 scored backhaul faults).
+4. A scoring bug in the *before* lookup (below) was fixed after the holdout run. The holdout was re-scored once
+   **from its stored detections** (nothing recomputed, no holdout data re-read): `03b_holdout_rescore.md`.
+   The detections are identical. The *before* arm and, through it, the combined *after* arm changed:
+   after median 331 -> 332 s, p90 461.2 -> 467.1 s, within 5 min 18.9 % -> 17.0 %; before 559 -> 562 s,
+   807.6 -> 810.3 s, 9.4 -> 7.5 %. Collective-alone and false-alarm figures are unchanged.
+
+**Results**, `BACKHAUL_DEGRADATION`, TTD = availability − impact start, ground truth used for scoring only. *Before*
+= the published step-2 metric (a), the first per-cell KPI or alarm detection on the footprint. *After* = whichever of
+per-cell and collective is first:
+
+| reading | n | before median / p90 / ≤ 5 min | after median / p90 / ≤ 5 min | median gain | false collective alerts |
+|---|---|---|---|---|---|
+| **holdout_1m (detector holdout)** | 53 | 562 s / 810 s / 7.5 % | **332 s / 467 s / 17.0 %** | **190 s** | **0 in 195.7 healthy link-days** |
+| holdout, link ≤ 6 cells | 22 | 558 s / 774 s / 4.5 % | 330 s / 589 s / 18.2 % | | |
+| holdout, link > 6 cells | 31 | 562 s / 820 s / 9.7 % | 333 s / 384 s / 16.1 % | | |
+| history_1m dev (calibrated on) | 55 | 569 s / 957 s / 9.1 % | 323 s / 821 s / 21.8 % | 191 s | 0 in 198.2 |
+| stream (old live run) | 3 | 808 s / 827 s / 0 % | 326 s / 354 s / 33.3 % | 470 s | 1 in 30.0 (busy hour) |
+
+- **About 3.2 minutes earlier**, on a run the thresholds were not tuned on, and small links gain as much as large
+  ones. That just meets the feasibility report's bar of about 3 minutes for going further.
+- **The 5-minute SLA is still mostly missed:** 17 % within 5 min. About 120 s of every collective TTD is the
+  watermark. As a secondary sensitivity only, the same frozen rule over a dedicated 60 s-watermark flow gives a
+  collective-alone median of about 270 s and 75 % within 5 min on the holdout (`03_holdout_reading.md`).
+- **False-alarm cost:** 0 collective false alerts in 195.7 healthy holdout link-days; the 95 % upper bound
+  (rule of three) is about 1.5 per 100 link-days, i.e. up to about 2 a day across 133 links. On the
+  same link-days, today's per-cell KPI rules raise 135 false alerts per 100 link-days. Every collective alert that
+  was not a true positive sat on a link that already had a per-cell alert within 10 minutes: no new pages. The
+  only false alarm in any reading (stream) is at busy hour (weighted PRB ≥ 70 %).
+- **Not measurable on these runs:** there are no `TRAFFIC_SURGE` incidents in any 1-minute run, and no
+  `CORE_CONGESTION` in the dev days, holdout or stream. So these readings cannot show surge false alarms or
+  collective true positives on other fault types. All collective true positives were backhaul faults.
+- 2 dev incidents and 1 holdout incident are detected by neither detector.
+- **Published-metric quirk (found here, not changed):** `eval_incident_detection.impact_ttd_s` is 0, not NULL, for
+  an undetected incident (`greatest(NULL, 0)`), so `eval_ttd_summary` medians include those as 0 s. This affects
+  1 holdout and 4 history_1m incidents. The step-6 *before* treats them as undetected.
+
+**Caveats.**
+
+- **Generator noise is nearly independent across cells.** `netmon_datagen.kpis` draws every cell's per-minute noise
+  separately; the feasibility simulation measured a within-link correlation of latency z of 0.017. Real networks
+  have common-mode variation (shared demand, weather, transport jitter), so the √N gain and the zero false-alarm
+  count here are an **upper bound**. Thresholds must be re-checked on real or correlated data.
+- The *before* side for the batch runs has no pipeline latency (evidence = emission time), and neither does the
+  collective side. On `stream`, the *before* includes measured live pipeline latency and the collective side does
+  not, so the stream gain is a lower bound on collective TTD, with n = 3.
+
+**Why it stays offline and is not wired into the ranker.** Adding a source to the `impact_signals` union forces a
+full refresh, which would recompute the live run's `pipeline_latency_s` as backfill time. Every published step-2
+figure would also move. The ranker opens cases only from per-cell degradation, so a collective signal would need
+case seeding, a retrain (v6) and a new fresh holdout (`holdout_1m` is now used). The honest SLA claim needs
+measured live latency from a new live stream. That is the full version (b) of the feasibility study.
+
 ## Governance
 
 Applied by `governance/apply_governance.py` (job `banksia-netmon-governance`, or as tasks of
@@ -416,6 +512,9 @@ honest because it adds the measured wall-clock pipeline latency to the simulated
   outage would look like no data at all.
 - **Ramped faults.** Backhaul degradation and core congestion ramp in over 10–30 minutes. At low intensity
   they are inside normal variation, so their TTD is naturally longer than for outages.
+  The offline collective link detector (step 6, [above](#collective-backhaul-detector-offline-experiment))
+  brings backhaul TTD from about 9.4 to 5.5 minutes on the holdout, still mostly outside 5 minutes; link-level
+  telemetry (interface errors, RSL, utilisation) remains the real fix.
 - **Sessions are sparse** at `small` (1 % sample), so they feed features rather than detection.
 - **Volume lineage.** `system.access.table_lineage` does not record the Volume path as the source of the
   Auto Loader tables on this workspace (see [Governance](#governance)); `_source_file` carries it.

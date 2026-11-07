@@ -75,6 +75,23 @@ and the assistant's outputs, the UC reads are the `netmon_noc` views (never `sil
 schema (`tests/test_no_ground_truth_surface.py` scans the app's SQL, sources and every API response). On top of that, `safety.scrub` drops any IMSI / MSISDN / subscriber-key column and
 every ground-truth label column (step 3's `LABEL_COLUMNS`) at any depth of every response, Genie results included, and
 redacts raw IMSI- or MSISDN-shaped strings (`tests/test_app_api_safety.py` poisons every source with them).
+A Genie answer goes through `safety.scrub_genie_answer`: label columns are dropped from its result table, and the whole
+answer is withheld rather than partly redacted when its SQL, text, description, columns or result values
+- refer to anything outside the `netmon_noc` serving views (another netmon schema, an evaluation or label table,
+  ground truth),
+- name a ground-truth label column (`fault_type`, `event_class`, `root_element_id(s)`, `root_cause*`, `is_censored`,
+  `affected_*`, `impact_start_ts`, ...; no serving view has one), even when no evaluation table is named, or
+- carry a fault-class label (`BACKHAUL_DEGRADATION`, ...) whose SQL does not read `incident_ai_summary.fault_hypothesis`,
+  the step-4 assistant's operational guess and the only serving column with such values.
+
+All three checks ignore case (`backhaul_degradation`, `Site_Power_Outage`, `FAULT_TYPE` are caught); only the
+underscore-joined identifier form is a label, so prose such as "backhaul degradation on link X" passes.
+
+`tests/test_no_ground_truth_surface.py` poisons the fake Genie in each field, with and without an eval table name, and
+checks that legitimate answers (sites down, the assistant's hypothesis, prose, alarms) still pass.
+**Deployment:** the hardened guard (step 6, C1) is in the code only. The deployed app picks it up after the next
+`databricks bundle deploy` + `databricks bundle run noc_topology`. It was not redeployed from the step-6 branch, because a
+bundle deploy also redeploys the pipeline, jobs, serving endpoint and Genie space resources.
 
 **Trust boundary: forwarded headers.** A Databricks App is reachable only through the Apps proxy, which authenticates
 the browser session and sets `x-forwarded-email`, `x-forwarded-preferred-username` and the downscoped

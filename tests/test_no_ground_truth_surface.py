@@ -31,7 +31,9 @@ GT = re.compile(r"netmon_eval|\{eval\}|eval_schema|eval_ttd_summary|eval_gt_inci
 # verification / offline-evaluation scripts allowed to read ground truth (never shown by Genie or the app)
 ALLOWED = {"scripts/trace_end_to_end.py", "scripts/capture_evidence.py", "scripts/capture_evidence_step3.py",
            "scripts/capture_evidence_step4.py", "scripts/capture_evidence_step5.py",
-           "scripts/genai_eval_local.py", "scripts/genai_early_example.py"}
+           "scripts/genai_eval_local.py", "scripts/genai_early_example.py",
+           "scripts/collective_backhaul_experiment.py",  # step 6 offline experiment: scores against ground truth
+           "scripts/capture_cost_step6.py"}  # reads the pipeline event log (netmon_eval) for the live update's duration
 
 
 def _hits(text: str) -> list[str]:
@@ -101,3 +103,121 @@ def test_api_responses_carry_no_ground_truth(path):
     assert r.status_code == 200, r.text
     assert not _hits(r.text), _hits(r.text)
     assert "scorecard" not in r.text
+
+
+POISONED_GENIE = {
+    "conversation_id": "c1", "message_id": "m1", "status": "COMPLETED",
+    "text": [f"From {CAT}.netmon_eval.eval_ttd_summary: the median backhaul time to detect is 559 s."],
+    "sql": f"SELECT fault_type, impact_median_ttd_s FROM {CAT}.netmon_eval.eval_ttd_summary",
+    "description": "Reads netmon_eval.eval_gt_incidents and eval_ttd_summary",
+    "columns": ["fault_type", "impact_median_ttd_s", "source"],
+    "rows": [["BACKHAUL_DEGRADATION", 559.0, "netmon_eval.eval_ttd_summary"]], "row_count": 1,
+}
+
+
+@pytest.mark.parametrize("field", ["all", "sql", "text", "description", "rows"])
+def test_genie_ask_never_passes_ground_truth_through(field):
+    """POST /api/genie/ask with a Genie that (wrongly) answers from the eval schema: the response exposes none of it."""
+    clean = {"conversation_id": "c1", "message_id": "m1", "status": "COMPLETED", "text": ["2 sites are down."],
+             "sql": f"SELECT element_id FROM {CAT}.netmon_noc.element_status", "description": "Sites down",
+             "columns": ["element_id"], "rows": [["SITE-NSW-00002"]], "row_count": 1}
+    ans = dict(POISONED_GENIE) if field == "all" else {**clean, field: POISONED_GENIE[field]}
+    if field == "rows":
+        ans["columns"] = POISONED_GENIE["columns"]
+    s = NocService(settings(), FakeStore(), FakeWarehouse(), FakeGenie(ans))
+    c = TestClient(create_app(lambda: s))
+    r = c.post("/api/genie/ask", json={"question": "How fast do we detect backhaul faults?"},
+               headers={"x-forwarded-email": "lead@banksia.example", "x-forwarded-access-token": "tok-national"})
+    assert r.status_code == 200, r.text
+    assert not _hits(r.text), _hits(r.text)
+    body = r.json()
+    assert body["withheld"] is True and body["sql"] is None and body["rows"] == [] and "559" not in r.text
+    assert "fault_type" not in r.text
+
+
+NOC = f"{CAT}.netmon_noc"
+CLEAN = {"conversation_id": "c1", "message_id": "m1", "status": "COMPLETED", "text": ["2 sites are down."],
+         "sql": f"SELECT element_id FROM {NOC}.element_status WHERE state = 'down'", "description": "Sites down",
+         "columns": ["element_id"], "rows": [["SITE-NSW-00002"]], "row_count": 1}
+
+
+def _ask(ans):
+    s = NocService(settings(), FakeStore(), FakeWarehouse(), FakeGenie(ans))
+    c = TestClient(create_app(lambda: s))
+    r = c.post("/api/genie/ask", json={"question": "What is going on?"},
+               headers={"x-forwarded-email": "lead@banksia.example", "x-forwarded-access-token": "tok-national"})
+    assert r.status_code == 200, r.text
+    return r
+
+
+# Ground truth WITHOUT any evaluation table being named: label columns or fault-class labels in one field each.
+POISON_NO_EVAL_TABLE = {
+    "label column in result columns": {"columns": ["element_id", "fault_type"], "rows": [["BH-VIC-0005", "x"]]},
+    "label column in sql": {"sql": f"SELECT element_id, is_censored FROM {NOC}.element_status"},
+    "label column in text": {"text": ["Its root_element_id is BH-VIC-0005."]},
+    "root cause column in description": {"description": "Uses root_cause_element from the incident record"},
+    "label column inside a row value": {"rows": [["{\"event_class\": \"fault\"}"]]},
+    "fault class in rows, no hypothesis": {"columns": ["element_id", "cause"], "rows": [["BH-VIC-0005", "BACKHAUL_DEGRADATION"]]},
+    "fault class in text, no hypothesis": {"text": ["The true fault was SITE_POWER_OUTAGE."]},
+    "red-herring class in sql": {"sql": f"SELECT * FROM {NOC}.element_status WHERE note = 'TRAFFIC_SURGE'"},
+    # case variants of the same labels and label columns (the guard ignores case)
+    "lowercase fault class in sql": {"sql": f"SELECT * FROM {NOC}.element_status WHERE note = 'backhaul_degradation'"},
+    "mixed-case fault class in text": {"text": ["The true fault was Site_Power_Outage."]},
+    "lowercase fault class in description": {"description": "Rows labelled cell_outage by the incident record"},
+    "mixed-case fault class in rows": {"columns": ["element_id", "cause"], "rows": [["BH-VIC-0005", "Backhaul_Degradation"]]},
+    "lowercase fault class in a quoted row value": {"rows": [["{\"cause\": \"agg_router_failure\"}"]]},
+    "upper-case label column in sql": {"sql": f"SELECT element_id, FAULT_TYPE FROM {NOC}.element_status"},
+    "mixed-case label column in text": {"text": ["Its Root_Element_Id is BH-VIC-0005."]},
+    "upper-case label column in columns": {"columns": ["element_id", "IS_CENSORED"], "rows": [["BH-VIC-0005", "x"]]},
+}
+
+
+@pytest.mark.parametrize("case", sorted(POISON_NO_EVAL_TABLE))
+def test_genie_ask_withholds_ground_truth_labels_without_an_eval_table(case):
+    r = _ask({**CLEAN, **POISON_NO_EVAL_TABLE[case]})
+    body = r.json()
+    assert body["withheld"] is True and body["rows"] == [] and body["sql"] is None, case
+    assert body["withheld_reason"] in ("label_column", "label_value")
+    for leaked in ("fault_type", "is_censored", "root_element_id", "root_cause", "event_class", "BACKHAUL_DEGRADATION",
+                   "SITE_POWER_OUTAGE", "TRAFFIC_SURGE", "CELL_OUTAGE", "AGG_ROUTER_FAILURE"):
+        assert leaked.lower() not in r.text.lower(), (case, leaked)
+
+
+CLEAN_ANSWERS = {
+    "sites down": CLEAN,
+    # the step-4 assistant's operational guess is a fault class, read from its serving column
+    "assistant hypothesis": {**CLEAN, "text": ["The assistant's hypothesis for RCA-1 is BACKHAUL_DEGRADATION."],
+                             "sql": f"SELECT incident_id, fault_hypothesis FROM {NOC}.incident_ai_summary",
+                             "columns": ["incident_id", "fault_hypothesis"], "rows": [["RCA-1", "BACKHAUL_DEGRADATION"]]},
+    "prose, not a label": {**CLEAN, "text": ["Latency is rising on every cell behind the link: backhaul degradation "
+                                             "is likely; check the root cause with the transport team."]},
+    "prose with spaces, element types and alarm text": {
+        **CLEAN, "text": ["Backhaul degradation on link BH-VIC-0005: LINK_DEGRADED and RSL_LOW raised on the BACKHAUL_LINK, "
+                          "CELL_OUT_OF_SERVICE on one CELL, NE_UNREACHABLE on the SITE; the AGG_ROUTER is fine. Cell outage "
+                          "and site power outage were ruled out."],
+        "description": "Alarms and element status on the backhaul link and its sites"},
+    "alarms": {**CLEAN, "sql": f"SELECT element_id, alarm_code, severity, event_ts FROM {NOC}.silver_alarms",
+               "columns": ["element_id", "alarm_code", "event_ts"], "rows": [["BH-VIC-0005", "RSL_LOW", "2026-10-09"]]},
+}
+
+
+@pytest.mark.parametrize("case", sorted(CLEAN_ANSWERS))
+def test_genie_ask_legitimate_noc_answers_pass(case):
+    ans = CLEAN_ANSWERS[case]
+    body = _ask(ans).json()
+    assert "withheld" not in body, (case, body)
+    assert body["rows"] == ans["rows"] and body["text"] == ans["text"] and body["sql"] == ans["sql"]
+
+
+def test_genie_ask_clean_answer_still_drops_forbidden_columns():
+    ans = {**CLEAN, "sql": f"SELECT element_id, severity FROM {NOC}.silver_alarms",
+           "columns": ["element_id", "severity"], "rows": [["SITE-NSW-00002", "CRITICAL"]]}
+    body = _ask(ans).json()
+    assert "withheld" not in body and body["columns"] == ["element_id"] and body["rows"] == [["SITE-NSW-00002"]]
+
+
+def test_fault_classes_match_the_generator():
+    from netmon_datagen.faults import FAULT_SPECS
+    from noc_app.safety import FAULT_CLASSES
+
+    assert set(FAULT_CLASSES) == set(FAULT_SPECS)
