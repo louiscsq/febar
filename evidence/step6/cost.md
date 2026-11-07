@@ -1,6 +1,19 @@
 # Platform running cost (C2)
 
-Generated 2026-11-07 01:59 UTC by `scripts/capture_cost_step6.py` from `system.billing.usage` joined to `system.billing.list_prices` (list price in force at each usage record, `pricing.default`, USD). DBUs and USD at **list price**; no discounts.
+Generated 2026-11-07 03:09 UTC by `scripts/capture_cost_step6.py` from `system.billing.usage` joined to `system.billing.list_prices` (list price in force at each usage record, `pricing.default`, USD). DBUs and USD at **list price**; no discounts.
+
+## Summary
+
+- Since the workspace was created (2026-10-08T05:56:51.000Z) to the last billed record (2026-11-06T23:50:00.000Z): **2373.6 DBU,
+  USD 410.21 at list price**. **149.2 units have no list price** (`GENIE_FREE_USAGE`, the free Genie
+  tier), so they are counted in the DBUs but not in the USD.
+- Steady state per day, at list price, under the assumptions stated in "Steady-state estimate per day":
+  - **serving components, excluding ingestion: about USD 59 / day** (85 DBU: Lakebase, app, SQL
+    warehouse 8 h, RCA endpoint at zero when idle, predictive optimization, storage);
+  - **with the pipeline triggered every 15 min: about USD 84 / day** (+USD 26);
+  - upper bound with a continuous pipeline at the measured, 12x-accelerated live rate: about USD
+    648 / day (+USD 590); a 1x live feed would cost less, but that was not measured;
+  - a warm RCA endpoint adds about USD 4 / day.
 
 ## Workspace
 
@@ -28,7 +41,7 @@ FROM system.billing.usage WHERE workspace_id = '7474648429104135'
 
 | first_usage | last_usage | days_with_usage | n_records |
 |---|---|---|---|
-| 2026-10-08T06:00:00.000Z | 2026-11-06T23:00:00.000Z | 30 | 3578 |
+| 2026-10-08T06:00:00.000Z | 2026-11-06T23:50:00.000Z | 30 | 3589 |
 
 _1 row(s)_
 
@@ -48,7 +61,7 @@ SELECT round(sum(CASE WHEN u.usage_unit = 'DBU' THEN u.usage_quantity END), 1) A
 
 | dbu | usd_list | unpriced_quantity |
 |---|---|---|
-| 2372.1 | 408.98 | 149.2 |
+| 2373.6 | 410.21 | 149.2 |
 
 _1 row(s)_
 
@@ -75,17 +88,17 @@ GROUP BY ALL ORDER BY usd_list DESC NULLS LAST
 | DLT | ENTERPRISE_JOBS_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 203.26 | 91.47 | 2026-10-08 | 2026-11-06 |
 | MODEL_SERVING | ENTERPRISE_OPENAI_MODEL_SERVING | DBU | 265.53 | 18.59 | 2026-11-05 | 2026-11-06 |
 | JOBS | ENTERPRISE_JOBS_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 39.98 | 17.99 | 2026-10-08 | 2026-11-06 |
-| LAKEBASE | ENTERPRISE_DATABASE_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 26.66 | 13.86 | 2026-11-05 | 2026-11-06 |
-| APPS | ENTERPRISE_ALL_PURPOSE_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 5.00 | 4.75 | 2026-11-06 | 2026-11-06 |
+| LAKEBASE | ENTERPRISE_DATABASE_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 27.19 | 14.14 | 2026-11-05 | 2026-11-06 |
+| APPS | ENTERPRISE_ALL_PURPOSE_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 6.00 | 5.70 | 2026-11-06 | 2026-11-06 |
 | PREDICTIVE_OPTIMIZATION | ENTERPRISE_JOBS_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 8.61 | 3.87 | 2026-10-08 | 2026-11-06 |
 | MODEL_SERVING | ENTERPRISE_SERVERLESS_REAL_TIME_INFERENCE_US_EAST_N_VIRGINIA | DBU | 24.01 | 1.68 | 2026-11-05 | 2026-11-06 |
 | LAKEBASE | ENTERPRISE_JOBS_SERVERLESS_COMPUTE_US_EAST_N_VIRGINIA | DBU | 1.81 | 0.82 | 2026-11-05 | 2026-11-06 |
-| DEFAULT_STORAGE | PREMIUM_DATABRICKS_STORAGE_US_EAST_N_VIRGINIA | DSU | 12.21 | 0.28 | 2026-10-08 | 2026-11-06 |
+| DEFAULT_STORAGE | PREMIUM_DATABRICKS_STORAGE_US_EAST_N_VIRGINIA | DSU | 12.22 | 0.28 | 2026-10-08 | 2026-11-06 |
 | NETWORKING | PUBLIC_CONNECTIVITY_DATA_PROCESSED_US_EAST_N_VIRGINIA | GB | 1.36 | 0.06 | 2026-10-08 | 2026-11-06 |
 | AI_GATEWAY | ENTERPRISE_SERVERLESS_REAL_TIME_INFERENCE_US_EAST_N_VIRGINIA | DBU | 0.21 | 0.01 | 2026-11-05 | 2026-11-06 |
 | NETWORKING | INTER_REGION_EGRESS_FROM_US_EAST_N_VIRGINIA | GB | 0.10 | 0.00 | 2026-10-08 | 2026-11-06 |
-| NETWORKING | INTERNET_EGRESS_FROM_US_EAST_N_VIRGINIA | GB | 0.00 | 0.00 | 2026-11-05 | 2026-11-06 |
 | LAKEBASE | ENTERPRISE_DATABRICKS_STORAGE_US_EAST_N_VIRGINIA | DSU | 0.03 | 0.00 | 2026-11-05 | 2026-11-06 |
+| NETWORKING | INTERNET_EGRESS_FROM_US_EAST_N_VIRGINIA | GB | 0.00 | 0.00 | 2026-11-05 | 2026-11-06 |
 | MODEL_SERVING | ENTERPRISE_GEMINI_MODEL_SERVING | DBU | 0.02 | 0.00 | 2026-11-05 | 2026-11-05 |
 | GENIE | GENIE_FREE_USAGE | DBU | 149.20 | NULL | 2026-11-06 | 2026-11-06 |
 
@@ -117,9 +130,9 @@ GROUP BY ALL HAVING sum(u.usage_quantity) > 0.01 ORDER BY usd_list DESC NULLS LA
 | MODEL_SERVING | databricks-claude-sonnet-5-5 | FOUNDATION_MODEL | 1425.16 | DBU | 99.76 |
 | DLT | 80449004-f45a-4b32-8215-f68fdf6acfd9 | NULL | 203.26 | DBU | 91.47 |
 | MODEL_SERVING | databricks-gpt-5-4-mini | FOUNDATION_MODEL | 265.53 | DBU | 18.59 |
-| LAKEBASE | (workspace) | NULL | 26.66 | DBU | 13.86 |
+| LAKEBASE | (workspace) | NULL | 27.19 | DBU | 14.14 |
 | JOBS | banksia-rca-train | NULL | 17.18 | DBU | 7.73 |
-| APPS | banksia-noc-topology | NULL | 5.00 | DBU | 4.75 |
+| APPS | banksia-noc-topology | NULL | 6.00 | DBU | 5.70 |
 | PREDICTIVE_OPTIMIZATION | (workspace) | NULL | 8.61 | DBU | 3.87 |
 | MODEL_SERVING | banksia-rca-ranker | MODEL | 24.01 | DBU | 1.68 |
 | JOBS | banksia-genai-build-evalset | NULL | 3.68 | DBU | 1.66 |
@@ -134,9 +147,9 @@ GROUP BY ALL HAVING sum(u.usage_quantity) > 0.01 ORDER BY usd_list DESC NULLS LA
 | LAKEBASE | eb85df61-12fb-4bfe-8baf-0a24254ef161 | NULL | 0.66 | DBU | 0.30 |
 | JOBS | banksia-genai-lakebase-check | NULL | 0.66 | DBU | 0.30 |
 | JOBS | banksia-netmon-replace-run-feeds | NULL | 0.63 | DBU | 0.29 |
-| DEFAULT_STORAGE | (workspace) | NULL | 12.21 | DSU | 0.28 |
-| LAKEBASE | de1a6b07-9c92-4c50-bc8d-dd195d68e6f5 | NULL | 0.61 | DBU | 0.28 |
+| DEFAULT_STORAGE | (workspace) | NULL | 12.22 | DSU | 0.28 |
 | JOBS | banksia-rca-generate-training-history | NULL | 0.62 | DBU | 0.28 |
+| LAKEBASE | de1a6b07-9c92-4c50-bc8d-dd195d68e6f5 | NULL | 0.61 | DBU | 0.28 |
 | JOBS | banksia-rca-generate-holdout | NULL | 0.59 | DBU | 0.27 |
 | LAKEBASE | 07a8ea76-5fa9-4a5d-90bf-b0a339c0f58a | NULL | 0.54 | DBU | 0.24 |
 | JOBS | banksia-netmon-generate-history | NULL | 0.30 | DBU | 0.13 |
@@ -197,7 +210,7 @@ GROUP BY 1 ORDER BY 1
 | 2026-11-03 | NULL | 0.00 |
 | 2026-11-04 | NULL | 0.00 |
 | 2026-11-05 | 97.0 | 52.79 |
-| 2026-11-06 | 1995.7 | 212.40 |
+| 2026-11-06 | 1997.3 | 213.63 |
 
 _30 row(s)_
 
@@ -238,15 +251,15 @@ UNION ALL SELECT 'storage_dsu_per_day', sum(usage_quantity), 'latest full day (2
 
 | rate | value | basis |
 |---|---|---|
-| lakebase_database_dbu_per_h | 0.7840044485294118 | Lakebase instance compute over its whole billed span (always on) |
-| lakebase_synced_tables_dbu_per_h | 0.053274213398692816 | synced-table pipelines (Lakebase sync), same span |
+| lakebase_database_dbu_per_h | 0.780535442583732 | Lakebase instance compute over its whole billed span (always on) |
+| lakebase_synced_tables_dbu_per_h | 0.051999710685805424 | synced-table pipelines (Lakebase sync), same span |
 | app_dbu_per_h | 0.5 | app compute per billed hour |
 | rca_endpoint_dbu_per_active_h | 2.4006666666666665 | banksia-rca-ranker per billed hour (scale-to-zero when idle) |
 | sql_warehouse_dbu_per_active_h | 6.547645196078431 | serverless SQL warehouse per billed hour |
 | pipeline_continuous_dbu_per_h | 54.610945249934986 | the continuous live update of the step-2 stream (12x accelerated feed, 34 min) |
 | pipeline_triggered_update_dbu | 0.5921620694444444 | median incremental triggered update (not full refresh, not continuous), 2026-11-05 .. 06 |
 | predictive_optimization_dbu_per_day | 0.2868639742708333 | whole period / 30 days |
-| storage_dsu_per_day | 3.0925626 | latest full day (2026-11-06) |
+| storage_dsu_per_day | 3.1003458 | latest full day (2026-11-06) |
 
 _9 row(s)_
 
@@ -266,14 +279,14 @@ share is not separable) and Genie (free usage tier, no list price).
 
 | component | assumption | DBU (DSU for storage) / day | USD / unit (list) | USD / day (list) |
 |---|---|---|---|---|
-| Lakebase instance (CU_1, always on) | 24 h | 18.82 | 0.52 | 9.78 |
-| Lakebase synced tables | 24 h at the measured rate | 1.28 | 0.45 | 0.58 |
+| Lakebase instance (CU_1, always on) | 24 h | 18.73 | 0.52 | 9.74 |
+| Lakebase synced tables | 24 h at the measured rate | 1.25 | 0.45 | 0.56 |
 | Databricks App (banksia-noc-topology) | running 24 h | 12.0 | 0.95 | 11.4 |
 | SQL warehouse (serverless) | 8 active h/day | 52.38 | 0.7 | 36.67 |
 | RCA serving endpoint (Small, scale-to-zero) | idle: scales to zero | 0.0 | 0.07 | 0.0 |
 | Predictive optimization | measured daily average | 0.29 | 0.45 | 0.13 |
-| Storage (DSU) | latest full day | 3.09 | 0.023 | 0.07 |
-| **serving platform, steady state (sum)** |  | 84.8 |  | 58.63 |
+| Storage (DSU) | latest full day | 3.1 | 0.023 | 0.07 |
+| **serving platform, steady state (sum)** |  | 84.6 |  | 58.57 |
 | + RCA endpoint warm 24 h |  | 57.6 | 0.07 | 4.03 |
 | + pipeline triggered every 15 min (96 incremental updates) |  | 56.8 | 0.45 | 25.58 |
 | + pipeline continuous 24 h at the measured live rate (12x accelerated feed: an upper bound) |  | 1310.7 | 0.45 | 589.8 |
@@ -281,9 +294,15 @@ share is not separable) and Genie (free usage tier, no list price).
 _11 row(s)_
 
 
-## Summary
+## Summary (repeated)
 
-- Since the workspace was created (2026-10-08T05:56:51.000Z) to the last billed record (2026-11-06T23:00:00.000Z): **2372.1 DBU,
-  USD 408.98 at list price** (Genie free-tier DBUs carry no price).
-- Steady-state serving platform: **about 85 DBU / USD 59 per day** at list price under the assumptions
-  above; a continuously running pipeline is the dominant optional cost.
+- Since the workspace was created (2026-10-08T05:56:51.000Z) to the last billed record (2026-11-06T23:50:00.000Z): **2373.6 DBU,
+  USD 410.21 at list price**. **149.2 units have no list price** (`GENIE_FREE_USAGE`, the free Genie
+  tier), so they are counted in the DBUs but not in the USD.
+- Steady state per day, at list price, under the assumptions stated in "Steady-state estimate per day":
+  - **serving components, excluding ingestion: about USD 59 / day** (85 DBU: Lakebase, app, SQL
+    warehouse 8 h, RCA endpoint at zero when idle, predictive optimization, storage);
+  - **with the pipeline triggered every 15 min: about USD 84 / day** (+USD 26);
+  - upper bound with a continuous pipeline at the measured, 12x-accelerated live rate: about USD
+    648 / day (+USD 590); a 1x live feed would cost less, but that was not measured;
+  - a warm RCA endpoint adds about USD 4 / day.

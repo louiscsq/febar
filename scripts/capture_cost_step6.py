@@ -166,13 +166,23 @@ share is not separable) and Genie (free usage tier, no list price).
 
 """ + md_table(["component", "assumption", "DBU (DSU for storage) / day", "USD / unit (list)", "USD / day (list)"], rows)
                  + "\n")
-    parts.append(f"""## Summary
+    trig_usd = opt[1][1] * opt[1][2]
+    cont_usd = opt[2][1] * opt[2][2]
+    summary = f"""## Summary
 
 - Since the workspace was created ({ws_rows[0][3]}) to the last billed record ({span[0][1]}): **{total[0][0]} DBU,
-  USD {total[0][1]} at list price** (Genie free-tier DBUs carry no price).
-- Steady-state serving platform: **about {base_dbu:.0f} DBU / USD {base_usd:.0f} per day** at list price under the assumptions
-  above; a continuously running pipeline is the dominant optional cost.
-""")
+  USD {total[0][1]} at list price**. **{total[0][2]} units have no list price** (`GENIE_FREE_USAGE`, the free Genie
+  tier), so they are counted in the DBUs but not in the USD.
+- Steady state per day, at list price, under the assumptions stated in "Steady-state estimate per day":
+  - **serving components, excluding ingestion: about USD {base_usd:.0f} / day** ({base_dbu:.0f} DBU: Lakebase, app, SQL
+    warehouse {SQL_ACTIVE_HOURS} h, RCA endpoint at zero when idle, predictive optimization, storage);
+  - **with the pipeline triggered every 15 min: about USD {base_usd + trig_usd:.0f} / day** (+USD {trig_usd:.0f});
+  - upper bound with a continuous pipeline at the measured, 12x-accelerated live rate: about USD
+    {base_usd + cont_usd:.0f} / day (+USD {cont_usd:.0f}); a 1x live feed would cost less, but that was not measured;
+  - a warm RCA endpoint adds about USD {opt[0][1] * opt[0][2]:.0f} / day.
+"""
+    parts.insert(1, summary)  # headline first
+    parts.append(summary.replace("## Summary", "## Summary (repeated)"))
     OUT.write_text("\n".join(parts))
     print("wrote", OUT)
 
