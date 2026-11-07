@@ -1,16 +1,16 @@
 {
  "reading": "dev",
  "freeze_sha": "e866511994f49fcf0084c994228221f6eb52af9a",
- "head_sha": "7e27c56dcdc76b17703a7aa5dc727c63390c5f23",
+ "head_sha": "8ff94baded45122b2971bcc749c49a083690caea",
  "ttd": [
   [
    "all",
    55,
    "before: per-cell (published metric a)",
-   55,
-   563.0,
-   947.8,
-   12.7
+   53,
+   569.0,
+   957.4,
+   9.1
   ],
   [
    "all",
@@ -25,10 +25,10 @@
    "all",
    55,
    "after: per-cell + collective (first of)",
-   55,
-   321.0,
-   772.8,
-   25.5
+   53,
+   323.0,
+   821.4,
+   21.8
   ],
   [
    "link <= 6 cells",
@@ -61,10 +61,10 @@
    "link > 6 cells",
    30,
    "before: per-cell (published metric a)",
-   30,
-   575.0,
-   874.9,
-   20.0
+   28,
+   591.5,
+   884.7,
+   13.3
   ],
   [
    "link > 6 cells",
@@ -79,18 +79,18 @@
    "link > 6 cells",
    30,
    "after: per-cell + collective (first of)",
-   30,
-   334.0,
-   874.9,
-   23.3
+   28,
+   336.0,
+   884.7,
+   16.7
   ],
   [
    "all",
-   55,
+   53,
    "median gain, before - after (s)",
-   55,
-   188.0,
-   436.0,
+   53,
+   191.0,
+   439.0,
    null
   ]
  ],
@@ -160,10 +160,10 @@
    "all",
    55,
    "before: per-cell (published metric a)",
-   55,
-   563.0,
-   947.8,
-   12.7
+   53,
+   569.0,
+   957.4,
+   9.1
   ],
   [
    "all",
@@ -178,10 +178,10 @@
    "all",
    55,
    "after: per-cell + collective (first of)",
-   55,
-   267.0,
-   766.4,
-   65.5
+   53,
+   271.0,
+   818.2,
+   61.8
   ],
   [
    "link <= 6 cells",
@@ -214,10 +214,10 @@
    "link > 6 cells",
    30,
    "before: per-cell (published metric a)",
-   30,
-   575.0,
-   874.9,
-   20.0
+   28,
+   591.5,
+   884.7,
+   13.3
   ],
   [
    "link > 6 cells",
@@ -232,18 +232,18 @@
    "link > 6 cells",
    30,
    "after: per-cell + collective (first of)",
-   30,
-   274.0,
-   874.9,
-   63.3
+   28,
+   276.0,
+   884.7,
+   56.7
   ],
   [
    "all",
-   55,
+   53,
    "median gain, before - after (s)",
-   55,
-   248.0,
-   496.0,
+   53,
+   251.0,
+   499.0,
    null
   ]
  ]

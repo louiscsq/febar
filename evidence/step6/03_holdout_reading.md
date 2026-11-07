@@ -1,5 +1,7 @@
 # Step 6 collective backhaul detector: DETECTOR HOLDOUT READING (holdout_1m, read once, after the freeze)
 
+> **Note (added after this run, in a later commit):** this is the as-run holdout reading, kept unchanged below. Its *before* and *after* TTD rows count INC-00204 as a per-cell detection at 0 s: `eval_incident_detection` gives undetected incidents `impact_ttd_s = 0`. The corrected scoring of the **same stored detections** (nothing recomputed, no holdout data re-read) is [`03b_holdout_rescore.md`](03b_holdout_rescore.md). The detections, the SQL-vs-mirror checks, the collective-alone rows and the false-alarm figures here are unaffected.
+
 Generated 2026-11-07 01:52 UTC by `scripts/collective_backhaul_experiment.py`.
 
 - reading `holdout`: source_run `holdout_1m`, windows 2026-10-17T00:00:00Z .. 2026-10-19T00:00:00Z.

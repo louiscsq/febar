@@ -1,10 +1,10 @@
 # Step 6 collective backhaul detector: Old live `stream` run (only 3 scored backhaul faults)
 
-Generated 2026-11-07 01:48 UTC by `scripts/collective_backhaul_experiment.py`.
+Generated 2026-11-07 02:08 UTC by `scripts/collective_backhaul_experiment.py`.
 
 - reading `stream`: source_run `stream`, windows 2026-10-08T18:55:00Z .. 2026-10-09T00:55:00Z.
 - frozen rule `detection.COLLECTIVE_BACKHAUL`, frozen at commit `e866511994f49fcf0084c994228221f6eb52af9a` (last change to the detector code), scored at
-  HEAD `7e27c56dcdc76b17703a7aa5dc727c63390c5f23`: `{"name": "collective_backhaul_v1", "z": 2.5, "floors": {"latency_ms": 3.0, "packet_loss_pct": 0.1286, "session_drop_rate_pct": 0.0643}, "min_consistency": 0.6, "min_reporting_share": 0.8, "persist": 2, "consistency_z": 1.0, "watermark_s": 120}`
+  HEAD `c2de6c1c3cd0fdb7945e7bfca982a11c20b8056c`: `{"name": "collective_backhaul_v1", "z": 2.5, "floors": {"latency_ms": 3.0, "packet_loss_pct": 0.1286, "session_drop_rate_pct": 0.0643}, "min_consistency": 0.6, "min_reporting_share": 0.8, "persist": 2, "consistency_z": 1.0, "watermark_s": 120}`
 - detections computed in SQL on the warehouse from `gold_cell_health_1m`, topology and the change calendar only, written
   to `telco_netmon_febar_catalog.netmon_eval.eval_collective_backhaul_experiment` (reading = `stream`). Ground truth was read afterwards, for scoring only.
 - timing: a link-minute is available at max(window_end + 120 s watermark, latest evidence_ts of the
