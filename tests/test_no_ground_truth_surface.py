@@ -160,6 +160,15 @@ POISON_NO_EVAL_TABLE = {
     "fault class in rows, no hypothesis": {"columns": ["element_id", "cause"], "rows": [["BH-VIC-0005", "BACKHAUL_DEGRADATION"]]},
     "fault class in text, no hypothesis": {"text": ["The true fault was SITE_POWER_OUTAGE."]},
     "red-herring class in sql": {"sql": f"SELECT * FROM {NOC}.element_status WHERE note = 'TRAFFIC_SURGE'"},
+    # case variants of the same labels and label columns (the guard ignores case)
+    "lowercase fault class in sql": {"sql": f"SELECT * FROM {NOC}.element_status WHERE note = 'backhaul_degradation'"},
+    "mixed-case fault class in text": {"text": ["The true fault was Site_Power_Outage."]},
+    "lowercase fault class in description": {"description": "Rows labelled cell_outage by the incident record"},
+    "mixed-case fault class in rows": {"columns": ["element_id", "cause"], "rows": [["BH-VIC-0005", "Backhaul_Degradation"]]},
+    "lowercase fault class in a quoted row value": {"rows": [["{\"cause\": \"agg_router_failure\"}"]]},
+    "upper-case label column in sql": {"sql": f"SELECT element_id, FAULT_TYPE FROM {NOC}.element_status"},
+    "mixed-case label column in text": {"text": ["Its Root_Element_Id is BH-VIC-0005."]},
+    "upper-case label column in columns": {"columns": ["element_id", "IS_CENSORED"], "rows": [["BH-VIC-0005", "x"]]},
 }
 
 
@@ -170,8 +179,8 @@ def test_genie_ask_withholds_ground_truth_labels_without_an_eval_table(case):
     assert body["withheld"] is True and body["rows"] == [] and body["sql"] is None, case
     assert body["withheld_reason"] in ("label_column", "label_value")
     for leaked in ("fault_type", "is_censored", "root_element_id", "root_cause", "event_class", "BACKHAUL_DEGRADATION",
-                   "SITE_POWER_OUTAGE", "TRAFFIC_SURGE"):
-        assert leaked not in r.text, (case, leaked)
+                   "SITE_POWER_OUTAGE", "TRAFFIC_SURGE", "CELL_OUTAGE", "AGG_ROUTER_FAILURE"):
+        assert leaked.lower() not in r.text.lower(), (case, leaked)
 
 
 CLEAN_ANSWERS = {
@@ -182,6 +191,11 @@ CLEAN_ANSWERS = {
                              "columns": ["incident_id", "fault_hypothesis"], "rows": [["RCA-1", "BACKHAUL_DEGRADATION"]]},
     "prose, not a label": {**CLEAN, "text": ["Latency is rising on every cell behind the link: backhaul degradation "
                                              "is likely; check the root cause with the transport team."]},
+    "prose with spaces, element types and alarm text": {
+        **CLEAN, "text": ["Backhaul degradation on link BH-VIC-0005: LINK_DEGRADED and RSL_LOW raised on the BACKHAUL_LINK, "
+                          "CELL_OUT_OF_SERVICE on one CELL, NE_UNREACHABLE on the SITE; the AGG_ROUTER is fine. Cell outage "
+                          "and site power outage were ruled out."],
+        "description": "Alarms and element status on the backhaul link and its sites"},
     "alarms": {**CLEAN, "sql": f"SELECT element_id, alarm_code, severity, event_ts FROM {NOC}.silver_alarms",
                "columns": ["element_id", "alarm_code", "event_ts"], "rows": [["BH-VIC-0005", "RSL_LOW", "2026-10-09"]]},
 }

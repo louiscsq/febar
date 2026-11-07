@@ -84,6 +84,9 @@ answer is withheld rather than partly redacted when its SQL, text, description, 
 - carry a fault-class label (`BACKHAUL_DEGRADATION`, ...) whose SQL does not read `incident_ai_summary.fault_hypothesis`,
   the step-4 assistant's operational guess and the only serving column with such values.
 
+All three checks ignore case (`backhaul_degradation`, `Site_Power_Outage`, `FAULT_TYPE` are caught); only the
+underscore-joined identifier form is a label, so prose such as "backhaul degradation on link X" passes.
+
 `tests/test_no_ground_truth_surface.py` poisons the fake Genie in each field, with and without an eval table name, and
 checks that legitimate answers (sites down, the assistant's hypothesis, prose, alarms) still pass.
 **Deployment:** the hardened guard (step 6, C1) is in the code only. The deployed app picks it up after the next

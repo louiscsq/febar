@@ -79,7 +79,10 @@ FAULT_CLASSES = frozenset({
     "AGG_ROUTER_FAILURE", "ALARM_STORM", "AMF_OVERLOAD", "BACKHAUL_DEGRADATION", "BUSHFIRE_GRID_OUTAGE", "CELL_OUTAGE",
     "CORE_CONGESTION", "CYCLONE_BACKHAUL_CUT", "FLAPPING_ELEMENT", "LONG_HAUL_FIBRE_CUT", "PLANNED_MAINTENANCE",
     "SITE_POWER_OUTAGE", "TRAFFIC_SURGE"})
-_FAULT_CLASS = re.compile(r"\b(?:" + "|".join(sorted(FAULT_CLASSES)) + r")\b")
+# Case-insensitive (`backhaul_degradation`, `Site_Power_Outage` are the same label); only the underscore-joined
+# identifier form matches, so ordinary prose ("backhaul degradation on link X") is not a label. All three patterns
+# here ignore case; identifiers in backticks or quotes still match because `\b` treats them as word boundaries.
+_FAULT_CLASS = re.compile(r"\b(?:" + "|".join(sorted(FAULT_CLASSES)) + r")\b", re.I)
 OPERATIONAL_FAULT_COLUMN = "fault_hypothesis"
 
 
