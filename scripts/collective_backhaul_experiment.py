@@ -387,7 +387,9 @@ def score(wh: Warehouse, reading: str, replace: bool) -> None:
         sys.exit("detection.COLLECTIVE_BACKHAUL is not frozen yet: run `calibrate`, freeze and commit first")
     if _git("status", "--porcelain", "--", "src"):
         sys.exit("src/ has uncommitted changes: the frozen rule must be committed before scoring")
-    sha = _git("rev-parse", "HEAD")
+    head = _git("rev-parse", "HEAD")
+    # the freeze: the last commit that changed the detector code (rule, thresholds, parent aggregate)
+    sha = _git("log", "-1", "--format=%H", "--", "src/netmon_pipeline/detection.py", "src/netmon_pipeline/windows.py")
     run, lo, hi = READINGS[reading]
     rule_json = json.dumps({"name": rule.name, "z": rule.z, "floors": dict(rule.floors),
                             "min_consistency": rule.min_consistency,
@@ -434,12 +436,13 @@ def score(wh: Warehouse, reading: str, replace: bool) -> None:
               "stream": "Old live `stream` run (only 3 scored backhaul faults)"}
     d = Doc(f"Step 6 collective backhaul detector: {titles[reading]}", f"""
 - reading `{reading}`: source_run `{run}`, windows {lo} .. {hi}.
-- frozen rule `detection.COLLECTIVE_BACKHAUL`, scored at commit `{sha}`: `{rule_json}`
+- frozen rule `detection.COLLECTIVE_BACKHAUL`, frozen at commit `{sha}` (last change to the detector code), scored at
+  HEAD `{head}`: `{rule_json}`
 - detections computed in SQL on the warehouse from `gold_cell_health_1m`, topology and the change calendar only, written
   to `{EXPERIMENT_TABLE}` (reading = `{reading}`). Ground truth was read afterwards, for scoring only.
 - timing: a link-minute is available at max(window_end + {windows.COLLECTIVE_WATERMARK_S} s watermark, latest evidence_ts of the
   on-time cell windows used); a cell window arriving after window_end + watermark is not used. No record-level timing.
-  "before" is the published step-2 metric (a) (`eval_incident_detection.first_available_ts`: first per-cell KPI or alarm
+  "before" is the published step-2 metric (a) (`eval_incident_detection.impact_ttd_s`: first per-cell KPI or alarm
   detection on the incident footprint, evidence time + measured live pipeline latency). For the batch runs that latency
   is 0 on both sides; for `stream` the collective side has no measured pipeline latency (a lower bound).
 - scored incidents: {len(ctx.scored)} customer-impacting, uncensored `{FAULT}` (impact start in the reading).
@@ -488,7 +491,7 @@ same grouping to today's per-cell KPI detections on the link's cells (labelled b
     d.table(["measure", "value"], [["false alarms per 100 healthy link-days", wm60["fa"]["false_alarms_per_100_link_days"]]])
     name = {"dev": "02_dev_reading.md", "holdout": "03_holdout_reading.md", "stream": "04_stream_reading.md"}[reading]
     d.write(name)
-    summary = {"reading": reading, "sha": sha, "ttd": ttd_table(ev["rows"])[1], "fa": ev["fa"], "percell_fa": cell_fa,
+    summary = {"reading": reading, "freeze_sha": sha, "head_sha": head, "ttd": ttd_table(ev["rows"])[1], "fa": ev["fa"], "percell_fa": cell_fa,
                "added_pages": added_pages(ev["alerts"], cell_alerts), "other_tp": other_fault_tp(ev["alerts"]),
                "mirror": mirror, "wm60": ttd_table(wm60["rows"])[1]}
     (OUT / name.replace(".md", ".json")).write_text(json.dumps(summary, indent=1, default=str))
