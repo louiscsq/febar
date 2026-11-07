@@ -2,7 +2,8 @@
 
 Run 2026-11-07 04:00–04:12 UTC as `louis.chen@databricks.com` (CLI profile `febar`, CLI v1.19.0), from a clean
 checkout of `main` at `53dcffd` (merge of PR #8, which carries the case-insensitive `safety.scrub_genie_answer`).
-Only the app was deployed. No pipeline, job, model, serving endpoint, Genie space, table or grant was changed or run.
+Only the app was deployed. No pipeline, job, model, serving endpoint, table or grant was changed or run, and no Genie
+space configuration was changed; the Ask Genie smoke test created two Genie conversations (section 4).
 
 ## 1. Plan: a full bundle deploy would touch two other resources, so the deploy was limited to the app
 
@@ -42,8 +43,8 @@ $ databricks bundle run -t dev -p febar noc_topology
 ✓ App started successfully
 ```
 
-The file sync rewrote the bundle's workspace files (code only, the `main` versions). No resource changed and nothing
-was run.
+The file sync refreshed the shared bundle workspace files to the `main` `53dcffd` contents (code only). The unselected
+pipeline and job resources were not deployed, updated or run. No non-app bundle resource was created, updated, deleted or run; only the app deployment was run.
 
 ## 3. App status and deployment
 
