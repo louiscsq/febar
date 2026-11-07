@@ -312,3 +312,14 @@ def collective_detections_sql(rule: CollectiveRule, stats_sql: str) -> str:
            {", ".join(f"wz_{m}, wdelta_{m}, frac_z1_{m}" for m in COLLECTIVE_METRICS)},
            w_prb_util_pct, max_used_evidence_ts, frame_available_ts AS available_ts
     FROM r WHERE qualifies AND n_qualified_in_frame >= {p}"""
+
+
+# FROZEN: chosen on the history_1m DEV days only (2026-10-14 .. 10-15, the RCA dev split) by the declared selection rule
+# in scripts/collective_backhaul_experiment.py (evidence/step6/01_calibration.md), and committed before any holdout_1m
+# or stream reading. Do not retune on a run it has been scored on. The 3 ms latency floor is the bottom of the grid,
+# so the z threshold is what binds; loss / drop floors scale with it by the fault's own ratio (6/140, 3/140).
+COLLECTIVE_BACKHAUL = CollectiveRule(
+    name="collective_backhaul_v1", z=2.5,
+    floors=(("latency_ms", 3.0), ("packet_loss_pct", 0.1286), ("session_drop_rate_pct", 0.0643)),
+    min_consistency=0.6, min_reporting_share=0.8, persist=2,
+)
