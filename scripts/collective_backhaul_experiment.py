@@ -410,8 +410,10 @@ def score(wh: Warehouse, reading: str, replace: bool) -> None:
         if reading == "holdout" or not replace:
             sys.exit(f"reading {reading} already scored at {prior.sha[0]}: the holdout is read once")
         wh.execute(f"DELETE FROM {EXPERIMENT_TABLE} WHERE reading = '{reading}'")
-    insert = (f"INSERT INTO {EXPERIMENT_TABLE}\nSELECT '{reading}' AS reading, '{sha}' AS freeze_sha, "
-              f"'{rule_json}' AS rule_json, current_timestamp() AS scored_at, *\nFROM ({det_sql})")
+    # MERGE, not INSERT: idempotent if the client retries the statement (an INSERT once landed twice that way)
+    insert = (f"MERGE INTO {EXPERIMENT_TABLE} t\nUSING (SELECT '{reading}' AS reading, '{sha}' AS freeze_sha, "
+              f"'{rule_json}' AS rule_json, current_timestamp() AS scored_at, *\nFROM ({det_sql})) s\n"
+              f"ON t.reading = s.reading AND t.detection_id = s.detection_id\nWHEN NOT MATCHED THEN INSERT *")
     wh.execute(insert)
 
     # --- the Python mirror over the same statistic must give the same detections
