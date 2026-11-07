@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -659,8 +660,10 @@ def compare_published(r) -> tuple[list[list], list[str]]:
             now = [ln for ln in md_table(cols, data).splitlines() if ln.startswith("|")]
             committed_body, now_body = tab[2:], now[2:]
             same_header = tab[0] == now[0]
-            missing = [x for x in committed_body if x not in now_body]
-            extra = [x for x in now_body if x not in committed_body]
+            # multiset comparison: a duplicated or dropped copy of a row counts, not just its presence
+            c_committed, c_now = Counter(committed_body), Counter(now_body)
+            missing = list((c_committed - c_now).elements())
+            extra = list((c_now - c_committed).elements())
             if same_header and not missing and not extra:
                 status = "identical"
             elif same_header and not missing:
@@ -674,7 +677,7 @@ def compare_published(r) -> tuple[list[list], list[str]]:
                     try:
                         c5, d5 = r.sql(pr5)
                         snap = [ln for ln in md_table(c5, d5).splitlines() if ln.startswith("|")]
-                        if snap[0] == tab[0] and sorted(snap[2:]) == sorted(committed_body):
+                        if snap[0] == tab[0] and Counter(snap[2:]) == Counter(committed_body):
                             status = "DIFFERENT from now; identical to the pre-PR-6 snapshot (`_pr5` tables)"
                     except RuntimeError:
                         pass
@@ -690,7 +693,8 @@ def verify(wh: Warehouse, since: str) -> None:
     """Evidence that the experiment changed nothing that existed: only the new table was written since `since`, the
     published step-2 backhaul numbers are unchanged, and the experiment table holds exactly one row set per reading."""
     d = Doc("Step 6: nothing existing changed", f"""
-Checks after the three readings. `since` = {since} (before this step's first query).""")
+Checks after the three readings. `since` = {since} (before this step's first query). The published-results part is a
+**partial retrospective check** against the committed step 2-4 evidence; step 5 is not replayed.""")
     for title, sql in [
         ("Tables / views in the netmon_* schemas altered since the step began",
          f"SELECT table_schema, table_name, table_type, last_altered FROM {CAT}.information_schema.tables "
@@ -710,7 +714,7 @@ Checks after the three readings. `since` = {since} (before this step's first que
         d.h(title)
         d.sql(sql)
         d.table(list(df.columns), df.astype(object).where(df.notna(), None).values.tolist())
-    # complete published step 2-5 result set: deterministic content hashes, row counts, last change
+    # current state of the published result tables: content hashes, row counts, last change (a reference for later)
     tabs = wh.frame(f"SELECT table_schema, table_name, table_type, last_altered FROM {CAT}.information_schema.tables "
                     f"WHERE table_schema IN {PUBLISHED_TABLE_SCHEMAS} ORDER BY 1, 2")
     tabs = tabs[tabs.table_name.str.match(PUBLISHED_TABLE_RE.pattern)]
@@ -720,26 +724,28 @@ Checks after the three readings. `since` = {since} (before this step's first que
                      f"FROM {CAT}.{t.table_schema}.{t.table_name}")
         hrows.append([f"{t.table_schema}.{t.table_name}", t.table_type, str(t.last_altered), int(h.n[0]), h.h[0][:16],
                       "yes" if pd.Timestamp(t.last_altered) >= pd.Timestamp(since) else "no"])
-    d.h("Every published step 2-5 result table: content hash and last change",
-        f"""All {len(hrows)} result / summary tables of netmon_eval, netmon_rca and netmon_genai (the published scorecards,
-including the `_pr5` copies of the pre-PR-6 results). `sha2` over the sorted JSON of every row is a deterministic content
-hash, recorded here so that any later change is detectable. **No pre-step-6 hash snapshot exists**, so the before/after
-check for this step is (a) `last_altered` (no table was changed since {since}) and (b) the replay of the committed
-evidence below.""")
+    d.h("Published result tables: current content hash and last change (current state only, not a before/after)",
+        f"""The {len(hrows)} result / summary tables of netmon_eval, netmon_rca and netmon_genai, including the `_pr5` copies
+of the pre-PR-6 results. `sha2` over the sorted JSON of every row is a deterministic content hash. **These hashes describe the
+current state only.** No pre-step-6 hash snapshot exists, so they prove nothing about this step by themselves; they are a
+reference that makes any later change detectable. What this step can show is `last_altered` (no table changed since {since})
+and the partial replay below.""")
     d.table(["table", "type", "last_altered", "rows", "sha2 (first 16 hex)", f"altered since {since}"], hrows)
     from capture_evidence import Runner
     rows, diffs = compare_published(Runner(PROFILE, WAREHOUSE))
-    d.h("Committed step 2-4 headline evidence replayed against the current tables",
-        """Before = the tables committed in evidence/step2..4 (the published numbers; no separate pre-step-6 snapshot was
-taken, so the committed evidence is the reference). After = the same SQL re-run now, rendered by the same function. Step 5's
-headline is the Genie benchmark (evidence/step5/02*): answers of a live LLM, not a table, so it cannot be replayed
-deterministically; the serving views it reads sit on the tables hashed above.""")
+    d.h("Partial retrospective check: committed step 2-4 evidence replayed against the current tables",
+        """**A partial check, not a comparison of the complete step 2-5 result set.** Before = the output tables committed in
+the listed evidence/step2..4 files (no pre-step-6 snapshot was taken). After = the same SQL re-run now, rendered by the same
+function and compared as multisets of rows (`collections.Counter`), so a duplicated or dropped row also counts. Only the
+listed files are covered, and only their replayable queries. **Step 5 is not replayed:** its headline is the Genie benchmark
+(evidence/step5/02*), answers of a live LLM, not a table.""")
     d.table(["file", "section", "status", "committed rows", "current rows"], rows)
     n_id = sum(x[2] == "identical" for x in rows)
     n_sup = sum(str(x[2]).startswith("every committed") for x in rows)
     n_diff = sum(str(x[2]).startswith("DIFFERENT") for x in rows)
-    d.text(f"**Replayed: {n_id} identical, {n_sup} with every committed row unchanged plus rows of runs added after that "
-           f"file was captured, {n_diff} different** (listed below; see the README for why each one differs).")
+    d.text(f"**Replayed (partial, step 2-4 only): {n_id} identical, {n_sup} with every committed row unchanged (same "
+           f"multiplicity) plus rows of runs added after that file was captured, {n_diff} different** (listed below; see "
+           f"the README for why each one differs).")
     if diffs:
         d.h("Differences (explained in the README)")
         d.text("\n".join(diffs))

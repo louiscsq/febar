@@ -278,10 +278,10 @@ on the 1-minute stream.
 Step 6 question: does rolling cell health up to the backhaul link, weighted by the customers attached to it, detect
 slow `BACKHAUL_DEGRADATION` faults earlier than the per-cell rules, and at what false-alarm cost? Evidence:
 [`evidence/step6/`](../evidence/step6/). **Offline only:** nothing here is read by the pipeline, the eval MVs, the
-`impact_signals` union, the RCA ranker, Lakebase, the app or Genie. No step 2–5 figure changed. `05_no_change.md`
-records a content hash of all 89 published result tables (none altered since the step began) and replays the
-committed step 2–4 headline evidence against them: 54 tables identical, 10 unchanged plus rows of later runs, and
-5 that differ for reasons that predate step 6 (README).
+`impact_signals` union, the RCA ranker, Lakebase, the app or Genie. No published table was altered (`05_no_change.md`:
+`last_altered` of the 89 published result tables). As a **partial retrospective check** against the committed step 2–4
+evidence (multiset row comparison; step 5 not replayed, no pre-step snapshot existed): 54 tables identical, 10 unchanged
+plus rows of later runs, and 5 that differ for reasons that predate step 6 (evidence README).
 
 **Why slow backhaul is late today.** A backhaul ramp reaches the per-cell floors (+40 ms latency, +1.5 pp loss) only
 when about 30 % of its full intensity has built up on one cell, about 8–9 minutes after impact start. The per-minute

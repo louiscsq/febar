@@ -1,8 +1,9 @@
 # Step 6: nothing existing changed
 
-Generated 2026-11-07 03:01 UTC by `scripts/collective_backhaul_experiment.py`.
+Generated 2026-11-07 03:22 UTC by `scripts/collective_backhaul_experiment.py`.
 
-Checks after the three readings. `since` = 2026-11-07T00:00:00Z (before this step's first query).
+Checks after the three readings. `since` = 2026-11-07T00:00:00Z (before this step's first query). The published-results part is a
+**partial retrospective check** against the committed step 2-4 evidence; step 5 is not replayed.
 
 ## Tables / views in the netmon_* schemas altered since the step began
 
@@ -73,13 +74,13 @@ SELECT version, timestamp, operation, operationMetrics.numOutputRows AS rows_wri
 _13 row(s)_
 
 
-## Every published step 2-5 result table: content hash and last change
+## Published result tables: current content hash and last change (current state only, not a before/after)
 
-All 89 result / summary tables of netmon_eval, netmon_rca and netmon_genai (the published scorecards,
-including the `_pr5` copies of the pre-PR-6 results). `sha2` over the sorted JSON of every row is a deterministic content
-hash, recorded here so that any later change is detectable. **No pre-step-6 hash snapshot exists**, so the before/after
-check for this step is (a) `last_altered` (no table was changed since 2026-11-07T00:00:00Z) and (b) the replay of the committed
-evidence below.
+The 89 result / summary tables of netmon_eval, netmon_rca and netmon_genai, including the `_pr5` copies
+of the pre-PR-6 results. `sha2` over the sorted JSON of every row is a deterministic content hash. **These hashes describe the
+current state only.** No pre-step-6 hash snapshot exists, so they prove nothing about this step by themselves; they are a
+reference that makes any later change detectable. What this step can show is `last_altered` (no table changed since 2026-11-07T00:00:00Z)
+and the partial replay below.
 
 | table | type | last_altered | rows | sha2 (first 16 hex) | altered since 2026-11-07T00:00:00Z |
 |---|---|---|---|---|---|
@@ -176,12 +177,13 @@ evidence below.
 _89 row(s)_
 
 
-## Committed step 2-4 headline evidence replayed against the current tables
+## Partial retrospective check: committed step 2-4 evidence replayed against the current tables
 
-Before = the tables committed in evidence/step2..4 (the published numbers; no separate pre-step-6 snapshot was
-taken, so the committed evidence is the reference). After = the same SQL re-run now, rendered by the same function. Step 5's
-headline is the Genie benchmark (evidence/step5/02*): answers of a live LLM, not a table, so it cannot be replayed
-deterministically; the serving views it reads sit on the tables hashed above.
+**A partial check, not a comparison of the complete step 2-5 result set.** Before = the output tables committed in
+the listed evidence/step2..4 files (no pre-step-6 snapshot was taken). After = the same SQL re-run now, rendered by the same
+function and compared as multisets of rows (`collections.Counter`), so a duplicated or dropped row also counts. Only the
+listed files are covered, and only their replayable queries. **Step 5 is not replayed:** its headline is the Genie benchmark
+(evidence/step5/02*), answers of a live LLM, not a table.
 
 | file | section | status | committed rows | current rows |
 |---|---|---|---|---|
@@ -262,7 +264,7 @@ deterministically; the serving views it reads sit on the tables hashed above.
 _73 row(s)_
 
 
-**Replayed: 54 identical, 10 with every committed row unchanged plus rows of runs added after that file was captured, 5 different** (listed below; see the README for why each one differs).
+**Replayed (partial, step 2-4 only): 54 identical, 10 with every committed row unchanged (same multiplicity) plus rows of runs added after that file was captured, 5 different** (listed below; see the README for why each one differs).
 
 ## Differences (explained in the README)
 
