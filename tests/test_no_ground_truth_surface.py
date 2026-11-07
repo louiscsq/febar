@@ -135,15 +135,75 @@ def test_genie_ask_never_passes_ground_truth_through(field):
     assert "fault_type" not in r.text
 
 
-def test_genie_ask_clean_answer_is_returned_with_label_columns_dropped():
-    ans = {"conversation_id": "c1", "message_id": "m1", "status": "COMPLETED", "text": ["2 sites are down."],
-           "sql": f"SELECT element_id, fault_type FROM {CAT}.netmon_noc.element_status",
-           "columns": ["element_id", "fault_type"], "rows": [["SITE-NSW-00002", "SITE_POWER_OUTAGE"]], "row_count": 1}
+NOC = f"{CAT}.netmon_noc"
+CLEAN = {"conversation_id": "c1", "message_id": "m1", "status": "COMPLETED", "text": ["2 sites are down."],
+         "sql": f"SELECT element_id FROM {NOC}.element_status WHERE state = 'down'", "description": "Sites down",
+         "columns": ["element_id"], "rows": [["SITE-NSW-00002"]], "row_count": 1}
+
+
+def _ask(ans):
     s = NocService(settings(), FakeStore(), FakeWarehouse(), FakeGenie(ans))
     c = TestClient(create_app(lambda: s))
-    r = c.post("/api/genie/ask", json={"question": "Which sites are down?"},
+    r = c.post("/api/genie/ask", json={"question": "What is going on?"},
                headers={"x-forwarded-email": "lead@banksia.example", "x-forwarded-access-token": "tok-national"})
+    assert r.status_code == 200, r.text
+    return r
+
+
+# Ground truth WITHOUT any evaluation table being named: label columns or fault-class labels in one field each.
+POISON_NO_EVAL_TABLE = {
+    "label column in result columns": {"columns": ["element_id", "fault_type"], "rows": [["BH-VIC-0005", "x"]]},
+    "label column in sql": {"sql": f"SELECT element_id, is_censored FROM {NOC}.element_status"},
+    "label column in text": {"text": ["Its root_element_id is BH-VIC-0005."]},
+    "root cause column in description": {"description": "Uses root_cause_element from the incident record"},
+    "label column inside a row value": {"rows": [["{\"event_class\": \"fault\"}"]]},
+    "fault class in rows, no hypothesis": {"columns": ["element_id", "cause"], "rows": [["BH-VIC-0005", "BACKHAUL_DEGRADATION"]]},
+    "fault class in text, no hypothesis": {"text": ["The true fault was SITE_POWER_OUTAGE."]},
+    "red-herring class in sql": {"sql": f"SELECT * FROM {NOC}.element_status WHERE note = 'TRAFFIC_SURGE'"},
+}
+
+
+@pytest.mark.parametrize("case", sorted(POISON_NO_EVAL_TABLE))
+def test_genie_ask_withholds_ground_truth_labels_without_an_eval_table(case):
+    r = _ask({**CLEAN, **POISON_NO_EVAL_TABLE[case]})
     body = r.json()
-    assert r.status_code == 200 and "withheld" not in body
-    assert body["columns"] == ["element_id"] and body["rows"] == [["SITE-NSW-00002"]]
-    assert body["text"] == ["2 sites are down."] and "netmon_noc.element_status" in body["sql"]
+    assert body["withheld"] is True and body["rows"] == [] and body["sql"] is None, case
+    assert body["withheld_reason"] in ("label_column", "label_value")
+    for leaked in ("fault_type", "is_censored", "root_element_id", "root_cause", "event_class", "BACKHAUL_DEGRADATION",
+                   "SITE_POWER_OUTAGE", "TRAFFIC_SURGE"):
+        assert leaked not in r.text, (case, leaked)
+
+
+CLEAN_ANSWERS = {
+    "sites down": CLEAN,
+    # the step-4 assistant's operational guess is a fault class, read from its serving column
+    "assistant hypothesis": {**CLEAN, "text": ["The assistant's hypothesis for RCA-1 is BACKHAUL_DEGRADATION."],
+                             "sql": f"SELECT incident_id, fault_hypothesis FROM {NOC}.incident_ai_summary",
+                             "columns": ["incident_id", "fault_hypothesis"], "rows": [["RCA-1", "BACKHAUL_DEGRADATION"]]},
+    "prose, not a label": {**CLEAN, "text": ["Latency is rising on every cell behind the link: backhaul degradation "
+                                             "is likely; check the root cause with the transport team."]},
+    "alarms": {**CLEAN, "sql": f"SELECT element_id, alarm_code, severity, event_ts FROM {NOC}.silver_alarms",
+               "columns": ["element_id", "alarm_code", "event_ts"], "rows": [["BH-VIC-0005", "RSL_LOW", "2026-10-09"]]},
+}
+
+
+@pytest.mark.parametrize("case", sorted(CLEAN_ANSWERS))
+def test_genie_ask_legitimate_noc_answers_pass(case):
+    ans = CLEAN_ANSWERS[case]
+    body = _ask(ans).json()
+    assert "withheld" not in body, (case, body)
+    assert body["rows"] == ans["rows"] and body["text"] == ans["text"] and body["sql"] == ans["sql"]
+
+
+def test_genie_ask_clean_answer_still_drops_forbidden_columns():
+    ans = {**CLEAN, "sql": f"SELECT element_id, severity FROM {NOC}.silver_alarms",
+           "columns": ["element_id", "severity"], "rows": [["SITE-NSW-00002", "CRITICAL"]]}
+    body = _ask(ans).json()
+    assert "withheld" not in body and body["columns"] == ["element_id"] and body["rows"] == [["SITE-NSW-00002"]]
+
+
+def test_fault_classes_match_the_generator():
+    from netmon_datagen.faults import FAULT_SPECS
+    from noc_app.safety import FAULT_CLASSES
+
+    assert set(FAULT_CLASSES) == set(FAULT_SPECS)
