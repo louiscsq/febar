@@ -1,10 +1,3 @@
-<!--
-DRAFT for Louis. Rewrite it in your own voice before committing.
-The FE Bar requires that "the work, decisions, and narrative are yours", and you attest to it. The roleplay will test
-whether you can defend each point below. Lines marked >> YOU: are judgement calls only you can make. Delete anything
-you don't agree with.
--->
-
 # BUILD.md: decisions, trade-offs and iterations
 
 ## 1. Who this is for and why
