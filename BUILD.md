@@ -8,6 +8,9 @@ real-time network operations in the NOC is one of the highest-value ones. It's u
 priority list. It also needs intelligence built on high-volume, high-velocity data as the foundation, which is a
 sweet spot for the Databricks platform.
 
+From my own telco experience: I've seen it take a large telco 24 hours to find the root cause of a network
+incident, and even then they couldn't say accurately which customers had been impacted.
+
 The two Australian incidents that shaped the requirements:
 
 - **Telstra, July 2026:** customers' web searches detected the outage after about 99 minutes. The earliest alarms
@@ -93,7 +96,11 @@ have missed.
   - **AI Gateway:** I approved putting AI Gateway on the shared pay-per-token LLM endpoint.
   - **Grading against the real rubric:** I steered the build against the official FE Bar page and the Telecom
   Outcome Map.
+  - **Measuring customer impact from the network, not from complaints:** I specified that subscriber information
+  from the probe feed should be used to measure the customers impacted, rather than relying on customers reporting
+  the interruption. That led to the step-6 detector, which rolls up the connected users behind each backhaul link.
   - **Every merge:** I reviewed and merged every PR myself.
+- **This document:** it was drafted with AI from my decisions and the evidence, then reviewed and edited by me.
 - **AI inside the solution:** the ML ranker for root cause, the LLM for the NOC summary and customer SMS, and Genie
 for questions in plain English. All of it is governed: AI Gateway handles PII guardrails, rate limits and usage
 tracking; MLflow tracing is on; and every request and response is logged.
@@ -119,6 +126,12 @@ tracking; MLflow tracing is on; and every request and response is logged.
 - **Alert precision of about 60%** means the next model target is false-alarm reduction.
 - **Workspace limits** (documented): inference tables wouldn't enable; AI Gateway's input safety filter flagged
 normal NOC prompts and is off, with code checks instead; there's no second user for a two-user masking test.
-- **Next:** a pilot on one region's real alarm and KPI feeds; train on closed incident tickets; measure MTTR before
-and after.
+- **Next, for a real customer pilot:** before building anything, I'd confirm with the customer:
+  - what data is actually available to them (alarms, KPIs, probe feeds, topology, incident tickets)
+  - how long it takes them today to detect a network fault and find its root cause
+  - what it would be worth if the tool gave them that answer in minutes
+  - whether that fits their executive leadership's priorities for the year
+
+  Then a pilot on one region's real alarm and KPI feeds, training on closed incident tickets and measuring MTTR
+  before and after.
 
